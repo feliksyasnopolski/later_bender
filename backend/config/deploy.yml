@@ -5,6 +5,9 @@ servers:
   web:
     - 193.123.38.157
 
+registry:
+  server: localhost:5555
+
 builder:
   arch: arm64
   remote: ssh://ubuntu@193.123.38.157
