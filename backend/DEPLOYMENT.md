@@ -17,11 +17,22 @@ From `backend/`, provide an ignored `.kamal/secrets` file containing:
 ```
 RAILS_MASTER_KEY=...
 BACKEND_DATABASE_PASSWORD=...
-KAMAL_REGISTRY_PASSWORD=...
 ```
 
-Deploy or redeploy with `kamal deploy`. The image is built for ARM64 and pushed
-to GHCR. The entrypoint runs `db:prepare` before boot. Create the first user
+GitHub Actions publishes the ARM64 immutable image to public GHCR. Pull the
+published version anonymously on the host, then boot that exact version with
+Kamal:
+
+```
+docker pull ghcr.io/feliksyasnopolski/later_bender:sha-<commit>
+docker tag ghcr.io/feliksyasnopolski/later_bender:sha-<commit> \
+  localhost:5555/ghcr.io/feliksyasnopolski/later_bender:sha-<commit>
+kamal app boot --version sha-<commit>
+```
+
+The local tag is a Kamal 2 configuration compatibility shim; it does not
+require registry credentials or a local registry. The entrypoint runs
+`db:prepare` before boot. Create the first user
 and a bearer token without storing either raw credential in the repository:
 
 ```
