@@ -2,9 +2,10 @@ require "test_helper"
 
 class ApiTest < ActionDispatch::IntegrationTest
   setup do
-    @token, @raw_token = ApiToken.issue!(name: "test client")
-    @project = Project.create!(name: "Writing", slug: "writing")
-    @other_project = Project.create!(name: "Other", slug: "other")
+    @user = User.create!(username: "test-user", password: "password123")
+    @token, @raw_token = ApiToken.issue!(user: @user, name: "test client")
+    @project = @user.projects.create!(name: "Writing", slug: "writing")
+    @other_project = @user.projects.create!(name: "Other", slug: "other")
   end
 
   test "rejects missing and revoked bearer tokens" do

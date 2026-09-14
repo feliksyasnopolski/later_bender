@@ -1,6 +1,32 @@
 module Api
   class BaseController < ApplicationController
+    before_action :authenticate_user!
+
+    attr_reader :current_user, :current_api_token
+
     private
+
+    def authenticate_user!
+      authorization = request.headers["Authorization"].to_s
+      raw_token = authorization.match?(/\ABearer\s+\S+\z/) ? authorization.split.last : nil
+      @current_api_token = ApiToken.authenticate(raw_token)
+      @current_user = @current_api_token&.user
+      render json: { error: "Authentication required" }, status: :unauthorized unless @current_user
+    end
+
+    def request_payload
+      return JSON.parse(request.raw_post) if request.content_mime_type == Mime[:json]
+
+      params.to_unsafe_h
+    end
+
+    def render_errors(record)
+      render json: { error: { code: "validation_failed", message: "Validation failed", details: record.errors.to_hash } }, status: :unprocessable_entity
+    end
+
+    def render_not_found
+      render json: { error: "Not found" }, status: :not_found
+    end
 
     def project_json(project)
       {

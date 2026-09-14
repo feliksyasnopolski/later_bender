@@ -6,6 +6,15 @@ Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
 
   namespace :api do
+    post "auth/login", to: "auth#login"
+    get "auth/current", to: "auth#current"
+    delete "auth/logout", to: "auth#logout"
+    post "auth/recover", to: "auth#recover"
+    resources :tokens, only: %i[index create destroy]
+    get "account/totp", to: "totp#index"
+    post "account/totp", to: "totp#create"
+    post "account/totp/:id/confirm", to: "totp#confirm"
+    delete "account/totp/:id", to: "totp#destroy"
     resources :projects, param: :slug, only: %i[index show create update] do
       resources :tasks, only: %i[index show create update destroy]
     end

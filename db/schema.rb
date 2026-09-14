@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_14_130707) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_14_150001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -21,7 +21,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_130707) do
     t.datetime "revoked_at"
     t.string "token_digest", null: false
     t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
     t.index ["token_digest"], name: "index_api_tokens_on_token_digest", unique: true
+    t.index ["user_id"], name: "index_api_tokens_on_user_id"
   end
 
   create_table "projects", force: :cascade do |t|
@@ -31,7 +33,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_130707) do
     t.string "name", null: false
     t.string "slug", null: false
     t.datetime "updated_at", null: false
-    t.index ["slug"], name: "index_projects_on_slug", unique: true
+    t.bigint "user_id", null: false
+    t.index ["user_id", "slug"], name: "index_projects_on_user_id_and_slug", unique: true
+    t.index ["user_id"], name: "index_projects_on_user_id"
   end
 
   create_table "tags", force: :cascade do |t|
@@ -65,7 +69,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_14_130707) do
     t.index ["project_id"], name: "index_tasks_on_project_id"
   end
 
+  create_table "totp_credentials", force: :cascade do |t|
+    t.datetime "confirmed_at"
+    t.datetime "created_at", null: false
+    t.string "label", default: "Authenticator", null: false
+    t.datetime "last_used_at"
+    t.bigint "last_used_counter"
+    t.text "secret", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id"], name: "index_totp_credentials_on_user_id"
+  end
+
+  create_table "users", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "encrypted_password", null: false
+    t.datetime "updated_at", null: false
+    t.string "username", null: false
+    t.index "lower((username)::text)", name: "index_users_on_lower_username", unique: true
+  end
+
+  add_foreign_key "api_tokens", "users"
+  add_foreign_key "projects", "users"
   add_foreign_key "task_tags", "tags"
   add_foreign_key "task_tags", "tasks"
   add_foreign_key "tasks", "projects"
+  add_foreign_key "totp_credentials", "users"
 end

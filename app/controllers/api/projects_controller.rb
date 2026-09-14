@@ -3,7 +3,7 @@ module Api
     before_action :set_project, only: %i[show update]
 
     def index
-      render json: Project.order({ created_at: :desc }).map { |project| project_json(project) }
+      render json: current_user.projects.order({ created_at: :desc }).map { |project| project_json(project) }
     end
 
     def show
@@ -11,7 +11,7 @@ module Api
     end
 
     def create
-      project = Project.create!(project_params(request_payload))
+      project = current_user.projects.create!(project_params(request_payload))
       render json: project_json(project), status: :created
     end
 
@@ -23,11 +23,7 @@ module Api
     private
 
     def set_project
-      @project = Project.find_by!({ slug: request.path_parameters[:slug] })
-    end
-
-    def request_payload
-      JSON.parse(request.raw_post)
+      @project = current_user.projects.find_by!({ slug: request.path_parameters[:slug] })
     end
 
     def project_params(values)
