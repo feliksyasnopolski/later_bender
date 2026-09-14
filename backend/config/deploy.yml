@@ -1,15 +1,9 @@
 service: later-bender
-image: feliksyasnopolski/later-bender
+image: ghcr.io/feliksyasnopolski/later_bender
 
 servers:
   web:
     - 193.123.38.157
-
-registry:
-  server: ghcr.io
-  username: feliksyasnopolski
-  password:
-    - KAMAL_REGISTRY_PASSWORD
 
 builder:
   arch: arm64
