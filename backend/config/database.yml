@@ -90,3 +90,4 @@ production:
     database: backend_production
     username: later_bender
     password: <%= ENV["BACKEND_DATABASE_PASSWORD"] %>
+    host: <%= ENV.fetch("DATABASE_HOST", "127.0.0.1") %>
