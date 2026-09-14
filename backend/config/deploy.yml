@@ -1,0 +1,48 @@
+service: later-bender
+image: feliksyasnopolski/later-bender
+
+servers:
+  web:
+    - 193.123.38.157
+
+registry:
+  server: ghcr.io
+  username: feliksyasnopolski
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+builder:
+  arch: arm64
+  remote: ssh://ubuntu@193.123.38.157
+  local: false
+  context: .
+  dockerfile: Dockerfile
+
+env:
+  clear:
+    RAILS_ENV: production
+    FORCE_SSL: false
+    DATABASE_HOST: 172.17.0.1
+    RAILS_MAX_THREADS: 3
+  secret:
+    - RAILS_MASTER_KEY
+    - BACKEND_DATABASE_PASSWORD
+
+proxy:
+  ssl: false
+  app_port: 3000
+  forward_headers: true
+  response_timeout: 30
+  healthcheck:
+    path: /up
+    interval: 3
+    timeout: 5
+  run:
+    http_port: 18080
+    https_port: 18443
+    publish: true
+    bind_ips:
+      - 127.0.0.1
+
+ssh:
+  user: ubuntu
