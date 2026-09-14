@@ -22,7 +22,7 @@ env:
   clear:
     RAILS_ENV: production
     FORCE_SSL: false
-    DATABASE_HOST: 172.17.0.1
+    DATABASE_HOST: 172.18.0.1
     RAILS_MAX_THREADS: 3
   secret:
     - RAILS_MASTER_KEY
