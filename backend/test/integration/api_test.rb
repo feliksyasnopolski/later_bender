@@ -39,6 +39,18 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal [ "auth" ], Task.find(task_id).tags.pluck(:name)
   end
 
+  test "reuses an existing tag when creating a task" do
+    Tag.create!(name: "deployment", slug: "deployment")
+
+    post "/api/projects/writing/tasks", params: {
+      title: "Reuse tag", status: "backlog", tags: [ "deployment" ]
+    }.to_json, headers: json_headers(@raw_token)
+
+    assert_response :created
+    assert_equal [ "deployment" ], json_body["tags"]
+    assert_equal 1, Tag.count
+  end
+
   test "nested listing is project scoped and global search filters tasks" do
     @project.tasks.create!(title: "Find this prose", status: "ready", context: "important writing")
     @other_project.tasks.create!(title: "Do not leak", status: "ready")
