@@ -25,14 +25,19 @@ test("sends bearer auth and maps project and task endpoints", async () => {
   assert.equal(calls[2].url, "https://example.test/laterbender/api/projects/writing/tasks?status=ready&q=draft");
 });
 
-test("includes tags on create and only supplied fields on update", async () => {
+test("create_task uses the project-scoped task endpoint and task payload", async () => {
   const { api, calls } = apiFor([{ status: 201, body: {} }, { status: 200, body: {} }]);
-  await api.createTask("writing", { title: "Ship", status: "backlog", tags: ["release"] });
-  await api.updateTask("writing", 7, { status: "done", tags: [] });
-  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { title: "Ship", status: "backlog", tags: ["release"] });
+  await api.createTask("writing", { title: "Ship", status: "backlog", priority: "normal", context: "A task", tags: ["release"] });
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/projects/writing/tasks");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { title: "Ship", status: "backlog", priority: "normal", context: "A task", tags: ["release"] });
   assert.equal(calls[0].init.method, "POST");
-  assert.deepEqual(JSON.parse(String(calls[1].init.body)), { status: "done", tags: [] });
-  assert.equal(calls[1].init.method, "PATCH");
+});
+
+test("update_task sends only supplied fields", async () => {
+  const { api, calls } = apiFor([{ status: 200, body: {} }]);
+  await api.updateTask("writing", 7, { status: "done", tags: [] });
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { status: "done", tags: [] });
+  assert.equal(calls[0].init.method, "PATCH");
 });
 
 test("preserves Rails validation failures and distinguishes auth/backend errors", async () => {
