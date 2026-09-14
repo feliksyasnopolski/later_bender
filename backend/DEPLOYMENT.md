@@ -7,9 +7,10 @@ the temporary external base URL
 Caddy strips `/laterbender` before proxying, so Rails continues to receive
 `/api/...` and `/up`.
 
-The Later, Bender proxy publishes only on loopback ports 18080 (HTTP) and
-18443 (HTTPS) on the host. PostgreSQL remains host-managed and non-public, with
-the dedicated `later_bender` role and `backend_production` database.
+The host's shared Kamal proxy publishes only on loopback ports 8080 (HTTP) and
+8443 (HTTPS); Later, Bender has its own route in that proxy. PostgreSQL remains
+host-managed and non-public, with the dedicated `later_bender` role and
+`backend_production` database.
 
 From `backend/`, provide an ignored `.kamal/secrets` file containing:
 

@@ -35,8 +35,8 @@ proxy:
     interval: 3
     timeout: 5
   run:
-    http_port: 18080
-    https_port: 18443
+    http_port: 8080
+    https_port: 8443
     publish: true
     bind_ips:
       - 127.0.0.1
