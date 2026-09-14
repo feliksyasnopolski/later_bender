@@ -1,0 +1,14 @@
+[Unit]
+Description=Later, Bender remote MCP adapter
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=5
+ExecStartPre=-/usr/bin/docker rm -f later-bender-mcp
+ExecStart=/usr/bin/docker run --name later-bender-mcp --pull=never --env-file=/etc/later-bender-mcp.env -p 127.0.0.1:3001:3000 ghcr.io/feliksyasnopolski/later-bender-mcp:production
+ExecStop=/usr/bin/docker stop -t 10 later-bender-mcp
+
+[Install]
+WantedBy=multi-user.target
