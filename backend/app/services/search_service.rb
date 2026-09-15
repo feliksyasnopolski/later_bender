@@ -29,7 +29,7 @@ class SearchService
       by_id[id] ||= hit
     end
     RrfFuser.call(lexical_by_id.keys, semantic_by_id.keys, limit: @limit).map do |id|
-      lexical_by_id[id] ? result_for(lexical_by_id[id]) : semantic_result_for(semantic_by_id.fetch(id))
+      lexical_by_id[id] ? result_for(lexical_by_id[id], fallback_snippet: semantic_by_id[id]&.fetch("chunk_text", nil)) : semantic_result_for(semantic_by_id.fetch(id))
     end
   rescue StandardError => e
     raise if %i[lexical semantic].include?(@mode)
@@ -76,8 +76,8 @@ class SearchService
     hits.group_by { |hit| "#{hit.fetch("kind")}-#{hit.fetch("parent_id")}" }.values.map { |matches| semantic_result_for(matches.max_by { |hit| hit.fetch("_score", 0) }) }.first(@limit)
   end
 
-  def result_for(hit)
-    { id: hit.id.to_i, kind: hit.kind, title: hit.title, project: hit.project_id && { id: hit.project_id.to_i, slug: hit.project_slug, name: hit.project_name }, tags: hit.tags || [], status: hit.status, priority: hit.priority, snippet: snippet_for(hit), highlights: highlights_for(hit), created_at: hit.created_at, updated_at: hit.updated_at }.tap do |result|
+  def result_for(hit, fallback_snippet: nil)
+    { id: hit.id.to_i, kind: hit.kind, title: hit.title, project: hit.project_id && { id: hit.project_id.to_i, slug: hit.project_slug, name: hit.project_name }, tags: hit.tags || [], status: hit.status, priority: hit.priority, snippet: snippet_for(hit, fallback_snippet), highlights: highlights_for(hit), created_at: hit.created_at, updated_at: hit.updated_at }.tap do |result|
       result.delete(:status) if hit.kind != "task"
       result.delete(:priority) if hit.kind != "task"
     end
@@ -97,7 +97,7 @@ class SearchService
     end
   end
 
-  def snippet_for(hit)
-    highlights_for(hit).first&.dig(:fragments, 0) || hit.title.to_s
+  def snippet_for(hit, fallback_snippet = nil)
+    highlights_for(hit).first&.dig(:fragments, 0) || fallback_snippet.to_s.slice(0, 280).presence || hit.title.to_s
   end
 end
