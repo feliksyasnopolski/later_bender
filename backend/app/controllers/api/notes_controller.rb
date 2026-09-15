@@ -8,8 +8,12 @@ module Api
       scope = scope.where(project: @project) if @project
       scope = scope.where(project_id: nil) if params[:projectless].to_s == "true" || params[:scope] == "global"
       scope = scope.where(project: current_user.projects.find_by!(slug: params[:project])) if params[:project].present? && !@project
-      scope = scope.joins(:tags).where(tags: { slug: params[:tag].to_s.parameterize }).distinct if params[:tag].present?
-      render json: scope.map { |note| note_json(note) }
+      Array(params[:tag].to_s.split(",")).reject(&:blank?).each do |tag|
+        scope = scope.joins(:tags).where(tags: { slug: tag.parameterize }).distinct
+      end
+      scope = scope.where(project_id: nil) if params[:scope] == "global"
+      scope = scope.where.not(project_id: nil) if params[:scope] == "project" && params[:project].blank? && !@project
+      render json: scope.limit(params[:limit].to_i.clamp(1, 100)).map { |note| params[:summary].to_s == "true" ? note_list_json(note) : note_json(note) }
     end
 
     def show

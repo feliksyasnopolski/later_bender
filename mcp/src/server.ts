@@ -28,7 +28,7 @@ export function createApp(apiFactory: (token: string) => LaterBenderApi = (token
   app.use(mcpAuthMetadataRouter({ oauthMetadata: metadata, resourceServerUrl: resourceUrl, scopesSupported: [], resourceName: "Later, Bender" }));
   const auth = requireBearerAuth({ verifier: { verifyAccessToken }, resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceUrl) }) as RequestHandler;
   app.all("/mcp", auth, async (request, response) => {
-    const server = new McpServer({ name: "later-bender", version: "0.1.0" });
+    const server = new McpServer({ name: "later-bender", version: "0.1.0" }, { instructions: "Later Bender stores explicit durable user state. Tasks are actionable work. Notes are durable non-actionable context such as ideas, decisions, findings, hypotheses, possible directions, constraints, observations, and discussion results. Projectless Notes are user-level durable memory; Project Notes belong to one project. Use search_memory for recall when the location is unknown or may be either a Task or Note. Use list_tasks/list_notes to browse a known scope with structured filters. Search and list results are summaries; use get_task/get_note for complete content. When a Task synthesizes existing Notes, attach materially relevant Notes with related_note_ids." });
     registerTools(server, apiFactory(request.auth!.token));
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     response.on("close", () => transport.close());

@@ -7,7 +7,7 @@ module Api
       scope = Task.includes(:project, :tags).joins(:project).where(projects: { user_id: current_user.id })
       scope = scope.where(projects: { id: @project.id }) if @project
       scope = scope.where({ projects: { slug: params[:project] } }) if params[:project].present? && !@project
-      render json: task_scope(scope).map { |task| task_json(task) }
+      render json: task_scope(scope).map { |task| params[:summary].to_s == "true" ? task_list_json(task) : task_json(task) }
     end
 
     def show

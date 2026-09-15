@@ -67,6 +67,7 @@ module Api
         intended_direction: task.intended_direction,
         tags: task.tags.order(:name).pluck(:name),
         related_note_ids: task.notes.order(:id).pluck(:id),
+        related_notes: task.notes.order(:id).map { |note| note_summary(note) },
         project: {
           id: task.project.id,
           name: task.project.name,
@@ -84,9 +85,27 @@ module Api
         body: note.body,
         tags: note.tags.order(:name).pluck(:name),
         project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug },
+        related_task_ids: note.tasks.order(:id).pluck(:id),
+        related_tasks: note.tasks.order(:id).map { |task| task_summary(task) },
         created_at: note.created_at,
         updated_at: note.updated_at
       }
+    end
+
+    def task_summary(task)
+      { id: task.id, title: task.title, status: task.status, priority: task.priority, project: { id: task.project.id, name: task.project.name, slug: task.project.slug } }
+    end
+
+    def note_summary(note)
+      { id: note.id, title: note.title, project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug } }
+    end
+
+    def task_list_json(task)
+      { id: task.id, title: task.title, status: task.status, priority: task.priority, tags: task.tags.order(:name).pluck(:name), related_note_ids: task.notes.order(:id).pluck(:id), project: { id: task.project.id, name: task.project.name, slug: task.project.slug }, created_at: task.created_at, updated_at: task.updated_at }
+    end
+
+    def note_list_json(note)
+      { id: note.id, title: note.title, excerpt: note.body.to_s.tr("\n", " ").strip[0, 240], tags: note.tags.order(:name).pluck(:name), project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug }, created_at: note.created_at, updated_at: note.updated_at }
     end
 
     def task_scope(scope)
@@ -97,6 +116,7 @@ module Api
         query = "%#{ActiveRecord::Base.sanitize_sql_like(params[:q].to_s)}%"
         scope = scope.where("tasks.title ILIKE :query OR tasks.context ILIKE :query OR tasks.intended_direction ILIKE :query", { query: query })
       end
+      scope = scope.limit(params[:limit].to_i.clamp(1, 100)) if params[:limit].present?
       scope.order({ created_at: :desc })
     end
   end

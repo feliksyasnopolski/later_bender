@@ -77,6 +77,23 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
+  test "gets and updates an owned task by global id and keeps task lists compact" do
+    task = @project.tasks.create!(title: "Detailed task", status: "backlog", context: "Long context that belongs only in exact reads")
+
+    get "/api/tasks/#{task.id}", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "Long context that belongs only in exact reads", json_body["context"]
+
+    patch "/api/tasks/#{task.id}", params: { status: "doing" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "doing", json_body["status"]
+
+    get "/api/projects/writing/tasks", params: { summary: true }, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "Detailed task", json_body.first["title"]
+    assert_nil json_body.first["context"]
+  end
+
   test "creates, lists, reads, and updates global and project notes" do
     post "/api/notes", params: { title: "Decision", body: "Keep the API boring", tags: [ "Context" ] }.to_json, headers: json_headers(@raw_token)
     assert_response :created
@@ -112,6 +129,11 @@ class ApiTest < ActionDispatch::IntegrationTest
     get "/api/notes/#{other_note.id}", headers: json_headers(@raw_token)
     assert_response :not_found
     patch "/api/notes/#{other_note.id}", params: { title: "Nope" }.to_json, headers: json_headers(@raw_token)
+    assert_response :not_found
+
+    get "/api/tasks/#{other_task.id}", headers: json_headers(@raw_token)
+    assert_response :not_found
+    patch "/api/tasks/#{other_task.id}", params: { title: "Nope" }.to_json, headers: json_headers(@raw_token)
     assert_response :not_found
 
     post "/api/projects/writing/tasks", params: { title: "Relate", status: "backlog", related_note_ids: [ other_note.id ] }.to_json, headers: json_headers(@raw_token)

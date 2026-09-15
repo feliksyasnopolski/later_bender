@@ -22,7 +22,7 @@ test("sends bearer auth and maps project and task endpoints", async () => {
   assert.equal(calls[0].url, "https://example.test/laterbender/api/projects");
   assert.equal(calls[0].init.headers && new Headers(calls[0].init.headers).get("Authorization"), "Bearer secret");
   assert.equal(calls[1].url, "https://example.test/laterbender/api/projects/my%20project");
-  assert.equal(calls[2].url, "https://example.test/laterbender/api/projects/writing/tasks?status=ready&q=draft");
+  assert.equal(calls[2].url, "https://example.test/laterbender/api/projects/writing/tasks?status=ready&q=draft&summary=true");
 });
 
 test("create_task uses the project-scoped task endpoint and task payload", async () => {
@@ -35,8 +35,9 @@ test("create_task uses the project-scoped task endpoint and task payload", async
 
 test("update_task sends only supplied fields", async () => {
   const { api, calls } = apiFor([{ status: 200, body: {} }]);
-  await api.updateTask("writing", 7, { status: "done", tags: [] });
+  await api.updateTask(7, { status: "done", tags: [] });
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { status: "done", tags: [] });
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/tasks/7");
   assert.equal(calls[0].init.method, "PATCH");
 });
 
@@ -53,7 +54,10 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, { inputSchema: unknown }>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_project", "create_task", "get_project", "get_task", "list_projects", "list_tasks", "search_tasks", "update_task"]);
+  assert.deepEqual(Object.keys(tools).sort(), ["create_note", "create_project", "create_task", "get_note", "get_project", "get_task", "list_notes", "list_projects", "list_tasks", "search_memory", "update_note", "update_project", "update_task"]);
   assert.ok(tools.create_task.inputSchema);
   assert.ok(tools.update_task.inputSchema);
+  assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
+  assert.equal(tools.update_task.annotations.destructiveHint, true);
+  assert.equal(tools.search_memory.annotations.openWorldHint, false);
 });
