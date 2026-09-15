@@ -42,7 +42,6 @@ Keep search simple until stronger retrieval is demonstrably valuable. Elasticsea
 - Keep scope literal. Do not mix requested work with speculative features, cleanup, dependency changes, or redesigns.
 - Task specifications should state the goal, invariants, constraints, required evidence, and acceptance criteria. Within those boundaries, use normal framework and tooling choices without needless line-by-line ceremony.
 - Validate the changed surface: relevant Rails tests and direct API acceptance for backend behavior; relevant frontend/browser checks for UI behavior; runtime acceptance for deployment work; documentation/static checks for documentation-only work. Do not run unrelated full suites as ceremony. Runtime evidence outranks a contradictory green test suite.
-- Do not commit unless the task explicitly authorizes it. When authorized, commit only scoped completed work with a concise message, exclude unrelated changes, and verify the working tree afterward.
 - Preserve unrelated work already present in the tree.
 
 Keep this guide durable. Do not turn it into a version inventory or record temporary hosts, routes, deployment details, or incidental implementation choices.
