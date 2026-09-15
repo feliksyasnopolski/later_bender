@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Sign in - Later, Bender</title></head>
+  <body>
+    <main>
+      <h1>Sign in to Later, Bender</h1>
+      <% if alert %><p role="alert"><%= alert %></p><% end %>
+      <%= form_with url: user_session_path, scope: :user, method: :post do |form| %>
+        <%= form.label :username %>
+        <%= form.text_field :username, autocomplete: "username", required: true %>
+        <%= form.label :password %>
+        <%= form.password_field :password, autocomplete: "current-password", required: true %>
+        <%= form.submit "Sign in" %>
+      <% end %>
+    </main>
+  </body>
+</html>

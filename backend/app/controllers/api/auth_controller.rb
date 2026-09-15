@@ -15,6 +15,7 @@ module Api
 
     def logout
       current_api_token&.revoke!
+      current_oauth_token&.revoke!
       head :no_content
     end
 

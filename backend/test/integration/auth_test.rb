@@ -46,4 +46,14 @@ class AuthTest < ActionDispatch::IntegrationTest
     get "/api/auth/current", headers: json_headers(fresh_token)
     assert_response :success
   end
+
+  test "accepts a valid Doorkeeper bearer token through the existing API" do
+    user = User.create!(username: "oauth-api", password: "password123")
+    application = Doorkeeper::Application.create!(name: "MCP API test", redirect_uri: "https://client.example/callback", confidential: false, scopes: "mcp")
+    oauth_token = Doorkeeper::AccessToken.create!(application: application, resource_owner_id: user.id, scopes: "mcp", expires_in: 30.days.to_i)
+
+    get "/api/auth/current", headers: json_headers(oauth_token.token)
+    assert_response :success
+    assert_equal user.id, json_body.fetch("id")
+  end
 end

@@ -10,7 +10,7 @@ module Api
 
     before_action :authenticate_user!
 
-    attr_reader :current_user, :current_api_token
+    attr_reader :current_user, :current_api_token, :current_oauth_token
 
     private
 
@@ -19,6 +19,10 @@ module Api
       raw_token = authorization.match?(/\ABearer\s+\S+\z/) ? authorization.split.last : nil
       @current_api_token = ApiToken.authenticate(raw_token)
       @current_user = @current_api_token&.user
+      if @current_user.nil? && raw_token.present?
+        @current_oauth_token = Doorkeeper::AccessToken.by_token(raw_token)
+        @current_user = User.find_by(id: @current_oauth_token&.resource_owner_id) if @current_oauth_token&.accessible?
+      end
       render json: { error: "Authentication required" }, status: :unauthorized unless @current_user
     end
 

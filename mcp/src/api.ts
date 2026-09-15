@@ -15,11 +15,10 @@ export class ApiError extends Error {
 export class LaterBenderApi {
   constructor(
     private readonly baseUrl = process.env.LATER_BENDER_API_BASE_URL,
-    private readonly token = process.env.LATER_BENDER_API_TOKEN,
+    private readonly token?: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {
     if (!baseUrl) throw new Error("LATER_BENDER_API_BASE_URL is required");
-    if (!token) throw new Error("LATER_BENDER_API_TOKEN is required");
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -28,7 +27,7 @@ export class LaterBenderApi {
     try {
       response = await this.fetcher(url, {
         ...init,
-        headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${this.token}`, ...init.headers },
+        headers: { Accept: "application/json", "Content-Type": "application/json", ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}), ...init.headers },
       });
     } catch (error) {
       throw new ApiError("backend_unavailable", 503, error instanceof Error ? error.message : "Backend unavailable");
