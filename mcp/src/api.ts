@@ -23,10 +23,10 @@ export class LaterBenderApi {
     return body as T;
   }
 
-  listProjects() { return this.request<unknown[]>("/api/projects"); }
-  getProject(slug: string) { return this.request<unknown>(`/api/projects/${encodeURIComponent(slug)}`); }
-  createProject(payload: Record<string, unknown>) { return this.request<unknown>("/api/projects", json("POST", payload)); }
-  updateProject(slug: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/projects/${encodeURIComponent(slug)}`, json("PATCH", payload)); }
+  listProjects() { return this.request<unknown[]>("/api/projects").then((projects) => projects.map(projectView)); }
+  getProject(slug: string) { return this.request<unknown>(`/api/projects/${encodeURIComponent(slug)}`).then(projectView); }
+  createProject(payload: Record<string, unknown>) { return this.request<unknown>("/api/projects", json("POST", payload)).then(projectView); }
+  updateProject(slug: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/projects/${encodeURIComponent(slug)}`, json("PATCH", payload)).then(projectView); }
   listTasks(project: string, filters: Record<string, string | undefined>) { return this.request<unknown[]>(`/api/projects/${encodeURIComponent(project)}/tasks${query({ ...filters, summary: "true" })}`); }
   getTask(id: number) { return this.request<unknown>(`/api/tasks/${id}`); }
   createTask(project: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/projects/${encodeURIComponent(project)}/tasks`, json("POST", payload)); }
@@ -45,6 +45,12 @@ export class LaterBenderApi {
   }
   updateNote(id: number, payload: Record<string, unknown>) { return this.request<unknown>(`/api/notes/${id}`, json("PATCH", payload)); }
   searchMemory(input: Record<string, unknown>) { return this.request<{ results: unknown[] }>(`/api/search${query({ q: String(input.query), scope: String(input.scope || "all"), project: input.project as string | undefined, kinds: (input.kinds as string[] | undefined)?.join(","), tags: (input.tags as string[] | undefined)?.join(","), task_statuses: (input.task_statuses as string[] | undefined)?.join(","), task_priorities: (input.task_priorities as string[] | undefined)?.join(","), limit: String(input.limit || 8) })}`); }
+}
+
+function projectView(project: unknown): unknown {
+  if (!project || typeof project !== "object") return project;
+  const { archived_at: _archivedAt, ...view } = project as Record<string, unknown>;
+  return view;
 }
 
 function json(method: string, body: Record<string, unknown>): RequestInit { return { method, body: JSON.stringify(body) }; }

@@ -43,7 +43,10 @@ class SearchService
   end
 
   def result_for(hit)
-    { id: hit.id.to_i, kind: hit.kind, title: hit.title, project: hit.project_id && { id: hit.project_id.to_i, slug: hit.project_slug, name: hit.project_name }, tags: hit.tags || [], status: hit.status, priority: hit.priority, snippet: snippet_for(hit), highlights: highlights_for(hit), created_at: hit.created_at, updated_at: hit.updated_at }.compact
+    { id: hit.id.to_i, kind: hit.kind, title: hit.title, project: hit.project_id && { id: hit.project_id.to_i, slug: hit.project_slug, name: hit.project_name }, tags: hit.tags || [], status: hit.status, priority: hit.priority, snippet: snippet_for(hit), highlights: highlights_for(hit), created_at: hit.created_at, updated_at: hit.updated_at }.tap do |result|
+      result.delete(:status) if hit.kind != "task"
+      result.delete(:priority) if hit.kind != "task"
+    end
   end
 
   def highlights_for(hit)

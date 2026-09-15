@@ -33,6 +33,12 @@ test("create_task uses the project-scoped task endpoint and task payload", async
   assert.equal(calls[0].init.method, "POST");
 });
 
+test("project responses omit persistence-only archive timestamps", async () => {
+  const { api } = apiFor([{ status: 200, body: { id: 1, slug: "writing", name: "Writing", archived_at: null } }]);
+  const project = await api.getProject("writing") as Record<string, unknown>;
+  assert.equal(project.archived_at, undefined);
+});
+
 test("update_task sends only supplied fields", async () => {
   const { api, calls } = apiFor([{ status: 200, body: {} }]);
   await api.updateTask(7, { status: "done", tags: [] });
@@ -53,11 +59,21 @@ test("preserves Rails validation failures and distinguishes auth/backend errors"
 test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
-  const tools = (server as any)._registeredTools as Record<string, { inputSchema: unknown }>;
+  const tools = (server as any)._registeredTools as Record<string, any>;
   assert.deepEqual(Object.keys(tools).sort(), ["create_note", "create_project", "create_task", "get_note", "get_project", "get_task", "list_notes", "list_projects", "list_tasks", "search_memory", "update_note", "update_project", "update_task"]);
   assert.ok(tools.create_task.inputSchema);
   assert.ok(tools.update_task.inputSchema);
   assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
   assert.equal(tools.update_task.annotations.destructiveHint, true);
   assert.equal(tools.search_memory.annotations.openWorldHint, false);
+  assert.deepEqual(Object.keys(tools.list_tasks.inputSchema.shape), ["project", "status", "priority", "tags", "limit"]);
+  assert.equal(tools.list_tasks.outputSchema.safeParse({ tasks: [{ id: 1, project: { id: 2, slug: "writing", name: "Writing" }, title: "Ship", status: "backlog", priority: "normal", tags: [], related_note_ids: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
+  assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "task", id: 1, project: { id: 2, slug: "writing", name: "Writing" }, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "backlog", priority: "normal", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
+  assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
+  assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], status: "done", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, false);
+  assert.equal(tools.list_notes.inputSchema.safeParse({ scope: "project" }).success, false);
+  assert.equal(tools.list_notes.inputSchema.safeParse({ scope: "global", project: "writing" }).success, false);
+  assert.equal(tools.list_notes.inputSchema.safeParse({}).success, true);
+  assert.equal(tools.search_memory.inputSchema.safeParse({ query: "decision", scope: "all", project: "writing" }).success, false);
+  assert.equal(tools.update_project.inputSchema.shape.archived_at, undefined);
 });

@@ -111,7 +111,11 @@ module Api
     def task_scope(scope)
       scope = scope.where({ status: params[:status] }) if params[:status].present?
       scope = scope.where({ priority: params[:priority] }) if params[:priority].present?
-      scope = scope.joins(:tags).where({ tags: { slug: params[:tag].to_s.parameterize } }).distinct if params[:tag].present?
+      tag_values = (params[:tags] || params[:tag]).to_s.split(",").reject(&:blank?)
+      if tag_values.present?
+        matching_task_ids = TaskTag.joins(:tag).where(tags: { slug: tag_values.map(&:parameterize) }).group(:task_id).having("COUNT(DISTINCT tags.id) = ?", tag_values.length).select(:task_id)
+        scope = scope.where(id: matching_task_ids)
+      end
       if params[:q].present?
         query = "%#{ActiveRecord::Base.sanitize_sql_like(params[:q].to_s)}%"
         scope = scope.where("tasks.title ILIKE :query OR tasks.context ILIKE :query OR tasks.intended_direction ILIKE :query", { query: query })

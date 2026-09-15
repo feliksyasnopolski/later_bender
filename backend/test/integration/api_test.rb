@@ -39,6 +39,15 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal [ "auth" ], Task.find(task_id).tags.pluck(:name)
   end
 
+  test "task tag filters match all supplied tags" do
+    @project.tasks.create!(title: "Both tags", status: "backlog").tap { |task| TagReconciler.call(task, ["one", "two"]) }
+    @project.tasks.create!(title: "One tag", status: "backlog").tap { |task| TagReconciler.call(task, ["one"]) }
+
+    get "/api/projects/writing/tasks", params: { tags: "one,two", summary: true }, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal ["Both tags"], json_body.map { |task| task["title"] }
+  end
+
   test "reuses an existing tag when creating a task" do
     Tag.create!(name: "deployment", slug: "deployment")
 

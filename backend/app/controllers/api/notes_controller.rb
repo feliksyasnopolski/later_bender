@@ -8,8 +8,10 @@ module Api
       scope = scope.where(project: @project) if @project
       scope = scope.where(project_id: nil) if params[:projectless].to_s == "true" || params[:scope] == "global"
       scope = scope.where(project: current_user.projects.find_by!(slug: params[:project])) if params[:project].present? && !@project
-      Array(params[:tag].to_s.split(",")).reject(&:blank?).each do |tag|
-        scope = scope.joins(:tags).where(tags: { slug: tag.parameterize }).distinct
+      tag_values = params[:tag].to_s.split(",").reject(&:blank?)
+      if tag_values.present?
+        matching_note_ids = NoteTag.joins(:tag).where(tags: { slug: tag_values.map(&:parameterize) }).group(:note_id).having("COUNT(DISTINCT tags.id) = ?", tag_values.length).select(:note_id)
+        scope = scope.where(id: matching_note_ids)
       end
       scope = scope.where(project_id: nil) if params[:scope] == "global"
       scope = scope.where.not(project_id: nil) if params[:scope] == "project" && params[:project].blank? && !@project
