@@ -50,26 +50,35 @@ test("update_task sends only supplied fields", async () => {
 test("create and update mutation handlers return only an acknowledgement", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api } = apiFor([
-    { status: 201, body: { id: 8, title: "Created", context: "large context", updated_at: "2026-01-01T00:00:00Z" } },
-    { status: 201, body: { id: 18, title: "Created note", body: "large body", updated_at: "2026-01-02T00:00:00Z" } },
-    { status: 200, body: { id: 7, title: "Ship", context: "large context", intended_direction: "large direction", updated_at: "2026-01-03T00:00:00Z" } },
-    { status: 200, body: { id: 17, title: "Decision", body: "large body", updated_at: "2026-01-04T00:00:00Z" } }
+    { status: 201, body: { id: 3, name: "Created project", description: "large description", updated_at: "2026-01-01T00:00:00Z" } },
+    { status: 200, body: { id: 3, name: "Updated project", description: "large description", updated_at: "2026-01-02T00:00:00Z" } },
+    { status: 201, body: { id: 8, title: "Created", context: "large context", updated_at: "2026-01-03T00:00:00Z" } },
+    { status: 201, body: { id: 18, title: "Created note", body: "large body", updated_at: "2026-01-04T00:00:00Z" } },
+    { status: 200, body: { id: 7, title: "Ship", context: "large context", intended_direction: "large direction", updated_at: "2026-01-05T00:00:00Z" } },
+    { status: 200, body: { id: 17, title: "Decision", body: "large body", updated_at: "2026-01-06T00:00:00Z" } }
   ]);
   registerTools(server, api);
   const tools = (server as any)._registeredTools as Record<string, any>;
 
+  const createdProjectResult = await tools.create_project.handler({ name: "Created project", description: "large description" });
+  const updatedProjectResult = await tools.update_project.handler({ slug: "created-project", description: "large description" });
   const createdTaskResult = await tools.create_task.handler({ project: "writing", title: "Created", context: "large context" });
   const createdNoteResult = await tools.create_note.handler({ title: "Created note", body: "large body" });
   const taskResult = await tools.update_task.handler({ id: 7, context: "large context" });
   const noteResult = await tools.update_note.handler({ id: 17, body: "large body" });
-  assert.deepEqual(createdTaskResult.structuredContent, { task: { id: 8, updated_at: "2026-01-01T00:00:00Z" } });
-  assert.deepEqual(createdNoteResult.structuredContent, { note: { id: 18, updated_at: "2026-01-02T00:00:00Z" } });
-  assert.deepEqual(taskResult.structuredContent, { task: { id: 7, updated_at: "2026-01-03T00:00:00Z" } });
-  assert.deepEqual(noteResult.structuredContent, { note: { id: 17, updated_at: "2026-01-04T00:00:00Z" } });
+  assert.deepEqual(createdProjectResult.structuredContent, { project: { id: 3, updated_at: "2026-01-01T00:00:00Z" } });
+  assert.deepEqual(updatedProjectResult.structuredContent, { project: { id: 3, updated_at: "2026-01-02T00:00:00Z" } });
+  assert.deepEqual(createdTaskResult.structuredContent, { task: { id: 8, updated_at: "2026-01-03T00:00:00Z" } });
+  assert.deepEqual(createdNoteResult.structuredContent, { note: { id: 18, updated_at: "2026-01-04T00:00:00Z" } });
+  assert.deepEqual(taskResult.structuredContent, { task: { id: 7, updated_at: "2026-01-05T00:00:00Z" } });
+  assert.deepEqual(noteResult.structuredContent, { note: { id: 17, updated_at: "2026-01-06T00:00:00Z" } });
+  assert.doesNotMatch(createdProjectResult.content[0].text, /large description/);
+  assert.doesNotMatch(updatedProjectResult.content[0].text, /large description/);
   assert.doesNotMatch(createdTaskResult.content[0].text, /large context|intended_direction/);
   assert.doesNotMatch(createdNoteResult.content[0].text, /large body/);
   assert.doesNotMatch(taskResult.content[0].text, /large context|intended_direction/);
   assert.doesNotMatch(noteResult.content[0].text, /large body/);
+  assert.equal(tools.create_project.outputSchema.safeParse(createdProjectResult.structuredContent).success, true);
   assert.equal(tools.create_task.outputSchema.safeParse(createdTaskResult.structuredContent).success, true);
   assert.equal(tools.create_note.outputSchema.safeParse(createdNoteResult.structuredContent).success, true);
   assert.equal(tools.update_task.outputSchema.safeParse(taskResult.structuredContent).success, true);
