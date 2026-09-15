@@ -47,6 +47,25 @@ test("update_task sends only supplied fields", async () => {
   assert.equal(calls[0].init.method, "PATCH");
 });
 
+test("update mutation handlers return only an acknowledgement", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api } = apiFor([
+    { status: 200, body: { id: 7, title: "Ship", context: "large context", intended_direction: "large direction", updated_at: "2026-01-02T00:00:00Z" } },
+    { status: 200, body: { id: 17, title: "Decision", body: "large body", updated_at: "2026-01-03T00:00:00Z" } }
+  ]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const taskResult = await tools.update_task.handler({ id: 7, context: "large context" });
+  const noteResult = await tools.update_note.handler({ id: 17, body: "large body" });
+  assert.deepEqual(taskResult.structuredContent, { task: { id: 7, updated_at: "2026-01-02T00:00:00Z" } });
+  assert.deepEqual(noteResult.structuredContent, { note: { id: 17, updated_at: "2026-01-03T00:00:00Z" } });
+  assert.doesNotMatch(taskResult.content[0].text, /large context|intended_direction/);
+  assert.doesNotMatch(noteResult.content[0].text, /large body/);
+  assert.equal(tools.update_task.outputSchema.safeParse(taskResult.structuredContent).success, true);
+  assert.equal(tools.update_note.outputSchema.safeParse(noteResult.structuredContent).success, true);
+});
+
 test("preserves Rails validation failures and distinguishes auth/backend errors", async () => {
   const validation = apiFor([{ status: 422, body: { error: { code: "validation_failed", message: "Validation failed", details: { title: ["can't be blank"] } } } }]);
   await assert.rejects(validation.api.createProject({ name: "" }), (error: unknown) => error instanceof ApiError && error.code === "validation_failed" && error.details?.title?.[0] === "can't be blank");
@@ -97,9 +116,10 @@ test("keeps note summary and full-note schemas separate", () => {
   };
   const summary = { ...fullNote, excerpt: fullNote.body, related_task_ids: undefined, related_tasks: undefined };
 
-  for (const toolName of ["get_note", "create_note", "update_note"]) {
+  for (const toolName of ["get_note", "create_note"]) {
     assert.equal(tools[toolName].outputSchema.safeParse({ note: fullNote }).success, true, toolName);
   }
+  assert.equal(tools.update_note.outputSchema.safeParse({ note: { id: 17, updated_at: fullNote.updated_at } }).success, true);
   assert.equal(tools.get_note.outputSchema.safeParse({ note: { ...fullNote, excerpt: undefined } }).success, true);
   assert.equal(tools.get_note.outputSchema.safeParse({ note: { ...fullNote, body: undefined } }).success, false);
   assert.equal(tools.list_notes.outputSchema.safeParse({ notes: [{ ...summary, related_task_ids: undefined, related_tasks: undefined }] }).success, true);
