@@ -1,4 +1,5 @@
 class Tag < ApplicationRecord
+  update_index("search_documents") { tasks + notes }
   has_many :task_tags, dependent: :destroy
   has_many :tasks, through: :task_tags
   has_many :note_tags, dependent: :destroy

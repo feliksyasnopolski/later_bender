@@ -1,4 +1,5 @@
 class Task < ApplicationRecord
+  update_index("search_documents") { self }
   belongs_to :project
   STATUSES = %w[backlog ready doing done dropped].freeze
   PRIORITIES = %w[low normal high].freeze

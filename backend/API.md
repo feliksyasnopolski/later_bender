@@ -2,6 +2,10 @@
 
 The backend is a small JSON API for a user-owned task backlog. It uses PostgreSQL and has users, projects, tasks, global reusable tags, and opaque bearer tokens.
 
+## Search
+
+`GET /api/search` performs authenticated unified natural-language search across the current user's tasks and notes. It accepts `q`, optional `project`, `kinds` (`task` and/or `note`), `tags`, and `limit` (maximum 100). Results are compact ranked records; Elasticsearch is disposable derived state and can be rebuilt with `bin/rails chewy:reset[search_documents]`.
+
 ## Authentication
 
 Every `/api` route requires `Authorization: Bearer <token>`. Create the first local user and an API token:

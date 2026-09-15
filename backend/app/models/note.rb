@@ -1,4 +1,5 @@
 class Note < ApplicationRecord
+  update_index("search_documents") { self }
   belongs_to :user, inverse_of: :notes
   belongs_to :project, optional: true
   has_many :note_tags, dependent: :destroy

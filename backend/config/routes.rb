@@ -14,6 +14,7 @@ Rails.application.routes.draw do
   namespace :api do
     post "auth/login", to: "auth#login"
     get "auth/current", to: "auth#current"
+    get "search", to: "search#index"
     get "oauth/token_info", to: "oauth#token_info"
     delete "auth/logout", to: "auth#logout"
     post "auth/recover", to: "auth#recover"

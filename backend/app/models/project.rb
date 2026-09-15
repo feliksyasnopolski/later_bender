@@ -1,4 +1,5 @@
 class Project < ApplicationRecord
+  update_index("search_documents") { tasks + notes }
   belongs_to :user, inverse_of: :projects
   has_many :tasks, dependent: :restrict_with_exception
   has_many :notes, dependent: :restrict_with_exception

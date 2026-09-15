@@ -1,0 +1,7 @@
+development:
+  host: <%= ENV.fetch("ELASTICSEARCH_URL", "http://localhost:9200") %>
+test:
+  host: <%= ENV.fetch("ELASTICSEARCH_URL", "http://localhost:9200") %>
+  prefix: test
+production:
+  host: <%= ENV.fetch("ELASTICSEARCH_URL", "http://elasticsearch:9200") %>

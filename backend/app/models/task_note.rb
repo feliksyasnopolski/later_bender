@@ -1,4 +1,5 @@
 class TaskNote < ApplicationRecord
+  update_index("search_documents", if: -> { task.present? && note.present? && !task.destroyed? && !note.destroyed? }) { task }
   belongs_to :task
   belongs_to :note
   validates :note_id, uniqueness: { scope: :task_id }
