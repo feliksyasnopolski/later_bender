@@ -1,5 +1,13 @@
 module Api
-  class BaseController < ApplicationController
+  class BaseController < ActionController::API
+    rescue_from ActiveRecord::RecordNotFound do
+      render json: { error: { code: "not_found", message: "Resource not found" } }, status: :not_found
+    end
+
+    rescue_from ActiveRecord::RecordInvalid do |error|
+      render_validation_errors(error.record)
+    end
+
     before_action :authenticate_user!
 
     attr_reader :current_user, :current_api_token
@@ -22,6 +30,10 @@ module Api
 
     def render_errors(record)
       render json: { error: { code: "validation_failed", message: "Validation failed", details: record.errors.to_hash } }, status: :unprocessable_entity
+    end
+
+    def render_validation_errors(record)
+      render json: { error: { code: "validation_failed", message: "Validation failed", details: record.errors.to_hash.transform_values(&:to_a) } }, status: :unprocessable_content
     end
 
     def render_not_found
