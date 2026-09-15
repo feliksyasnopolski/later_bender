@@ -77,3 +77,32 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.equal(tools.search_memory.inputSchema.safeParse({ query: "decision", scope: "all", project: "writing" }).success, false);
   assert.equal(tools.update_project.inputSchema.shape.archived_at, undefined);
 });
+
+test("keeps note summary and full-note schemas separate", () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
+  const tools = (server as any)._registeredTools as Record<string, any>;
+  const project = { id: 2, slug: "writing", name: "Writing" };
+  const relatedTask = { id: 7, title: "Ship", status: "backlog", priority: "normal", project };
+  const fullNote = {
+    id: 17,
+    project,
+    title: "Decision",
+    body: "Keep the API boring",
+    tags: ["architecture"],
+    related_task_ids: [7],
+    related_tasks: [relatedTask],
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z"
+  };
+  const summary = { ...fullNote, excerpt: fullNote.body, related_task_ids: undefined, related_tasks: undefined };
+
+  for (const toolName of ["get_note", "create_note", "update_note"]) {
+    assert.equal(tools[toolName].outputSchema.safeParse({ note: fullNote }).success, true, toolName);
+  }
+  assert.equal(tools.get_note.outputSchema.safeParse({ note: { ...fullNote, excerpt: undefined } }).success, true);
+  assert.equal(tools.get_note.outputSchema.safeParse({ note: { ...fullNote, body: undefined } }).success, false);
+  assert.equal(tools.list_notes.outputSchema.safeParse({ notes: [{ ...summary, related_task_ids: undefined, related_tasks: undefined }] }).success, true);
+  assert.equal(tools.list_notes.outputSchema.safeParse({ notes: [{ ...summary, excerpt: undefined, related_task_ids: undefined, related_tasks: undefined }] }).success, false);
+  assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 17, project, title: "Decision", snippet: "Keep the API boring", highlights: [], tags: ["architecture"], created_at: fullNote.created_at, updated_at: fullNote.updated_at }] }).success, true);
+});
