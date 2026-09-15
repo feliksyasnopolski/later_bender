@@ -76,4 +76,62 @@ class ApiTest < ActionDispatch::IntegrationTest
     get "/api/projects/writing/tasks/#{task.id}", headers: json_headers(@raw_token)
     assert_response :not_found
   end
+
+  test "creates, lists, reads, and updates global and project notes" do
+    post "/api/notes", params: { title: "Decision", body: "Keep the API boring", tags: [ "Context" ] }.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    global_id = json_body["id"]
+    assert_nil json_body["project"]
+    assert_equal [ "context" ], json_body["tags"]
+
+    post "/api/projects/writing/notes", params: { title: "Idea", body: "A project detail" }.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    project_id = json_body["id"]
+    assert_equal "writing", json_body.dig("project", "slug")
+
+    get "/api/notes", params: { projectless: true }, headers: json_headers(@raw_token)
+    assert_equal [ global_id ], json_body.map { |note| note["id"] }
+    get "/api/projects/writing/notes", headers: json_headers(@raw_token)
+    assert_equal [ project_id ], json_body.map { |note| note["id"] }
+
+    patch "/api/notes/#{global_id}", params: { title: "Updated", project: "writing", tags: [] }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "Updated", json_body["title"]
+    assert_equal "writing", json_body.dig("project", "slug")
+    assert_equal [], json_body["tags"]
+    patch "/api/notes/#{global_id}", params: { project: nil }.to_json, headers: json_headers(@raw_token)
+    assert_nil json_body["project"]
+  end
+
+  test "does not expose another user's notes or permit cross-user task relations" do
+    other = User.create!(username: "other-user", password: "password123")
+    other_project = other.projects.create!(name: "Private", slug: "private")
+    other_note = other.notes.create!(title: "Private note", body: "Secret", project: other_project)
+    other_task = other_project.tasks.create!(title: "Private task", status: "backlog")
+
+    get "/api/notes/#{other_note.id}", headers: json_headers(@raw_token)
+    assert_response :not_found
+    patch "/api/notes/#{other_note.id}", params: { title: "Nope" }.to_json, headers: json_headers(@raw_token)
+    assert_response :not_found
+
+    post "/api/projects/writing/tasks", params: { title: "Relate", status: "backlog", related_note_ids: [ other_note.id ] }.to_json, headers: json_headers(@raw_token)
+    assert_response :not_found
+    assert_empty other_task.notes
+  end
+
+  test "task related notes replace, clear, and preserve predictably" do
+    first = @user.notes.create!(title: "First", body: "One")
+    second = @user.notes.create!(title: "Second", body: "Two")
+    post "/api/projects/writing/tasks", params: { title: "Relate", status: "backlog", related_note_ids: [ first.id, second.id ] }.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    task_id = json_body["id"]
+    assert_equal [ first.id, second.id ], json_body["related_note_ids"]
+
+    patch "/api/projects/writing/tasks/#{task_id}", params: { title: "Changed", related_note_ids: [ second.id ] }.to_json, headers: json_headers(@raw_token)
+    assert_equal [ second.id ], json_body["related_note_ids"]
+    patch "/api/projects/writing/tasks/#{task_id}", params: { title: "Changed again" }.to_json, headers: json_headers(@raw_token)
+    assert_equal [ second.id ], json_body["related_note_ids"]
+    patch "/api/projects/writing/tasks/#{task_id}", params: { related_note_ids: [] }.to_json, headers: json_headers(@raw_token)
+    assert_equal [], json_body["related_note_ids"]
+  end
 end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_15_105026) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_15_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -24,6 +24,27 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_15_105026) do
     t.bigint "user_id", null: false
     t.index ["token_digest"], name: "index_api_tokens_on_token_digest", unique: true
     t.index ["user_id"], name: "index_api_tokens_on_user_id"
+  end
+
+  create_table "note_tags", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "note_id", null: false
+    t.bigint "tag_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["note_id", "tag_id"], name: "index_note_tags_on_note_id_and_tag_id", unique: true
+    t.index ["note_id"], name: "index_note_tags_on_note_id"
+    t.index ["tag_id"], name: "index_note_tags_on_tag_id"
+  end
+
+  create_table "notes", force: :cascade do |t|
+    t.text "body", null: false
+    t.datetime "created_at", null: false
+    t.bigint "project_id"
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["project_id"], name: "index_notes_on_project_id"
+    t.index ["user_id"], name: "index_notes_on_user_id"
   end
 
   create_table "oauth_access_grants", force: :cascade do |t|
@@ -91,6 +112,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_15_105026) do
     t.index ["slug"], name: "index_tags_on_slug", unique: true
   end
 
+  create_table "task_notes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "note_id", null: false
+    t.bigint "task_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["note_id"], name: "index_task_notes_on_note_id"
+    t.index ["task_id", "note_id"], name: "index_task_notes_on_task_id_and_note_id", unique: true
+    t.index ["task_id"], name: "index_task_notes_on_task_id"
+  end
+
   create_table "task_tags", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.bigint "tag_id", null: false
@@ -134,9 +165,15 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_15_105026) do
   end
 
   add_foreign_key "api_tokens", "users"
+  add_foreign_key "note_tags", "notes"
+  add_foreign_key "note_tags", "tags"
+  add_foreign_key "notes", "projects"
+  add_foreign_key "notes", "users"
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
   add_foreign_key "projects", "users"
+  add_foreign_key "task_notes", "notes"
+  add_foreign_key "task_notes", "tasks"
   add_foreign_key "task_tags", "tags"
   add_foreign_key "task_tags", "tasks"
   add_foreign_key "tasks", "projects"

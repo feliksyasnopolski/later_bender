@@ -66,6 +66,7 @@ module Api
         context: task.context,
         intended_direction: task.intended_direction,
         tags: task.tags.order(:name).pluck(:name),
+        related_note_ids: task.notes.order(:id).pluck(:id),
         project: {
           id: task.project.id,
           name: task.project.name,
@@ -73,6 +74,18 @@ module Api
         },
         created_at: task.created_at,
         updated_at: task.updated_at
+      }
+    end
+
+    def note_json(note)
+      {
+        id: note.id,
+        title: note.title,
+        body: note.body,
+        tags: note.tags.order(:name).pluck(:name),
+        project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug },
+        created_at: note.created_at,
+        updated_at: note.updated_at
       }
     end
 

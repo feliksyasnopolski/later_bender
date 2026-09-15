@@ -2,6 +2,7 @@ class User < ApplicationRecord
   devise :database_authenticatable
 
   has_many :projects, dependent: :destroy, inverse_of: :user
+  has_many :notes, dependent: :destroy, inverse_of: :user
   has_many :api_tokens, dependent: :destroy, inverse_of: :user
   has_many :totp_credentials, dependent: :destroy, inverse_of: :user
 

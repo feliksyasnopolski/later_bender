@@ -24,8 +24,10 @@ Rails.application.routes.draw do
     delete "account/totp/:id", to: "totp#destroy"
     resources :projects, param: :slug, only: %i[index show create update] do
       resources :tasks, only: %i[index show create update destroy]
+      resources :notes, only: %i[index create]
     end
     resources :tasks, only: :index
+    resources :notes, only: %i[index show create update]
   end
 
   # Defines the root path route ("/")

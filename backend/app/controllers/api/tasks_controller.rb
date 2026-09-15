@@ -20,6 +20,7 @@ module Api
       Task.transaction do
         task.save!
         TagReconciler.call(task, payload["tags"]) if payload.key?("tags")
+        replace_related_notes(task, payload["related_note_ids"]) if payload.key?("related_note_ids")
       end
       render json: task_json(task), status: :created
     end
@@ -29,6 +30,7 @@ module Api
       Task.transaction do
         @task.update!(task_params(payload))
         TagReconciler.call(@task, payload["tags"]) if payload.key?("tags")
+        replace_related_notes(@task, payload["related_note_ids"]) if payload.key?("related_note_ids")
       end
       render json: task_json(@task)
     end
@@ -55,6 +57,14 @@ module Api
 
     def task_params(values)
       { "title" => values["title"], "status" => values["status"], "priority" => values["priority"], "context" => values["context"], "intended_direction" => values["intended_direction"] }.compact
+    end
+
+    def replace_related_notes(task, ids)
+      ids = Array(ids).map(&:to_i).uniq
+      notes = current_user.notes.where(id: ids).to_a
+      raise ActiveRecord::RecordNotFound if notes.size != ids.size
+
+      task.notes = notes
     end
   end
 end

@@ -32,6 +32,12 @@ GET    /api/projects/:slug/tasks/:id
 PATCH  /api/projects/:slug/tasks/:id
 DELETE /api/projects/:slug/tasks/:id
 GET    /api/tasks
+GET    /api/notes
+POST   /api/notes
+GET    /api/notes/:id
+PATCH  /api/notes/:id
+GET    /api/projects/:slug/notes
+POST   /api/projects/:slug/notes
 GET    /api/tokens
 POST   /api/tokens
 DELETE /api/tokens/:id
@@ -44,6 +50,12 @@ Projects are archived by setting `archived_at`; they are not deleted. Task delet
 Task `status` is one of `backlog`, `ready`, `doing`, `done`, or `dropped`. `priority` is optional and is one of `low`, `normal`, or `high`. `context` describes why a task exists; `intended_direction` records the direction already decided when it was parked. Both are plain text and may contain Markdown.
 
 `GET /api/tasks` and nested task listing accept `status`, `priority`, `tag`, and `q`. Global listing also accepts `project=<slug>`. Search uses PostgreSQL `ILIKE` across `title`, `context`, and `intended_direction`.
+
+## Notes
+
+Notes are durable context. A note always belongs to the authenticated user and may either be projectless (global user-level context) or belong to one of that user's projects. Use `GET /api/notes?projectless=true` (or `scope=global`) for global notes, `GET /api/notes?project=<slug>` or the nested project route for project notes. Notes have `title`, `body`, optional `project` slug, and optional reusable `tags`; updating `project` to `null` makes a note projectless. Note deletion is not supported.
+
+Tasks accept `related_note_ids`, an array of globally unique note IDs. On create those notes are associated; on update the field replaces the complete relation set, and an empty array clears it. Omitting the field preserves existing relations. Task responses expose the current IDs in `related_note_ids`. Notes and tasks must belong to the same user.
 
 ## Tags
 

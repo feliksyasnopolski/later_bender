@@ -4,6 +4,8 @@ class Task < ApplicationRecord
   PRIORITIES = %w[low normal high].freeze
   has_many :task_tags, dependent: :destroy
   has_many :tags, through: :task_tags
+  has_many :task_notes, dependent: :destroy
+  has_many :notes, through: :task_notes
 
   validates :title, presence: true
   validates :status, presence: true, inclusion: { in: STATUSES }
