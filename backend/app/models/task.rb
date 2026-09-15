@@ -1,5 +1,6 @@
 class Task < ApplicationRecord
   update_index("search_documents") { self }
+  after_commit :index_semantic_content, on: %i[create update destroy]
   belongs_to :project
   STATUSES = %w[backlog ready doing done dropped].freeze
   PRIORITIES = %w[low normal high].freeze
@@ -18,5 +19,11 @@ class Task < ApplicationRecord
   def set_defaults
     self.status ||= "backlog"
     self.priority ||= "normal"
+  end
+
+  def index_semantic_content
+    SemanticIndexer.call(self)
+  rescue StandardError => e
+    Rails.logger.warn("semantic indexing deferred for Task #{id}: #{e.class}: #{e.message}")
   end
 end
