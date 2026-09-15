@@ -23,7 +23,7 @@ class SearchService
     semantic = semantic_hits
     return semantic_results(semantic) if @mode == :semantic
 
-    lexical_by_id = lexical.index_by { |hit| hit.id.to_s }
+    lexical_by_id = lexical.index_by { |hit| "#{hit.kind}-#{hit.id}" }
     semantic_by_id = semantic.each_with_object({}) do |hit, by_id|
       id = "#{hit.fetch("kind")}-#{hit.fetch("parent_id")}"
       by_id[id] ||= hit
