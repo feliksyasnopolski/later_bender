@@ -16,6 +16,11 @@ class SearchService
   def call
     request = SearchDocumentsIndex.all
     request = request.query(bool: { must: [keyword_query].compact, filter: filters })
+    request = request.highlight(
+      fields: %w[title context intended_direction body].to_h { |field| [field, { fragment_size: 240, number_of_fragments: 1 }] },
+      pre_tags: ["<em>"],
+      post_tags: ["</em>"]
+    ) if @q.present?
     request.limit(@limit).to_a.map { |hit| result_for(hit) }
   end
 
@@ -26,8 +31,8 @@ class SearchService
 
     { multi_match: {
       query: @q,
-      fields: ["title^4", "tags^3", "intended_direction^3", "project_name^2", "context", "body"],
-      type: "best_fields",
+      fields: ["title^2", "tags^2", "intended_direction^2", "project_name^2", "context^1.5", "body^1.5"],
+      type: "most_fields",
       fuzziness: "AUTO"
     } }
   end
@@ -53,9 +58,17 @@ class SearchService
       intended_direction: hit.intended_direction,
       body: hit.body,
       related_note_ids: hit.related_note_ids || [],
+      highlights: highlights_for(hit),
       created_at: hit.created_at,
       updated_at: hit.updated_at,
       score: hit._score
     }.compact
+  end
+
+  def highlights_for(hit)
+    %w[title context intended_direction body].each_with_object({}) do |field, highlights|
+      values = hit.public_send("#{field}_highlights")
+      highlights[field] = values if values.present?
+    end
   end
 end
