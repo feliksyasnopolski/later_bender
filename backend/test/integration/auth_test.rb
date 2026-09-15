@@ -56,4 +56,29 @@ class AuthTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_equal user.id, json_body.fetch("id")
   end
+
+  test "redirects an unauthenticated OAuth authorization request to login" do
+    payload = {
+      client_name: "MCP authorization test",
+      redirect_uris: [ "https://chatgpt.com/connector/oauth/test" ],
+      grant_types: [ "authorization_code", "refresh_token" ],
+      response_types: [ "code" ],
+      token_endpoint_auth_method: "none",
+      scope: "mcp"
+    }
+    post "/oauth/register", params: payload.to_json, headers: json_headers
+    assert_response :created
+    client_id = json_body.fetch("client_id")
+
+    get "/oauth/authorize", params: {
+      response_type: "code",
+      client_id: client_id,
+      redirect_uri: "https://chatgpt.com/connector/oauth/test",
+      scope: "mcp",
+      code_challenge: "challenge",
+      code_challenge_method: "S256"
+    }
+    assert_response :redirect
+    assert_includes response.location, "/users/sign_in"
+  end
 end
