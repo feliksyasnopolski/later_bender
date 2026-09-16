@@ -157,6 +157,32 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_nil json_body["project"]
   end
 
+  test "deletes an owned note and cascades its relationships and citations" do
+    task = @project.tasks.create!(title: "Related", status: "backlog")
+    file = StoredFile.new(project: @project, filename: "source.txt", media_type: "text/plain", byte_size: 12, sha256: Digest::SHA256.hexdigest("source line\n"))
+    file.original.attach(io: StringIO.new("source line\n"), filename: "source.txt", content_type: "text/plain")
+    file.save!
+    FileReader.generate(file)
+    note = @user.notes.create!(title: "Throwaway", body: "Delete me")
+    citation = note.citations.create!(stored_file: file, representation_kind: "text", locator: { "kind" => "lines", "start" => 1, "end" => 1 })
+    task_note = TaskNote.create!(task: task, note: note)
+    file_note = FileNote.create!(stored_file: file, note: note)
+
+    delete "/api/notes/#{note.id}", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal({ "id" => note.id }, json_body)
+    assert_raises(ActiveRecord::RecordNotFound) { Note.find(note.id) }
+    assert_raises(ActiveRecord::RecordNotFound) { Citation.find(citation.id) }
+    assert_raises(ActiveRecord::RecordNotFound) { TaskNote.find(task_note.id) }
+    assert_raises(ActiveRecord::RecordNotFound) { FileNote.find(file_note.id) }
+  end
+
+  test "deleting a missing note returns the established not found error" do
+    delete "/api/notes/999999", headers: json_headers(@raw_token)
+    assert_response :not_found
+    assert_equal "not_found", json_body.dig("error", "code")
+  end
+
   test "does not expose another user's notes or permit cross-user task relations" do
     other = User.create!(username: "other-user", password: "password123")
     other_project = other.projects.create!(name: "Private", slug: "private")

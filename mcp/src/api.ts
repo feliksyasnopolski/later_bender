@@ -38,6 +38,7 @@ export class LaterBenderApi {
     return this.request<unknown[]>(`${path}${query({ scope, tag: input.tags?.join(","), limit: input.limit?.toString(), summary: "true" })}`);
   }
   getNote(id: number) { return this.request<unknown>(`/api/notes/${id}`); }
+  deleteNote(id: number) { return this.request<unknown>(`/api/notes/${id}`, { method: "DELETE" }); }
   createNote(payload: Record<string, unknown>) {
     const project = typeof payload.project === "string" ? payload.project : undefined;
     const body = { ...payload }; delete body.project;

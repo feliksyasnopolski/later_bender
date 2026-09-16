@@ -1,7 +1,7 @@
 module Api
   class NotesController < BaseController
     before_action :set_project, only: %i[index create]
-    before_action :set_note, only: %i[show update]
+    before_action :set_note, only: %i[show update destroy]
 
     def index
       scope = current_user.notes.includes(:project, :tags).order(created_at: :desc)
@@ -45,6 +45,12 @@ module Api
         replace_citations(@note, payload["citations"]) if payload.key?("citations")
       end
       render json: note_json(@note)
+    end
+
+    def destroy
+      id = @note.id
+      @note.destroy!
+      render json: { id: id }
     end
 
     private
