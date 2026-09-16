@@ -160,3 +160,28 @@ test("keeps note summary and full-note schemas separate", () => {
   assert.equal(tools.list_notes.outputSchema.safeParse({ notes: [{ ...summary, excerpt: undefined, related_task_ids: undefined, related_tasks: undefined }] }).success, false);
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 17, project, title: "Decision", snippet: "Keep the API boring", highlights: [], tags: ["architecture"], created_at: fullNote.created_at, updated_at: fullNote.updated_at }] }).success, true);
 });
+
+test("projects mixed search results to their strict compact contracts", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const project = { id: 2, slug: "writing", shorthand: "WR", name: "Writing" };
+  const { api } = apiFor([{ status: 200, body: { results: [
+    { kind: "task", id: 7, ref: "WR-7", number: 7, project, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "ready", priority: "high", related_tasks: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+    { kind: "note", id: 8, project: null, title: "Decision", snippet: "Keep it boring", highlights: [], tags: [], status: null, priority: null, ref: null, number: null, related_tasks: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+    { kind: "note", id: 9, project, title: "Project note", snippet: "A project detail", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }
+  ] } }]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const result = await tools.search_memory.handler({ query: "ship" });
+  assert.deepEqual(result.structuredContent.results, [
+    { kind: "task", ref: "WR-7", number: 7, project, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "ready", priority: "high", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+    { kind: "note", id: 8, project: null, title: "Decision", snippet: "Keep it boring", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+    { kind: "note", id: 9, project, title: "Project note", snippet: "A project detail", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }
+  ]);
+  assert.equal(tools.search_memory.outputSchema.safeParse(result.structuredContent).success, true);
+  assert.equal(result.structuredContent.results[0].id, undefined);
+  assert.equal(result.structuredContent.results[0].related_tasks, undefined);
+  assert.equal(result.structuredContent.results[1].ref, undefined);
+  assert.equal(result.structuredContent.results[1].number, undefined);
+  assert.equal(result.structuredContent.results[1].related_tasks, undefined);
+});
