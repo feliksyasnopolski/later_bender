@@ -112,7 +112,7 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_note", "create_project", "create_task", "get_note", "get_project", "get_task", "get_tasks", "list_notes", "list_projects", "list_tasks", "search_memory", "update_note", "update_project", "update_task"]);
+  assert.deepEqual(Object.keys(tools).sort(), ["__TEMP_probe_file_input", "create_note", "create_project", "create_task", "get_note", "get_project", "get_task", "get_tasks", "list_notes", "list_projects", "list_tasks", "search_memory", "update_note", "update_project", "update_task"]);
   assert.ok(tools.create_task.inputSchema);
   assert.ok(tools.update_task.inputSchema);
   assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
@@ -128,6 +128,14 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.equal(tools.list_notes.inputSchema.safeParse({}).success, true);
   assert.equal(tools.search_memory.inputSchema.safeParse({ query: "decision", scope: "all", project: "writing" }).success, false);
   assert.equal(tools.update_project.inputSchema.shape.archived_at, undefined);
+});
+
+test("temporary file transport probe reports bytes and integrity without persistence", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
+  const probe = (server as any)._registeredTools.__TEMP_probe_file_input;
+  const result = await probe.handler({ file: { filename: "sample.bin", mimeType: "application/octet-stream", data: "AAEC/w==", encoding: "base64" } });
+  assert.deepEqual(result.structuredContent.probe, { received_bytes: true, input_kind: "base64", filename: "sample.bin", mime_type: "application/octet-stream", byte_length: 4, sha256: "3d1f57c984978ef98a18378c8166c1cb8ede02c03eeb6aee7e2f121dfeee3e56", text_preview: null });
 });
 
 test("keeps note summary and full-note schemas separate", () => {

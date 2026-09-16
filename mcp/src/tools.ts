@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { createHash } from "node:crypto";
 import { ApiError, LaterBenderApi } from "./api.js";
 
 const statuses = z.enum(["backlog", "ready", "doing", "done", "dropped"]);
@@ -42,6 +43,35 @@ const taskSearchView = (value: any): any => ({ kind: "task", ref: value.ref, num
 const noteSearchView = (value: any): any => ({ kind: "note", id: value.id, project: value.project === null ? null : projectSearchView(value.project), title: value.title, snippet: value.snippet, highlights: highlightsSearchView(value.highlights), tags: value.tags, created_at: value.created_at, updated_at: value.updated_at });
 const taskFields = { title: z.string().optional(), status: statuses.optional(), position: z.number().int().optional(), priority: priorities.optional(), context: z.string().optional(), intended_direction: z.string().optional(), tags: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional() };
 
+// TEMPORARY TRANSPORT PROBE: this intentionally accepts only the JSON value
+// that the MCP client puts in a tool argument. It is not a File-domain shape.
+const probeFileInput = z.object({ file: z.unknown() });
+const probeFileOutput = z.object({ received_bytes: z.boolean(), input_kind: z.string(), filename: z.string().nullable(), mime_type: z.string().nullable(), byte_length: z.number().nullable(), sha256: z.string().nullable(), text_preview: z.string().nullable() });
+const probeFile = (value: unknown): z.infer<typeof probeFileOutput> => {
+  const encoder = new TextEncoder();
+  const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+  const text = (value: unknown, filename: string | null, mimeType: string | null, inputKind: string) => {
+    const bytes = encoder.encode(value as string);
+    return { received_bytes: true, input_kind: inputKind, filename, mime_type: mimeType, byte_length: bytes.byteLength, sha256: hash(bytes), text_preview: (value as string).slice(0, 120) };
+  };
+  if (typeof value === "string") return text(value, null, "text/plain", "string");
+  if (!value || typeof value !== "object") return { received_bytes: false, input_kind: typeof value, filename: null, mime_type: null, byte_length: null, sha256: null, text_preview: null };
+  const input = value as Record<string, unknown>;
+  const filename = typeof input.filename === "string" ? input.filename : null;
+  const mimeType = typeof input.mimeType === "string" ? input.mimeType : null;
+  if (typeof input.text === "string") return text(input.text, filename, mimeType, "text");
+  if (typeof input.data === "string" && input.encoding === "base64") {
+    const bytes = Buffer.from(input.data, "base64");
+    return { received_bytes: true, input_kind: "base64", filename, mime_type: mimeType, byte_length: bytes.byteLength, sha256: hash(bytes), text_preview: null };
+  }
+  if (typeof input.blob === "string") {
+    const bytes = Buffer.from(input.blob, "base64");
+    return { received_bytes: true, input_kind: "resource_blob", filename, mime_type: mimeType, byte_length: bytes.byteLength, sha256: hash(bytes), text_preview: null };
+  }
+  if (typeof input.uri === "string" || typeof input.path === "string") return { received_bytes: false, input_kind: typeof input.uri === "string" ? "uri" : "path", filename, mime_type: mimeType, byte_length: null, sha256: null, text_preview: null };
+  return { received_bytes: false, input_kind: "json_object", filename, mime_type: mimeType, byte_length: null, sha256: null, text_preview: null };
+};
+
 const noteScopeInput = z.object({ scope: z.enum(["global", "project", "all"]).optional(), project: z.string().optional(), tags: z.array(z.string()).optional(), limit: z.number().int().positive().max(100).optional() }).superRefine((value, context) => {
   if (value.scope === "project" && !value.project) context.addIssue({ code: z.ZodIssueCode.custom, path: ["project"], message: "scope=project requires project" });
   if (value.scope !== "project" && value.project) context.addIssue({ code: z.ZodIssueCode.custom, path: ["project"], message: "project requires scope=project" });
@@ -69,4 +99,5 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
   server.registerTool("update_note", { description: "Partially update a Note by global ID. Omitted project or tags preserve them; project null makes it global; tags [] clears tags and a non-empty array replaces them exactly.", inputSchema: { id: z.number().int().positive(), title: z.string().optional(), body: z.string().optional(), project: z.string().nullable().optional(), tags: z.array(z.string()).optional() }, outputSchema: noteMutationOutput, annotations: updateAnnotations }, ({ id, ...payload }) => compactMutation("note", () => api.updateNote(id, payload)));
 
   server.registerTool("search_memory", { description: "Search Later Bender durable state across Tasks and Notes. Task results use external refs and Notes retain their existing behavior.", inputSchema: searchInput, outputSchema: { results: z.array(searchResult) }, annotations: readAnnotations }, (input) => safe("results", () => api.searchMemory(input).then((response) => response.results.map((entry: any) => entry.kind === "task" ? taskSearchView(entry) : noteSearchView(entry)))));
+  server.registerTool("__TEMP_probe_file_input", { description: "TEMPORARY transport probe: report whether the JSON tool argument contains file bytes. Not a Later Bender File API.", inputSchema: probeFileInput.shape, outputSchema: { probe: probeFileOutput }, annotations: readAnnotations }, ({ file }) => Promise.resolve(result("probe", probeFile(file))));
 }
