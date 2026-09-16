@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 
 const username = ref('')
@@ -9,11 +10,12 @@ const error = ref('')
 const busy = ref(false)
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 
 async function submit() {
   error.value = ''
   busy.value = true
-  try { await auth.login(username.value, password.value); router.push('/projects') }
+  try { await auth.login(username.value, password.value); router.push(route.query.redirect || '/projects') }
   catch (e) { error.value = e.message }
   finally { busy.value = false }
 }

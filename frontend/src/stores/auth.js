@@ -20,7 +20,6 @@ export const useAuthStore = defineStore('auth', {
         this.user = await request('/auth/current', {}, this.token)
         return true
       } catch (error) {
-        if (error.status === 401) this.clear()
         return false
       } finally {
         this.checking = false

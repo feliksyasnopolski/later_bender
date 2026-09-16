@@ -5,7 +5,7 @@ import { request } from '../api'
 import { useAuthStore } from '../stores/auth'
 
 const route = useRoute(); const auth = useAuthStore(); const task = ref(null); const error = ref(''); const loading = ref(true)
-onMounted(async () => { try { task.value = await request(`/projects/${route.params.project}/tasks/${route.params.taskId}`, {}, auth.token) } catch (e) { error.value = e.message; if (e.status === 401) auth.clear() } finally { loading.value = false } })
+onMounted(async () => { try { task.value = await request(`/projects/${route.params.project}/tasks/${route.params.taskId}`, {}, auth.token) } catch (e) { error.value = e.message } finally { loading.value = false } })
 </script>
 
 <template>

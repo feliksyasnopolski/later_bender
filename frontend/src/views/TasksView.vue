@@ -16,7 +16,7 @@ async function load() {
   try {
     tasks.value = await request(`/projects/${route.params.project}/tasks${params.size ? `?${params}` : ''}`, {}, auth.token)
     project.value = tasks.value[0]?.project || { slug: route.params.project, name: route.params.project }
-  } catch (e) { error.value = e.message; if (e.status === 401) auth.clear() }
+  } catch (e) { error.value = e.message }
   finally { loading.value = false }
 }
 onMounted(load)

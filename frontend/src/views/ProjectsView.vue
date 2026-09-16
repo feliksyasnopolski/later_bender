@@ -10,7 +10,7 @@ const loading = ref(true)
 
 onMounted(async () => {
   try { projects.value = await request('/projects', {}, auth.token) }
-  catch (e) { error.value = e.message; if (e.status === 401) auth.clear() }
+  catch (e) { error.value = e.message }
   finally { loading.value = false }
 })
 </script>
