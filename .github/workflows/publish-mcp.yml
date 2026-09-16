@@ -26,6 +26,8 @@ jobs:
           file: mcp/Dockerfile
           platforms: linux/arm64
           push: true
+          provenance: false
+          sbom: false
           tags: ghcr.io/feliksyasnopolski/later-bender-mcp:sha-${{ github.sha }}
           labels: |
             service=later-bender-mcp
