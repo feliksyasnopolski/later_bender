@@ -45,7 +45,7 @@ const taskFields = { title: z.string().optional(), status: statuses.optional(), 
 
 // TEMPORARY TRANSPORT PROBE: this intentionally accepts only the JSON value
 // that the MCP client puts in a tool argument. It is not a File-domain shape.
-const probeFileInput = z.object({ file: z.unknown() });
+const probeFileInput = z.object({ file: z.object({ download_url: z.string().optional(), file_id: z.string().optional(), mime_type: z.string().optional(), file_name: z.string().optional() }).passthrough() });
 const probeFileOutput = z.object({ received_bytes: z.boolean(), input_kind: z.string(), filename: z.string().nullable(), mime_type: z.string().nullable(), byte_length: z.number().nullable(), sha256: z.string().nullable(), text_preview: z.string().nullable() });
 const probeFile = (value: unknown): z.infer<typeof probeFileOutput> => {
   const encoder = new TextEncoder();
@@ -68,6 +68,7 @@ const probeFile = (value: unknown): z.infer<typeof probeFileOutput> => {
     const bytes = Buffer.from(input.blob, "base64");
     return { received_bytes: true, input_kind: "resource_blob", filename, mime_type: mimeType, byte_length: bytes.byteLength, sha256: hash(bytes), text_preview: null };
   }
+  if (typeof input.download_url === "string" || typeof input.file_id === "string") return { received_bytes: false, input_kind: "provided_file_payload", filename: typeof input.file_name === "string" ? input.file_name : filename, mime_type: typeof input.mime_type === "string" ? input.mime_type : mimeType, byte_length: null, sha256: null, text_preview: null };
   if (typeof input.uri === "string" || typeof input.path === "string") return { received_bytes: false, input_kind: typeof input.uri === "string" ? "uri" : "path", filename, mime_type: mimeType, byte_length: null, sha256: null, text_preview: null };
   return { received_bytes: false, input_kind: "json_object", filename, mime_type: mimeType, byte_length: null, sha256: null, text_preview: null };
 };
@@ -99,5 +100,5 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
   server.registerTool("update_note", { description: "Partially update a Note by global ID. Omitted project or tags preserve them; project null makes it global; tags [] clears tags and a non-empty array replaces them exactly.", inputSchema: { id: z.number().int().positive(), title: z.string().optional(), body: z.string().optional(), project: z.string().nullable().optional(), tags: z.array(z.string()).optional() }, outputSchema: noteMutationOutput, annotations: updateAnnotations }, ({ id, ...payload }) => compactMutation("note", () => api.updateNote(id, payload)));
 
   server.registerTool("search_memory", { description: "Search Later Bender durable state across Tasks and Notes. Task results use external refs and Notes retain their existing behavior.", inputSchema: searchInput, outputSchema: { results: z.array(searchResult) }, annotations: readAnnotations }, (input) => safe("results", () => api.searchMemory(input).then((response) => response.results.map((entry: any) => entry.kind === "task" ? taskSearchView(entry) : noteSearchView(entry)))));
-  server.registerTool("__TEMP_probe_file_input", { description: "TEMPORARY transport probe: report whether the JSON tool argument contains file bytes. Not a Later Bender File API.", inputSchema: probeFileInput.shape, outputSchema: { probe: probeFileOutput }, annotations: readAnnotations }, ({ file }) => Promise.resolve(result("probe", probeFile(file))));
+  server.registerTool("__TEMP_probe_file_input", { description: "TEMPORARY transport probe: report whether the JSON tool argument contains file bytes. Not a Later Bender File API.", inputSchema: probeFileInput.shape, outputSchema: { probe: probeFileOutput }, annotations: readAnnotations, _meta: { "openai/fileParams": ["file"] } }, ({ file }) => Promise.resolve(result("probe", probeFile(file))));
 }
