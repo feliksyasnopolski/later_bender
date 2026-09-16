@@ -135,7 +135,49 @@ test("temporary file transport probe reports bytes and integrity without persist
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const probe = (server as any)._registeredTools.__TEMP_probe_file_input;
   const result = await probe.handler({ file: { filename: "sample.bin", mimeType: "application/octet-stream", data: "AAEC/w==", encoding: "base64" } });
-  assert.deepEqual(result.structuredContent.probe, { received_bytes: true, input_kind: "base64", filename: "sample.bin", mime_type: "application/octet-stream", byte_length: 4, sha256: "3d1f57c984978ef98a18378c8166c1cb8ede02c03eeb6aee7e2f121dfeee3e56", text_preview: null });
+  assert.deepEqual(result.structuredContent.probe, { received_bytes: true, input_kind: "base64", filename: "sample.bin", file_name: "sample.bin", mime_type: "application/octet-stream", file_id_present: false, download_url_present: false, byte_length: 4, downloaded_byte_length: null, sha256: "3d1f57c984978ef98a18378c8166c1cb8ede02c03eeb6aee7e2f121dfeee3e56", text_preview: null, http_status: null, response_content_type: null, download_error: null });
+});
+
+test("temporary file transport probe recognizes provided file payloads without exposing the signed URL", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
+  const probe = (server as any)._registeredTools.__TEMP_probe_file_input;
+  const signedUrl = "https://files.example.test/download?signature=secret-value";
+  const result = await probe.handler({ file: { file_id: "file-123", download_url: signedUrl, file_name: "sample.txt", mime_type: "text/plain" } });
+  assert.deepEqual(result.structuredContent.probe, { received_bytes: false, input_kind: "provided_file_payload", filename: "sample.txt", file_name: "sample.txt", mime_type: "text/plain", file_id_present: true, download_url_present: true, byte_length: null, downloaded_byte_length: null, sha256: null, text_preview: null, http_status: null, response_content_type: null, download_error: "download_failed" });
+  assert.doesNotMatch(JSON.stringify(result.structuredContent), /secret-value|download\?/);
+});
+
+test("temporary file transport probe downloads and hashes provided bytes", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
+  const probe = (server as any)._registeredTools.__TEMP_probe_file_input;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(new Uint8Array([0, 1, 2, 255]), { status: 200, headers: { "content-type": "application/octet-stream" } });
+  try {
+    const result = await probe.handler({ file: { file_id: "file-123", download_url: "https://files.example.test/signed", file_name: "sample.bin", mime_type: "application/octet-stream" } });
+    assert.deepEqual(result.structuredContent.probe, { received_bytes: true, input_kind: "provided_file_payload", filename: "sample.bin", file_name: "sample.bin", mime_type: "application/octet-stream", file_id_present: true, download_url_present: true, byte_length: 4, downloaded_byte_length: 4, sha256: "3d1f57c984978ef98a18378c8166c1cb8ede02c03eeb6aee7e2f121dfeee3e56", text_preview: null, http_status: 200, response_content_type: "application/octet-stream", download_error: null });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("temporary file transport probe reports failed and oversized downloads clearly", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
+  const probe = (server as any)._registeredTools.__TEMP_probe_file_input;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    assert.equal(init?.method, "GET");
+    return new Response(null, { status: 503, headers: { "content-type": "text/plain" } });
+  };
+  try {
+    const failed = await probe.handler({ file: { download_url: "https://files.example.test/failed" } });
+    assert.equal(failed.structuredContent.probe.http_status, 503);
+    assert.equal(failed.structuredContent.probe.download_error, "download_failed");
+    globalThis.fetch = async () => new Response(new Uint8Array(1), { status: 200, headers: { "content-length": "1048577" } });
+    const oversized = await probe.handler({ file: { download_url: "https://files.example.test/large" } });
+    assert.equal(oversized.structuredContent.probe.download_error, "download_too_large");
+    assert.equal(oversized.structuredContent.probe.received_bytes, false);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("keeps note summary and full-note schemas separate", () => {
