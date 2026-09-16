@@ -17,6 +17,8 @@ test("MCP requires bearer auth and advertises protected-resource metadata", asyn
     assert.match(response.headers.get("www-authenticate") || "", /resource_metadata=/);
     const metadata = await fetch(`${baseUrl}/.well-known/oauth-protected-resource/mcp`);
     assert.equal(metadata.status, 200);
-    assert.deepEqual((await metadata.json()).authorization_servers, ["https://laterbender-api.felixworks.v6.rocks/"]);
+    const body = await metadata.json();
+    assert.deepEqual(body.authorization_servers, ["https://laterbender-api.felixworks.v6.rocks"]);
+    assert.deepEqual(body.scopes_supported, ["mcp"]);
   });
 });

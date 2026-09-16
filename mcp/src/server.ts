@@ -10,6 +10,7 @@ import { registerTools } from "./tools.js";
 
 const resourceUrl = new URL(process.env.MCP_RESOURCE_URL || "https://laterbender-mcp.felixworks.v6.rocks/mcp");
 const issuerUrl = new URL(process.env.LATER_BENDER_OAUTH_ISSUER || "https://laterbender-api.felixworks.v6.rocks");
+const issuerOrigin = issuerUrl.origin;
 const apiBaseUrl = process.env.LATER_BENDER_API_BASE_URL;
 
 async function verifyAccessToken(token: string): Promise<AuthInfo> {
@@ -24,8 +25,8 @@ async function verifyAccessToken(token: string): Promise<AuthInfo> {
 export function createApp(apiFactory: (token: string) => LaterBenderApi = (token) => new LaterBenderApi(apiBaseUrl, token)) {
   const app = express();
   app.use(express.json());
-  const metadata = { issuer: issuerUrl.href, authorization_endpoint: new URL("/oauth/authorize", issuerUrl).href, token_endpoint: new URL("/oauth/token", issuerUrl).href, registration_endpoint: new URL("/oauth/register", issuerUrl).href, response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"], code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: ["none"], scopes_supported: ["mcp"] };
-  app.use(mcpAuthMetadataRouter({ oauthMetadata: metadata, resourceServerUrl: resourceUrl, scopesSupported: [], resourceName: "Later, Bender" }));
+  const metadata = { issuer: issuerOrigin, authorization_endpoint: new URL("/oauth/authorize", issuerOrigin).href, token_endpoint: new URL("/oauth/token", issuerOrigin).href, registration_endpoint: new URL("/oauth/register", issuerOrigin).href, response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"], code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: ["none"], scopes_supported: ["mcp"] };
+  app.use(mcpAuthMetadataRouter({ oauthMetadata: metadata, resourceServerUrl: resourceUrl, scopesSupported: ["mcp"], resourceName: "Later, Bender" }));
   const auth = requireBearerAuth({ verifier: { verifyAccessToken }, resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceUrl) }) as RequestHandler;
   app.all("/mcp", auth, async (request, response) => {
     const server = new McpServer({ name: "later-bender", version: "0.1.0" }, { instructions: "Later Bender stores explicit durable user state. Tasks are actionable work. Notes are durable non-actionable context such as ideas, decisions, findings, hypotheses, possible directions, constraints, observations, and discussion results. Projectless Notes are user-level durable memory; Project Notes belong to one project. Use search_memory for recall when the location is unknown or may be either a Task or Note. Use list_tasks/list_notes to browse a known scope with structured filters. Search and list results are summaries; use get_task/get_note for complete content. When a Task synthesizes existing Notes, attach materially relevant Notes with related_note_ids." });
