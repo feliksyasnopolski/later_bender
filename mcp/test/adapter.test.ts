@@ -114,7 +114,14 @@ test("registers exactly the v1 tools with schemas", () => {
   const tools = (server as any)._registeredTools as Record<string, any>;
   assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_file", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_files", "list_notes", "list_projects", "list_tasks", "read_file", "read_files", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task"]);
   assert.ok(tools.create_task.inputSchema);
+  assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", representation: "text", locator: { kind: "lines", start: 138, end: 152 } }]).success, true);
+  assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", locator: { kind: "bytes", start: 1, end: 2 } }]).success, false);
   assert.ok(tools.update_task.inputSchema);
+  assert.match(tools.create_task.description, /exact evidence pointers into canonical Files/);
+  assert.match(tools.create_note.description, /distinct from broader related_files relationships/);
+  assert.match(tools.list_tasks.description, /Tasks, Notes, and Files/);
+  assert.match(tools.read_file.description, /omitted.*auto.*line coordinates.*PDF.*page coordinates/i);
+  assert.match(tools.read_files.description, /bounded follow-up reads and citations/i);
   assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
   assert.equal(tools.update_task.annotations.destructiveHint, true);
   assert.deepEqual(tools.create_file._meta, { "openai/fileParams": ["file"] });
@@ -125,6 +132,7 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "task", ref: "WR-1", number: 1, project: { id: 2, slug: "writing", shorthand: "WR", name: "Writing" }, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "backlog", priority: "normal", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], status: "done", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, false);
+  assert.equal(tools.get_note.outputSchema.safeParse({ note: { id: 1, project: null, title: "Decision", tags: [], body: "evidence", related_task_ids: [], related_tasks: [], related_files: [], citations: [{ file: "LB-F7", representation: "text", locator: { kind: "pages", start: 1, end: 2 } }], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" } }).success, true);
   assert.equal(tools.list_notes.inputSchema.safeParse({ scope: "project" }).success, false);
   assert.equal(tools.list_notes.inputSchema.safeParse({ scope: "global", project: "writing" }).success, false);
   assert.equal(tools.list_notes.inputSchema.safeParse({}).success, true);
