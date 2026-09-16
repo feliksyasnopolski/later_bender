@@ -32,3 +32,6 @@ body { overflow: hidden; }
 .order-controls { display: flex; gap: .35rem; align-items: center; margin: .75rem 0; color: var(--muted); font-size: .8rem; }
 .order-controls span { margin-right: auto; }
 @media (max-width: 700px) { .app-content { height: calc(100vh - 112px); } .board { max-height: calc(100vh - 245px); grid-template-columns: repeat(4, minmax(185px, 1fr)); } .create-bar form { display: block; } }
+
+/* A native drag keeps the source under the pointer; moving hovered cards changes the hit target mid-drag. */
+.task-card:hover { transform: none; }
