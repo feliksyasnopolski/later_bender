@@ -81,4 +81,36 @@ class AuthTest < ActionDispatch::IntegrationTest
     assert_response :redirect
     assert_includes response.location, "/users/sign_in"
   end
+
+  test "returns to OAuth authorization after web login" do
+    user = User.create!(username: "oauth-login", password: "password123")
+    payload = {
+      client_name: "MCP callback test",
+      redirect_uris: [ "https://chatgpt.com/connector/oauth/callback" ],
+      grant_types: [ "authorization_code", "refresh_token" ],
+      response_types: [ "code" ],
+      token_endpoint_auth_method: "none",
+      scope: "mcp"
+    }
+    post "/oauth/register", params: payload.to_json, headers: json_headers
+    client_id = json_body.fetch("client_id")
+    authorization_params = {
+      response_type: "code", client_id: client_id,
+      redirect_uri: "https://chatgpt.com/connector/oauth/callback", scope: "mcp",
+      code_challenge: "challenge", code_challenge_method: "S256", state: "state-123"
+    }
+
+    get "/oauth/authorize", params: authorization_params
+    assert_response :redirect
+    assert_includes response.location, "/users/sign_in"
+
+    post "/users/sign_in", params: { user: { username: user.username, password: "password123" } }
+    assert_response :redirect
+    assert_match %r{/oauth/authorize\?}, response.location
+
+    get URI(response.location).request_uri
+    assert_response :redirect
+    assert_match %r{https?://chatgpt\.com/connector/oauth/callback\?code=}, response.location
+    assert_includes response.location, "state=state-123"
+  end
 end
