@@ -9,13 +9,14 @@ class StoredFileIngestor
     new(...).call
   end
 
-  def initialize(project:, payload:, filename: nil, tags: nil, related_task_refs: nil, related_note_ids: nil)
+  def initialize(project:, payload:, filename: nil, tags: nil, related_task_refs: nil, related_note_ids: nil, opener: URI.method(:open))
     @project = project
     @payload = payload
     @filename = filename.presence || payload["file_name"].presence
     @tags = tags
     @related_task_refs = related_task_refs
     @related_note_ids = related_note_ids
+    @opener = opener
   end
 
   def call
@@ -25,24 +26,32 @@ class StoredFileIngestor
 
     tempfile = Tempfile.new([ "later-bender-file", File.extname(@filename) ])
     digest = Digest::SHA256.new
-    byte_size = download_to(tempfile, digest)
+    begin
+      byte_size = download_to(tempfile, digest)
+    rescue OpenURI::HTTPError, SocketError, Timeout::Error, IOError => error
+      raise ActiveRecord::RecordInvalid, invalid_record("file", "provider download failed: #{error.message}")
+    end
     tempfile.rewind
     media_type = supplied_media_type.presence || "application/octet-stream"
 
-    StoredFile.transaction do
-      file = @project.stored_files.new(filename: @filename, media_type: media_type, byte_size: byte_size, sha256: digest.hexdigest)
-      file.save!
-      file.original.attach(io: tempfile, filename: @filename, content_type: media_type)
-      file.update!(byte_size: byte_size, sha256: digest.hexdigest)
-      TagReconciler.call(file, @tags) if @tags
-      file.tasks = tasks if @related_task_refs
-      file.notes = notes if @related_note_ids
-      file
+    begin
+      StoredFile.transaction do
+        file = @project.stored_files.new(filename: @filename, media_type: media_type, byte_size: byte_size, sha256: digest.hexdigest)
+        file.save!
+        file.original.attach(io: tempfile, filename: @filename, content_type: media_type)
+        file.update!(byte_size: byte_size, sha256: digest.hexdigest)
+        TagReconciler.call(file, @tags) if @tags
+        file.tasks = tasks if @related_task_refs
+        file.notes = notes if @related_note_ids
+        file
+      end
     ensure
-      tempfile.close!
+      begin
+        tempfile.close!
+      rescue IOError
+        nil
+      end
     end
-  rescue OpenURI::HTTPError, SocketError, Timeout::Error, IOError => error
-    raise ActiveRecord::RecordInvalid, invalid_record("file", "provider download failed: #{error.message}")
   end
 
   private
@@ -50,9 +59,9 @@ class StoredFileIngestor
   def download_to(tempfile, digest)
     raise ActiveRecord::RecordInvalid, invalid_record("file", "download_url is required") unless @payload["download_url"].present?
     size = 0
-    URI.open(@payload.fetch("download_url"), "rb") do |stream|
+    @opener.call(@payload.fetch("download_url"), "rb") do |stream|
       @download_media_type = stream.content_type if stream.respond_to?(:content_type)
-      stream.each_body do |chunk|
+      while (chunk = stream.read(64 * 1024))
         size += chunk.bytesize
         raise ActiveRecord::RecordInvalid, invalid_record("file", "exceeds upload size limit") if size > MAX_BYTES
         tempfile.write(chunk)

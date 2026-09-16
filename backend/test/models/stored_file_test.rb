@@ -26,6 +26,17 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_includes file.errors[:project], "must exist"
   end
 
+  test "ingests a streamed provider response from an IO without each_body" do
+    user = User.create!(username: "ingest-user", password: "password123")
+    project = user.projects.create!(name: "Ingest", slug: "ingest-files", shorthand: "IF")
+    bytes = "provider bytes\x00".b
+
+    opener = ->(_url, _mode, &block) { block.call(StringIO.new(bytes)) }
+    file = StoredFileIngestor.call(project: project, payload: { "download_url" => "https://provider.invalid/file", "file_name" => "provider.bin", "mime_type" => "application/octet-stream" }, opener: opener)
+    assert_equal bytes, file.original.download
+    assert_equal Digest::SHA256.hexdigest(bytes), file.sha256
+  end
+
   private
 
   def create_file(project, filename, bytes)
