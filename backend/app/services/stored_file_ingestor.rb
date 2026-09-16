@@ -25,6 +25,7 @@ class StoredFileIngestor
     notes = resolve_notes if @related_note_ids
 
     tempfile = Tempfile.new([ "later-bender-file", File.extname(@filename) ])
+    tempfile.binmode
     digest = Digest::SHA256.new
     begin
       byte_size = download_to(tempfile, digest)
