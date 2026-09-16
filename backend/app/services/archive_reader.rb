@@ -125,7 +125,9 @@ class ArchiveReader
     return unless match
     raw_path = match[:path].sub(/\s+->\s+.*\z/, "")
     mode = match[:mode]
-    { "path" => self.class.normalize_path(raw_path.sub(%r{\A\./}, "")), "kind" => mode == "d" ? "directory" : mode == "l" ? "symlink" : "file", "uncompressed_size" => match[:size].to_i, "compressed_size" => nil, "readable" => mode != "l", "encrypted" => false }
+    clean_path = raw_path.sub(%r{\A\./}, "").sub(%r{/\z}, "")
+    return if clean_path.blank?
+    { "path" => self.class.normalize_path(clean_path), "kind" => mode == "d" ? "directory" : mode == "l" ? "symlink" : "file", "uncompressed_size" => match[:size].to_i, "compressed_size" => nil, "readable" => mode != "l", "encrypted" => false }
   end
 
   def enrich(row)
