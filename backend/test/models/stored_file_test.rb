@@ -49,6 +49,20 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_not FileReader.valid_locator?(file, "markdown", { "kind" => "lines", "start" => 1, "end" => 4 })
   end
 
+  test "derives page-aware text from a small PDF stream" do
+    user = User.create!(username: "pdf-user", password: "password123")
+    project = user.projects.create!(name: "PDF", slug: "pdf-files", shorthand: "PF")
+    pdf = "%PDF-1.4\n1 0 obj\n<<>>\nstream\n(PDF known page)\nendstream\n%%EOF".b
+    file = create_file(project, "source.pdf", pdf)
+    file.update!(media_type: "application/pdf")
+    FileReader.generate(file)
+
+    read = FileReader.read(file, representation: "pdf_text", locator: { "kind" => "pages", "start" => 1, "end" => 1 })
+    assert_equal "pdf_text", read[:representation]
+    assert_includes read[:content], "PDF known page"
+    assert_equal 1, read[:metadata]["pages"]
+  end
+
   private
 
   def create_file(project, filename, bytes)
