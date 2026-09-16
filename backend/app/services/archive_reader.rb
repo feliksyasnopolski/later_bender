@@ -35,7 +35,8 @@ class ArchiveReader
       relative = entry["path"].delete_prefix(prefix).delete_prefix("/")
       relative.split("/").length <= max_depth + 1
     end
-    result.first([[limit || 50, 1].max, MAX_LIST_LIMIT].min)
+    requested_limit = limit.nil? ? 50 : Integer(limit)
+    result.first([[requested_limit, 1].max, MAX_LIST_LIMIT].min)
   rescue JSON::ParserError
     raise Error, "archive manifest is invalid"
   end
