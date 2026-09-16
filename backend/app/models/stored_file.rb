@@ -34,7 +34,7 @@ class StoredFile < ApplicationRecord
   private
 
   def prepare_and_index
-    generate_representations if saved_change_to_id?
+    generate_representations if representations.none?
     index_search_content
   end
 
