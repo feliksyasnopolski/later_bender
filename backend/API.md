@@ -53,7 +53,7 @@ Projects are archived by setting `archived_at`; they are not deleted. Task delet
 
 Task `status` is one of `backlog`, `ready`, `doing`, `done`, or `dropped`. `priority` is optional and is one of `low`, `normal`, or `high`. `context` describes why a task exists; `intended_direction` records the direction already decided when it was parked. Both are plain text and may contain Markdown.
 
-`GET /api/tasks` and nested task listing accept `status`, `priority`, `tag`, and `q`. Global listing also accepts `project=<slug>`. Search uses PostgreSQL `ILIKE` across `title`, `context`, and `intended_direction`.
+`GET /api/tasks` and nested task listing accept `status`, `priority`, `tag`, and `q`. Global listing also accepts `project=<slug>`. Results use ascending canonical integer `position` (then `id`) for board order. Create and update accept `position`; omitted position appends a task to its status column. Search uses PostgreSQL `ILIKE` across `title`, `context`, and `intended_direction`.
 
 ## Notes
 

@@ -73,6 +73,21 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal [ "Find this prose" ], json_body.map { |task| task["title"] }
   end
 
+  test "task listing uses explicit position and position updates persist" do
+    later = @project.tasks.create!(title: "Later", status: "backlog", position: 2000)
+    first = @project.tasks.create!(title: "First", status: "backlog", position: 1000)
+
+    get "/api/projects/writing/tasks", headers: json_headers(@raw_token)
+    assert_equal ["First", "Later"], json_body.map { |task| task["title"] }
+    assert_equal [1000, 2000], json_body.map { |task| task["position"] }
+
+    patch "/api/tasks/#{later.id}", params: { position: 500 }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal 500, json_body["position"]
+    get "/api/projects/writing/tasks", headers: json_headers(@raw_token)
+    assert_equal ["Later", "First"], json_body.map { |task| task["title"] }
+  end
+
   test "returns structured validation errors" do
     post "/api/projects/writing/tasks", params: { title: "", status: "later" }.to_json, headers: json_headers(@raw_token)
     assert_response :unprocessable_content

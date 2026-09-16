@@ -13,3 +13,22 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 @media (max-width: 900px) { .detail-pane { width:min(480px,75vw) } }
 @media (max-width: 700px) { .board-heading { align-items:start }.board-filters { flex-wrap:wrap }.create-bar form { flex-wrap:wrap }.create-bar input { min-width:100% }.detail-pane { top:112px; width:100%; border-left:0 } }
 @media (max-width: 650px) { .filters, .task-row { display: flex; flex-wrap: wrap }.task-row strong { width: 100% } }
+
+html, body, #app { min-height: 100%; }
+body { overflow: hidden; }
+.app-content { height: calc(100vh - 64px); overflow: auto; }
+.board { max-height: calc(100vh - 190px); overflow: auto; padding-bottom: 1rem; }
+.board-column header { position: sticky; top: 0; z-index: 1; background: #eef1f5; }
+.card-stack { min-height: 80px; }
+.task-card.dragging { opacity: .45; }
+.drop-placeholder { min-height: 2.4rem; margin: .35rem 0; padding: .55rem; border: 2px dashed var(--accent); border-radius: 5px; color: var(--accent); background: var(--accent-soft); text-align: center; font-size: .78rem; }
+.create-bar { max-height: calc(100vh - 2rem); overflow: auto; }
+.create-bar form { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 0 1rem; }
+.create-bar label { margin: .35rem 0; font-size: .8rem; }
+.create-bar textarea { min-height: 3rem; }
+.detail-pane { overflow-y: auto; }
+.prose-field h3 { margin: .9rem 0 .2rem; font-size: .9rem; }
+.prose-field textarea { min-height: 9rem; width: 100%; }
+.order-controls { display: flex; gap: .35rem; align-items: center; margin: .75rem 0; color: var(--muted); font-size: .8rem; }
+.order-controls span { margin-right: auto; }
+@media (max-width: 700px) { .app-content { height: calc(100vh - 112px); } .board { max-height: calc(100vh - 245px); grid-template-columns: repeat(4, minmax(185px, 1fr)); } .create-bar form { display: block; } }

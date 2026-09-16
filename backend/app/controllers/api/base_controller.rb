@@ -62,6 +62,7 @@ module Api
         id: task.id,
         title: task.title,
         status: task.status,
+        position: task.position,
         priority: task.priority,
         context: task.context,
         intended_direction: task.intended_direction,
@@ -101,7 +102,7 @@ module Api
     end
 
     def task_list_json(task)
-      { id: task.id, title: task.title, status: task.status, priority: task.priority, tags: task.tags.order(:name).pluck(:name), related_note_ids: task.notes.order(:id).pluck(:id), project: { id: task.project.id, name: task.project.name, slug: task.project.slug }, created_at: task.created_at, updated_at: task.updated_at }
+      { id: task.id, title: task.title, status: task.status, position: task.position, priority: task.priority, tags: task.tags.order(:name).pluck(:name), related_note_ids: task.notes.order(:id).pluck(:id), project: { id: task.project.id, name: task.project.name, slug: task.project.slug }, created_at: task.created_at, updated_at: task.updated_at }
     end
 
     def note_list_json(note)
@@ -121,7 +122,7 @@ module Api
         scope = scope.where("tasks.title ILIKE :query OR tasks.context ILIKE :query OR tasks.intended_direction ILIKE :query", { query: query })
       end
       scope = scope.limit(params[:limit].to_i.clamp(1, 100)) if params[:limit].present?
-      scope.order({ created_at: :desc })
+      scope.order({ position: :asc, id: :asc })
     end
   end
 end

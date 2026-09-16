@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_15_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_16_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -136,12 +136,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_15_120000) do
     t.text "context"
     t.datetime "created_at", null: false
     t.text "intended_direction"
+    t.bigint "position", null: false
     t.string "priority"
     t.bigint "project_id", null: false
     t.string "status", null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
     t.index ["project_id"], name: "index_tasks_on_project_id"
+    t.index ["status", "position", "id"], name: "index_tasks_on_status_and_position_and_id"
   end
 
   create_table "totp_credentials", force: :cascade do |t|

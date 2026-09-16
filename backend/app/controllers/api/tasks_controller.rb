@@ -56,7 +56,7 @@ module Api
     end
 
     def task_params(values)
-      { "title" => values["title"], "status" => values["status"], "priority" => values["priority"], "context" => values["context"], "intended_direction" => values["intended_direction"] }.compact
+      { "title" => values["title"], "status" => values["status"], "position" => values["position"], "priority" => values["priority"], "context" => values["context"], "intended_direction" => values["intended_direction"] }.compact
     end
 
     def replace_related_notes(task, ids)

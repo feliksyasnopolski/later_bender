@@ -33,7 +33,7 @@ async function logout() {
         <button class="link-button" @click="logout">Log out</button>
       </div>
     </header>
-    <main class="page"><router-view /></main>
+    <main class="page app-content"><router-view /></main>
   </div>
   <main v-else class="page"><router-view /></main>
 </template>
