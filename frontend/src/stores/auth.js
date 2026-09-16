@@ -15,6 +15,7 @@ export const useAuthStore = defineStore('auth', {
     },
     async restore() {
       if (!this.token) return false
+      if (this.checking) return this.isAuthenticated
       this.checking = true
       try {
         this.user = await request('/auth/current', {}, this.token)

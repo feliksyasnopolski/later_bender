@@ -18,7 +18,8 @@ async function logout() {
 </script>
 
 <template>
-  <div v-if="auth.isAuthenticated" class="app-shell">
+  <div v-if="auth.token && auth.checking" class="session-loading" role="status">Checking your session…</div>
+  <div v-else-if="auth.isAuthenticated" class="app-shell">
     <header class="site-header">
       <router-link to="/projects" class="brand">Later, Bender</router-link>
       <nav class="primary-nav" aria-label="Primary navigation">

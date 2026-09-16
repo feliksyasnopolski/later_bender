@@ -10,4 +10,7 @@ const pinia = createPinia()
 setActivePinia(pinia)
 const auth = useAuthStore(pinia)
 setUnauthorizedHandler(() => auth.clear())
-createApp(App).use(pinia).use(router).mount('#app')
+
+const app = createApp(App).use(pinia).use(router)
+await router.isReady()
+app.mount('#app')
