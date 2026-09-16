@@ -58,4 +58,29 @@ test.describe('task board rendered acceptance', () => {
     await expect(page.getByTestId('board-column-ready').getByTestId('task-card').filter({ hasText: before[0].split('\n')[0] })).toBeVisible()
     await page.screenshot({ path: 'test-results/drag-between-columns.png', fullPage: true })
   })
+
+  test('keeps the provisional insertion index stable when hit targets alternate', async ({ page }) => {
+    await page.goto('/tasks')
+    const lane = page.getByTestId('board-column-backlog')
+    const cards = lane.getByTestId('task-card')
+    await expect(cards.nth(2)).toBeVisible()
+    await page.evaluate(() => { window.__LB_DRAG_TRACE__ = true; window.__LB_DRAG_EVENTS__ = [] })
+
+    const pointerY = await cards.nth(2).evaluate((card) => {
+      const box = card.getBoundingClientRect()
+      return box.top + box.height / 2
+    })
+    const changes = await page.evaluate((y) => {
+      const laneCards = [...document.querySelectorAll('[data-testid="board-column-backlog"] [data-testid="task-card"]')]
+      const dataTransfer = new DataTransfer()
+      laneCards[0].dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }))
+      for (const index of [1, 2, 3, 1, 2, 3]) {
+        laneCards[index].dispatchEvent(new DragEvent('dragover', { bubbles: true, clientY: y, dataTransfer }))
+      }
+      return window.__LB_DRAG_EVENTS__.filter((event) => event.handler === 'provisional-change')
+    }, pointerY)
+    expect(changes.length).toBeGreaterThan(0)
+    expect(new Set(changes.map((event) => event.candidateIndex)).size).toBe(1)
+    await cards.first().dispatchEvent('dragend')
+  })
 })
