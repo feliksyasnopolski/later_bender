@@ -21,7 +21,10 @@ class SemanticIndexer
       return
     end
     chunks = SemanticChunker.for(@record)
-    return if chunks.empty?
+    if chunks.empty?
+      delete_parent_chunks
+      return
+    end
     vectors = @embedding_client.embed(chunks, mode: :document)
     delete_parent_chunks
     body = chunks.each_with_index.map do |text, index|
@@ -52,7 +55,8 @@ class SemanticIndexer
       if @record.is_a?(StoredFile)
         representation = @record.searchable_representation
         data[:representation] = representation&.kind
-        data[:locator] = { "kind" => representation&.metadata&.fetch("coordinate", "lines"), "start" => 1, "end" => representation&.content.to_s.lines.length }
+        start_line = representation&.content.to_s[0, representation.content.to_s.index(text).to_i].to_s.lines.length + 1
+        data[:locator] = { "kind" => representation&.metadata&.fetch("coordinate", "lines"), "start" => start_line, "end" => [start_line + text.lines.length - 1, representation&.content.to_s.lines.length].min }
         data[:filename] = @record.filename
         data[:media_type] = @record.media_type
       end
