@@ -41,10 +41,24 @@ test("project responses omit persistence-only archive timestamps", async () => {
 
 test("update_task sends only supplied fields", async () => {
   const { api, calls } = apiFor([{ status: 200, body: {} }]);
-  await api.updateTask(7, { status: "done", tags: [] });
+  await api.updateTask("LB-7", { status: "done", tags: [] });
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { status: "done", tags: [] });
-  assert.equal(calls[0].url, "https://example.test/laterbender/api/tasks/7");
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/tasks/by-ref/LB-7");
   assert.equal(calls[0].init.method, "PATCH");
+});
+
+test("get_tasks preserves order and returns per-ref not_found entries", async () => {
+  const { api } = apiFor([
+    { status: 200, body: { id: 1, ref: "LB-1" } },
+    { status: 404, body: { error: "Not found" } },
+    { status: 200, body: { id: 2, ref: "LB-2" } }
+  ]);
+  const result = await api.getTasks(["LB-1", "LB-404", "LB-2"]);
+  assert.deepEqual(result, [
+    { ref: "LB-1", task: { id: 1, ref: "LB-1" } },
+    { ref: "LB-404", error: "not_found" },
+    { ref: "LB-2", task: { id: 2, ref: "LB-2" } }
+  ]);
 });
 
 test("create and update mutation handlers return only an acknowledgement", async () => {
@@ -52,9 +66,9 @@ test("create and update mutation handlers return only an acknowledgement", async
   const { api } = apiFor([
     { status: 201, body: { id: 3, name: "Created project", description: "large description", updated_at: "2026-01-01T00:00:00Z" } },
     { status: 200, body: { id: 3, name: "Updated project", description: "large description", updated_at: "2026-01-02T00:00:00Z" } },
-    { status: 201, body: { id: 8, title: "Created", context: "large context", updated_at: "2026-01-03T00:00:00Z" } },
+    { status: 201, body: { ref: "LB-8", title: "Created", context: "large context", updated_at: "2026-01-03T00:00:00Z" } },
     { status: 201, body: { id: 18, title: "Created note", body: "large body", updated_at: "2026-01-04T00:00:00Z" } },
-    { status: 200, body: { id: 7, title: "Ship", context: "large context", intended_direction: "large direction", updated_at: "2026-01-05T00:00:00Z" } },
+    { status: 200, body: { ref: "LB-7", title: "Ship", context: "large context", intended_direction: "large direction", updated_at: "2026-01-05T00:00:00Z" } },
     { status: 200, body: { id: 17, title: "Decision", body: "large body", updated_at: "2026-01-06T00:00:00Z" } }
   ]);
   registerTools(server, api);
@@ -64,13 +78,13 @@ test("create and update mutation handlers return only an acknowledgement", async
   const updatedProjectResult = await tools.update_project.handler({ slug: "created-project", description: "large description" });
   const createdTaskResult = await tools.create_task.handler({ project: "writing", title: "Created", context: "large context" });
   const createdNoteResult = await tools.create_note.handler({ title: "Created note", body: "large body" });
-  const taskResult = await tools.update_task.handler({ id: 7, context: "large context" });
+  const taskResult = await tools.update_task.handler({ ref: "LB-7", context: "large context" });
   const noteResult = await tools.update_note.handler({ id: 17, body: "large body" });
   assert.deepEqual(createdProjectResult.structuredContent, { project: { id: 3, updated_at: "2026-01-01T00:00:00Z" } });
   assert.deepEqual(updatedProjectResult.structuredContent, { project: { id: 3, updated_at: "2026-01-02T00:00:00Z" } });
-  assert.deepEqual(createdTaskResult.structuredContent, { task: { id: 8, updated_at: "2026-01-03T00:00:00Z" } });
+  assert.deepEqual(createdTaskResult.structuredContent, { task: { ref: "LB-8", updated_at: "2026-01-03T00:00:00Z" } });
   assert.deepEqual(createdNoteResult.structuredContent, { note: { id: 18, updated_at: "2026-01-04T00:00:00Z" } });
-  assert.deepEqual(taskResult.structuredContent, { task: { id: 7, updated_at: "2026-01-05T00:00:00Z" } });
+  assert.deepEqual(taskResult.structuredContent, { task: { ref: "LB-7", updated_at: "2026-01-05T00:00:00Z" } });
   assert.deepEqual(noteResult.structuredContent, { note: { id: 17, updated_at: "2026-01-06T00:00:00Z" } });
   assert.doesNotMatch(createdProjectResult.content[0].text, /large description/);
   assert.doesNotMatch(updatedProjectResult.content[0].text, /large description/);
@@ -98,15 +112,15 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_note", "create_project", "create_task", "get_note", "get_project", "get_task", "list_notes", "list_projects", "list_tasks", "search_memory", "update_note", "update_project", "update_task"]);
+  assert.deepEqual(Object.keys(tools).sort(), ["create_note", "create_project", "create_task", "get_note", "get_project", "get_task", "get_tasks", "list_notes", "list_projects", "list_tasks", "search_memory", "update_note", "update_project", "update_task"]);
   assert.ok(tools.create_task.inputSchema);
   assert.ok(tools.update_task.inputSchema);
   assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
   assert.equal(tools.update_task.annotations.destructiveHint, true);
   assert.equal(tools.search_memory.annotations.openWorldHint, false);
   assert.deepEqual(Object.keys(tools.list_tasks.inputSchema.shape), ["project", "status", "priority", "tags", "limit"]);
-  assert.equal(tools.list_tasks.outputSchema.safeParse({ tasks: [{ id: 1, project: { id: 2, slug: "writing", name: "Writing" }, title: "Ship", status: "backlog", position: 1000, priority: "normal", tags: [], related_note_ids: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
-  assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "task", id: 1, project: { id: 2, slug: "writing", name: "Writing" }, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "backlog", priority: "normal", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
+  assert.equal(tools.list_tasks.outputSchema.safeParse({ tasks: [{ ref: "WR-1", number: 1, project: { id: 2, slug: "writing", shorthand: "WR", name: "Writing" }, title: "Ship", status: "backlog", position: 1000, priority: "normal", tags: [], related_note_ids: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
+  assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "task", ref: "WR-1", number: 1, project: { id: 2, slug: "writing", shorthand: "WR", name: "Writing" }, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "backlog", priority: "normal", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], status: "done", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, false);
   assert.equal(tools.list_notes.inputSchema.safeParse({ scope: "project" }).success, false);
@@ -120,8 +134,8 @@ test("keeps note summary and full-note schemas separate", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  const project = { id: 2, slug: "writing", name: "Writing" };
-  const relatedTask = { id: 7, title: "Ship", status: "backlog", priority: "normal", project };
+  const project = { id: 2, slug: "writing", shorthand: "WR", name: "Writing" };
+  const relatedTask = { ref: "WR-7", number: 7, title: "Ship", status: "backlog", priority: "normal", project };
   const fullNote = {
     id: 17,
     project,

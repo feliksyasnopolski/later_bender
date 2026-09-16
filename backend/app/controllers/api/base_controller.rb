@@ -49,6 +49,7 @@ module Api
         id: project.id,
         name: project.name,
         slug: project.slug,
+        shorthand: project.shorthand,
         description: project.description,
         archived_at: project.archived_at,
         task_count: project.tasks.count,
@@ -60,6 +61,8 @@ module Api
     def task_json(task)
       {
         id: task.id,
+        ref: task.ref,
+        number: task.number,
         title: task.title,
         status: task.status,
         position: task.position,
@@ -72,7 +75,8 @@ module Api
         project: {
           id: task.project.id,
           name: task.project.name,
-          slug: task.project.slug
+          slug: task.project.slug,
+          shorthand: task.project.shorthand
         },
         created_at: task.created_at,
         updated_at: task.updated_at
@@ -85,7 +89,7 @@ module Api
         title: note.title,
         body: note.body,
         tags: note.tags.order(:name).pluck(:name),
-        project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug },
+        project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug, shorthand: note.project.shorthand },
         related_task_ids: note.tasks.order(:id).pluck(:id),
         related_tasks: note.tasks.order(:id).map { |task| task_summary(task) },
         created_at: note.created_at,
@@ -94,19 +98,19 @@ module Api
     end
 
     def task_summary(task)
-      { id: task.id, title: task.title, status: task.status, priority: task.priority, project: { id: task.project.id, name: task.project.name, slug: task.project.slug } }
+      { id: task.id, ref: task.ref, number: task.number, title: task.title, status: task.status, priority: task.priority, project: { id: task.project.id, name: task.project.name, slug: task.project.slug, shorthand: task.project.shorthand } }
     end
 
     def note_summary(note)
-      { id: note.id, title: note.title, project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug } }
+      { id: note.id, title: note.title, project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug, shorthand: note.project.shorthand } }
     end
 
     def task_list_json(task)
-      { id: task.id, title: task.title, status: task.status, position: task.position, priority: task.priority, tags: task.tags.order(:name).pluck(:name), related_note_ids: task.notes.order(:id).pluck(:id), project: { id: task.project.id, name: task.project.name, slug: task.project.slug }, created_at: task.created_at, updated_at: task.updated_at }
+      { id: task.id, ref: task.ref, number: task.number, title: task.title, status: task.status, position: task.position, priority: task.priority, tags: task.tags.order(:name).pluck(:name), related_note_ids: task.notes.order(:id).pluck(:id), project: { id: task.project.id, name: task.project.name, slug: task.project.slug, shorthand: task.project.shorthand }, created_at: task.created_at, updated_at: task.updated_at }
     end
 
     def note_list_json(note)
-      { id: note.id, title: note.title, excerpt: note.body.to_s.tr("\n", " ").strip[0, 240], tags: note.tags.order(:name).pluck(:name), project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug }, created_at: note.created_at, updated_at: note.updated_at }
+      { id: note.id, title: note.title, excerpt: note.body.to_s.tr("\n", " ").strip[0, 240], tags: note.tags.order(:name).pluck(:name), project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug, shorthand: note.project.shorthand }, created_at: note.created_at, updated_at: note.updated_at }
     end
 
     def task_scope(scope)

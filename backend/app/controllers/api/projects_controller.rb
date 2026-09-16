@@ -27,7 +27,7 @@ module Api
     end
 
     def project_params(values)
-      { "name" => values["name"], "slug" => values["slug"], "description" => values["description"], "archived_at" => values["archived_at"] }.compact
+      { "name" => values["name"], "slug" => values["slug"], "shorthand" => values["shorthand"], "description" => values["description"], "archived_at" => values["archived_at"] }.compact
     end
   end
 end

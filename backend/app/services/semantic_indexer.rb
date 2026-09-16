@@ -48,7 +48,7 @@ class SemanticIndexer
 
   def document(text, vector, index)
     project = @record.project
-    { kind: @record.class.name.underscore, parent_id: @record.id, chunk_index: index, chunk_text: text, vector:, user_id: @record.is_a?(Task) ? project.user_id : @record.user_id, project_id: @record.project_id, project_slug: project&.slug, project_name: project&.name, tags: @record.tags.map(&:name), title: @record.title, created_at: @record.created_at, updated_at: @record.updated_at }.tap do |data|
+    { kind: @record.class.name.underscore, parent_id: @record.id, ref: (@record.ref if @record.is_a?(Task)), number: (@record.number if @record.is_a?(Task)), chunk_index: index, chunk_text: text, vector:, user_id: @record.is_a?(Task) ? project.user_id : @record.user_id, project_id: @record.project_id, project_slug: project&.slug, project_name: project&.name, project_shorthand: project&.shorthand, tags: @record.tags.map(&:name), title: @record.title, created_at: @record.created_at, updated_at: @record.updated_at }.tap do |data|
       data[:status] = @record.status if @record.is_a?(Task)
       data[:priority] = @record.priority if @record.is_a?(Task)
     end

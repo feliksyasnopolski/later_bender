@@ -4,8 +4,8 @@ class ApiTest < ActionDispatch::IntegrationTest
   setup do
     @user = User.create!(username: "test-user", password: "password123")
     @token, @raw_token = ApiToken.issue!(user: @user, name: "test client")
-    @project = @user.projects.create!(name: "Writing", slug: "writing")
-    @other_project = @user.projects.create!(name: "Other", slug: "other")
+    @project = @user.projects.create!(name: "Writing", slug: "writing", shorthand: "WR")
+    @other_project = @user.projects.create!(name: "Other", slug: "other", shorthand: "OT")
   end
 
   test "rejects missing and revoked bearer tokens" do
@@ -116,6 +116,19 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_equal "Detailed task", json_body.first["title"]
     assert_nil json_body.first["context"]
+  end
+
+  test "gets and updates an owned task by external ref" do
+    task = @project.tasks.create!(title: "Ref task", status: "backlog")
+
+    get "/api/tasks/by-ref/WR-#{task.number}", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "WR-#{task.number}", json_body["ref"]
+    assert_equal task.number, json_body["number"]
+
+    patch "/api/tasks/by-ref/WR-#{task.number}", params: { status: "done" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "done", json_body["status"]
   end
 
   test "creates, lists, reads, and updates global and project notes" do

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_16_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_16_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -96,9 +96,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_090000) do
     t.datetime "created_at", null: false
     t.text "description"
     t.string "name", null: false
+    t.bigint "next_task_number", default: 1, null: false
+    t.string "shorthand", null: false
     t.string "slug", null: false
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
+    t.index ["shorthand"], name: "index_projects_on_shorthand", unique: true
     t.index ["user_id", "slug"], name: "index_projects_on_user_id_and_slug", unique: true
     t.index ["user_id"], name: "index_projects_on_user_id"
   end
@@ -136,12 +139,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_090000) do
     t.text "context"
     t.datetime "created_at", null: false
     t.text "intended_direction"
+    t.bigint "number", null: false
     t.bigint "position", null: false
     t.string "priority"
     t.bigint "project_id", null: false
     t.string "status", null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
+    t.index ["project_id", "number"], name: "index_tasks_on_project_id_and_number", unique: true
     t.index ["project_id"], name: "index_tasks_on_project_id"
     t.index ["status", "position", "id"], name: "index_tasks_on_status_and_position_and_id"
   end

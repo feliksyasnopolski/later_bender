@@ -10,4 +10,14 @@ class ProjectTest < ActiveSupport::TestCase
     assert_not duplicate.valid?
     assert_includes duplicate.errors[:slug], "has already been taken"
   end
+
+  test "normalizes shorthand and enforces global uniqueness" do
+    user = User.create!(username: "shorthand-user", password: "password123")
+    project = user.projects.create!(name: "Writing", shorthand: "wr")
+    assert_equal "WR", project.shorthand
+
+    duplicate = User.create!(username: "other-shorthand-user", password: "password123").projects.new(name: "Other", shorthand: "wr")
+    assert_not duplicate.valid?
+    assert_includes duplicate.errors[:shorthand], "has already been taken"
+  end
 end

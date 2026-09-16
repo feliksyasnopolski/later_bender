@@ -28,9 +28,10 @@ export class LaterBenderApi {
   createProject(payload: Record<string, unknown>) { return this.request<unknown>("/api/projects", json("POST", payload)).then(projectView); }
   updateProject(slug: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/projects/${encodeURIComponent(slug)}`, json("PATCH", payload)).then(projectView); }
   listTasks(project: string, filters: Record<string, string | undefined>) { return this.request<unknown[]>(`/api/projects/${encodeURIComponent(project)}/tasks${query({ ...filters, summary: "true" })}`); }
-  getTask(id: number) { return this.request<unknown>(`/api/tasks/${id}`); }
+  getTask(ref: string) { return this.request<unknown>(`/api/tasks/by-ref/${encodeURIComponent(ref)}`); }
   createTask(project: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/projects/${encodeURIComponent(project)}/tasks`, json("POST", payload)); }
-  updateTask(id: number, payload: Record<string, unknown>) { return this.request<unknown>(`/api/tasks/${id}`, json("PATCH", payload)); }
+  updateTask(ref: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/tasks/by-ref/${encodeURIComponent(ref)}`, json("PATCH", payload)); }
+  getTasks(refs: string[]) { return Promise.all(refs.map(async (ref) => { try { return { ref, task: await this.getTask(ref) }; } catch (error) { if (error instanceof ApiError && error.code === "not_found") return { ref, error: "not_found" }; throw error; } })); }
   listNotes(input: { scope?: string; project?: string; tags?: string[]; limit?: number }) {
     const scope = input.scope || "global";
     const path = scope === "project" && input.project ? `/api/projects/${encodeURIComponent(input.project)}/notes` : "/api/notes";

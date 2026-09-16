@@ -4,6 +4,8 @@ class SemanticChunksIndex < Chewy::Index
   root id: ->(record) { record.fetch(:id) } do
     field :kind, type: "keyword"
     field :parent_id, type: "integer"
+    field :ref, type: "keyword"
+    field :number, type: "integer"
     field :chunk_index, type: "integer"
     field :chunk_text, type: "text"
     field :vector, type: "dense_vector", dims: 256, index: true, similarity: "cosine"
@@ -11,6 +13,7 @@ class SemanticChunksIndex < Chewy::Index
     field :project_id, type: "integer"
     field :project_slug, type: "keyword"
     field :project_name, type: "text"
+    field :project_shorthand, type: "keyword"
     field :tags, type: "keyword"
     field :status, type: "keyword"
     field :priority, type: "keyword"

@@ -10,10 +10,17 @@ class Task < ApplicationRecord
   has_many :notes, through: :task_notes
 
   validates :title, presence: true
+  validates :number, presence: true, numericality: { only_integer: true }, uniqueness: { scope: :project_id }
   validates :status, presence: true, inclusion: { in: STATUSES }
   validates :priority, inclusion: { in: PRIORITIES }, allow_nil: true
   validates :position, numericality: { only_integer: true }
   before_validation :set_defaults
+  before_validation :allocate_number, on: :create
+  validate :number_is_immutable, on: :update
+
+  def ref
+    "#{project.shorthand}-#{number}"
+  end
 
   private
 
@@ -21,6 +28,19 @@ class Task < ApplicationRecord
     self.status ||= "backlog"
     self.priority ||= "normal"
     self.position ||= next_position
+  end
+
+  def allocate_number
+    return unless project&.persisted?
+
+    project.with_lock do
+      self.number ||= project.next_task_number
+      project.update_columns(next_task_number: [ project.next_task_number, number + 1 ].max, updated_at: Time.current)
+    end
+  end
+
+  def number_is_immutable
+    errors.add(:number, "cannot be changed") if number_changed?
   end
 
   def next_position

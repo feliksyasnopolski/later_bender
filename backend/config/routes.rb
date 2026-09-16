@@ -30,6 +30,8 @@ Rails.application.routes.draw do
     resources :tasks, only: :index
     get "tasks/:id", to: "tasks#show"
     patch "tasks/:id", to: "tasks#update"
+    get "tasks/by-ref/:ref", to: "tasks#show_by_ref"
+    patch "tasks/by-ref/:ref", to: "tasks#update_by_ref"
     resources :notes, only: %i[index show create update]
   end
 

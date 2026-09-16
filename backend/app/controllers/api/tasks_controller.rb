@@ -2,6 +2,7 @@ module Api
   class TasksController < BaseController
     before_action :set_project, only: %i[index create]
     before_action :set_task, only: %i[show update destroy]
+    before_action :set_task_by_ref, only: %i[show_by_ref update_by_ref]
 
     def index
       scope = Task.includes(:project, :tags).joins(:project).where(projects: { user_id: current_user.id })
@@ -11,6 +12,10 @@ module Api
     end
 
     def show
+      render json: task_json(@task)
+    end
+
+    def show_by_ref
       render json: task_json(@task)
     end
 
@@ -35,6 +40,10 @@ module Api
       render json: task_json(@task)
     end
 
+    def update_by_ref
+      update
+    end
+
     def destroy
       @task.destroy!
       head :no_content
@@ -53,6 +62,11 @@ module Api
       if path[:project_slug] && @task.project.slug != path[:project_slug]
         raise ActiveRecord::RecordNotFound
       end
+    end
+
+    def set_task_by_ref
+      shorthand, number = request.path_parameters[:ref].to_s.split("-", 2)
+      @task = current_user.projects.joins(:tasks).where(shorthand: shorthand.to_s.upcase).merge(Task.where(number: number)).first!.tasks.find_by!(number: number)
     end
 
     def task_params(values)
