@@ -17,8 +17,7 @@ class StoredFile < ApplicationRecord
   validate :number_is_immutable, on: :update
   validate :original_is_attached
   before_validation :allocate_number, on: :create
-  after_commit :generate_representations, on: :create
-  after_commit :index_search_content, on: %i[create update]
+  after_commit :prepare_and_index, on: %i[create update]
 
   def ref
     "#{project.shorthand}-F#{number}"
@@ -33,6 +32,11 @@ class StoredFile < ApplicationRecord
   end
 
   private
+
+  def prepare_and_index
+    generate_representations if saved_change_to_id?
+    index_search_content
+  end
 
   def generate_representations
     FileReader.generate(self)
