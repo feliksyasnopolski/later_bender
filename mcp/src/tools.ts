@@ -1,6 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createHash } from "node:crypto";
 import { ApiError, LaterBenderApi } from "./api.js";
 
 const statuses = z.enum(["backlog", "ready", "doing", "done", "dropped"]);
@@ -50,80 +49,6 @@ const noteSearchView = (value: any): any => ({ kind: "note", id: value.id, proje
 const taskFields = { title: z.string().optional(), status: statuses.optional(), position: z.number().int().optional(), priority: priorities.optional(), context: z.string().optional(), intended_direction: z.string().optional(), tags: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional() };
 const providedFile = z.object({ download_url: z.string().optional(), file_id: z.string().optional(), mime_type: z.string().optional(), file_name: z.string().optional() }).strict();
 
-// TEMPORARY TRANSPORT PROBE: this intentionally accepts only the JSON value
-// that the MCP client puts in a tool argument. It is not a File-domain shape.
-const probeFileInput = z.object({ file: z.object({ download_url: z.string().optional(), file_id: z.string().optional(), mime_type: z.string().optional(), file_name: z.string().optional() }).passthrough() });
-const probeFileOutput = z.object({
-  received_bytes: z.boolean(), input_kind: z.string(), filename: z.string().nullable(), file_name: z.string().nullable(), mime_type: z.string().nullable(),
-  file_id_present: z.boolean(), download_url_present: z.boolean(), byte_length: z.number().nullable(), downloaded_byte_length: z.number().nullable(),
-  sha256: z.string().nullable(), text_preview: z.string().nullable(), http_status: z.number().nullable(), response_content_type: z.string().nullable(), download_error: z.string().nullable()
-});
-export const PROBE_MAX_DOWNLOAD_BYTES = 1024 * 1024;
-const probeFile = async (value: unknown, fetcher: typeof fetch = fetch): Promise<z.infer<typeof probeFileOutput>> => {
-  const encoder = new TextEncoder();
-  const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-  const emptyDownload = { http_status: null, response_content_type: null, download_error: null };
-  const base = (filename: string | null, mimeType: string | null, inputKind: string, extra: Partial<z.infer<typeof probeFileOutput>> = {}) => ({
-    received_bytes: false, input_kind: inputKind, filename, file_name: filename, mime_type: mimeType,
-    file_id_present: false, download_url_present: false, byte_length: null, downloaded_byte_length: null, sha256: null, text_preview: null,
-    ...emptyDownload, ...extra
-  });
-  const text = (value: unknown, filename: string | null, mimeType: string | null, inputKind: string) => {
-    const bytes = encoder.encode(value as string);
-    return base(filename, mimeType, inputKind, { received_bytes: true, byte_length: bytes.byteLength, sha256: hash(bytes), text_preview: (value as string).slice(0, 120) });
-  };
-  if (typeof value === "string") return text(value, null, "text/plain", "string");
-  if (!value || typeof value !== "object") return base(null, null, typeof value);
-  const input = value as Record<string, unknown>;
-  const filename = typeof input.filename === "string" ? input.filename : null;
-  const mimeType = typeof input.mimeType === "string" ? input.mimeType : null;
-  if (typeof input.text === "string") return text(input.text, filename, mimeType, "text");
-  if (typeof input.data === "string" && input.encoding === "base64") {
-    const bytes = Buffer.from(input.data, "base64");
-    return base(filename, mimeType, "base64", { received_bytes: true, byte_length: bytes.byteLength, sha256: hash(bytes) });
-  }
-  if (typeof input.blob === "string") {
-    const bytes = Buffer.from(input.blob, "base64");
-    return base(filename, mimeType, "resource_blob", { received_bytes: true, byte_length: bytes.byteLength, sha256: hash(bytes) });
-  }
-  if (typeof input.download_url === "string" || typeof input.file_id === "string") {
-    const fileName = typeof input.file_name === "string" ? input.file_name : filename;
-    const providedMimeType = typeof input.mime_type === "string" ? input.mime_type : mimeType;
-    const fileIdPresent = typeof input.file_id === "string";
-    const downloadUrlPresent = typeof input.download_url === "string";
-    const diagnostic = base(fileName, providedMimeType, "provided_file_payload", { file_id_present: fileIdPresent, download_url_present: downloadUrlPresent });
-    if (!downloadUrlPresent) return diagnostic;
-    try {
-      const response = await fetcher(input.download_url as string, { method: "GET" });
-      const responseContentType = response.headers.get("content-type");
-      if (!response.ok) return { ...diagnostic, http_status: response.status, response_content_type: responseContentType, download_error: "download_failed" };
-      const declaredLength = response.headers.get("content-length");
-      if (declaredLength && Number(declaredLength) > PROBE_MAX_DOWNLOAD_BYTES) return { ...diagnostic, http_status: response.status, response_content_type: responseContentType, download_error: "download_too_large" };
-      if (!response.body) return { ...diagnostic, http_status: response.status, response_content_type: responseContentType, download_error: "download_body_unavailable" };
-      const reader = response.body.getReader();
-      const chunks: Uint8Array[] = [];
-      const digest = createHash("sha256");
-      let byteLength = 0;
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        byteLength += chunk.value.byteLength;
-        if (byteLength > PROBE_MAX_DOWNLOAD_BYTES) {
-          await reader.cancel();
-          return { ...diagnostic, http_status: response.status, response_content_type: responseContentType, downloaded_byte_length: byteLength, download_error: "download_too_large" };
-        }
-        chunks.push(chunk.value);
-        digest.update(chunk.value);
-      }
-      return { ...diagnostic, received_bytes: byteLength > 0, byte_length: byteLength, downloaded_byte_length: byteLength, sha256: byteLength > 0 ? digest.digest("hex") : null, http_status: response.status, response_content_type: responseContentType };
-    } catch {
-      return { ...diagnostic, download_error: "download_failed" };
-    }
-  }
-  if (typeof input.uri === "string" || typeof input.path === "string") return base(filename, mimeType, typeof input.uri === "string" ? "uri" : "path");
-  return base(filename, mimeType, "json_object");
-};
-
 const noteScopeInput = z.object({ scope: z.enum(["global", "project", "all"]).optional(), project: z.string().optional(), tags: z.array(z.string()).optional(), limit: z.number().int().positive().max(100).optional() }).superRefine((value, context) => {
   if (value.scope === "project" && !value.project) context.addIssue({ code: z.ZodIssueCode.custom, path: ["project"], message: "scope=project requires project" });
   if (value.scope !== "project" && value.project) context.addIssue({ code: z.ZodIssueCode.custom, path: ["project"], message: "project requires scope=project" });
@@ -158,5 +83,4 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
   server.registerTool("delete_file", { description: "Permanently delete a canonical File and its original bytes.", inputSchema: { ref: z.string() }, outputSchema: { file: z.object({ ref: z.string() }) }, annotations: { ...updateAnnotations, idempotentHint: false } }, ({ ref }) => safe("file", () => api.deleteFile(ref).then(fileView)));
 
   server.registerTool("search_memory", { description: "Search Later Bender durable state across Tasks and Notes. Task results use external refs and Notes retain their existing behavior.", inputSchema: searchInput, outputSchema: { results: z.array(searchResult) }, annotations: readAnnotations }, (input) => safe("results", () => api.searchMemory(input).then((response) => response.results.map((entry: any) => entry.kind === "task" ? taskSearchView(entry) : noteSearchView(entry)))));
-  server.registerTool("__TEMP_probe_file_input", { description: "TEMPORARY transport probe: report whether the JSON tool argument contains file bytes. Not a Later Bender File API.", inputSchema: probeFileInput.shape, outputSchema: { probe: probeFileOutput }, annotations: readAnnotations, _meta: { "openai/fileParams": ["file"] } }, async ({ file }) => result("probe", await probeFile(file)));
 }
