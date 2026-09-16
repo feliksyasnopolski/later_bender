@@ -183,6 +183,22 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal "not_found", json_body.dig("error", "code")
   end
 
+  test "deletes an owned file through its canonical ref and returns not found afterward" do
+    bytes = "throwaway file\n"
+    file = StoredFile.new(project: @project, filename: "throwaway.txt", media_type: "text/plain", byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes))
+    file.original.attach(io: StringIO.new(bytes), filename: "throwaway.txt", content_type: "text/plain")
+    file.save!
+
+    delete "/api/files/by-ref/#{file.ref}", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal({ "ref" => file.ref }, json_body)
+
+    get "/api/files/by-ref/#{file.ref}", headers: json_headers(@raw_token)
+    assert_response :not_found
+    assert_equal "not_found", json_body.dig("error", "code")
+    assert_raises(ActiveRecord::RecordNotFound) { StoredFile.find(file.id) }
+  end
+
   test "does not expose another user's notes or permit cross-user task relations" do
     other = User.create!(username: "other-user", password: "password123")
     other_project = other.projects.create!(name: "Private", slug: "private")

@@ -75,6 +75,31 @@ test("delete_note uses a destructive non-idempotent delete and returns its id", 
   assert.equal(tools.delete_note.outputSchema.safeParse({ note: { id: 17 } }).success, true);
 });
 
+test("manage_files deletes independently, preserves order, and reports missing refs", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api, calls } = apiFor([
+    { status: 200, body: { ref: "LB-F17" } },
+    { status: 404, body: { error: { code: "not_found", message: "File not found" } } }
+  ]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+  const result = await tools.manage_files.handler({ operations: [
+    { operation: "delete", ref: "LB-F17" },
+    { operation: "delete", ref: "LB-MISSING" }
+  ] });
+  assert.deepEqual(result.structuredContent, { results: [
+    { operation: "delete", ref: "LB-F17", status: "succeeded" },
+    { operation: "delete", ref: "LB-MISSING", status: "not_found" }
+  ] });
+  assert.deepEqual(calls.map((call) => [call.url, call.init.method]), [
+    ["https://example.test/laterbender/api/files/by-ref/LB-F17", "DELETE"],
+    ["https://example.test/laterbender/api/files/by-ref/LB-MISSING", "DELETE"]
+  ]);
+  assert.equal(tools.manage_files.annotations.destructiveHint, true);
+  assert.equal(tools.manage_files.annotations.idempotentHint, false);
+  assert.equal(tools.manage_files.outputSchema.safeParse(result.structuredContent).success, true);
+});
+
 test("create and update mutation handlers return only an acknowledgement", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api } = apiFor([
@@ -126,7 +151,7 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_file", "delete_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_files", "list_notes", "list_projects", "list_tasks", "read_archive_entry", "read_file", "read_files", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task"]);
+  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task"]);
   assert.ok(tools.create_task.inputSchema);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", representation: "text", locator: { kind: "lines", start: 138, end: 152 } }]).success, true);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", locator: { kind: "bytes", start: 1, end: 2 } }]).success, false);
@@ -139,7 +164,13 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
   assert.equal(tools.update_task.annotations.destructiveHint, true);
   assert.deepEqual(tools.create_file._meta, { "openai/fileParams": ["file"] });
-  assert.equal(tools.delete_file.annotations.destructiveHint, true);
+  assert.match(tools.manage_files.description, /File lifecycle operations/);
+  assert.equal(tools.manage_files.annotations.destructiveHint, true);
+  assert.equal(tools.manage_files.annotations.idempotentHint, false);
+  assert.equal(tools.manage_files.inputSchema.shape.operations.safeParse([{ operation: "delete", ref: "LB-F17" }]).success, true);
+  assert.equal(tools.manage_files.inputSchema.shape.operations.safeParse([{ operation: "update", ref: "LB-F17" }]).success, false);
+  assert.equal(tools.manage_files.inputSchema.shape.operations.safeParse([{ operation: "delete", ref: "" }]).success, false);
+  assert.equal(tools.delete_file, undefined);
   assert.match(tools.delete_note.description, /Permanently delete.*not archival or supersession/);
   assert.equal(tools.delete_note.inputSchema.shape.id.safeParse(17).success, true);
   assert.equal(tools.delete_note.inputSchema.shape.id.safeParse(0).success, false);
