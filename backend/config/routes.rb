@@ -38,6 +38,9 @@ Rails.application.routes.draw do
     delete "files/by-ref/:ref", to: "files#destroy"
     get "files/by-ref/:ref/read", to: "files#read"
     post "files/by-ref/:ref/read-batch", to: "files#read_batch"
+    get "files/by-ref/:ref/archive", to: "files#archive_list"
+    get "files/by-ref/:ref/archive/entry", to: "files#archive_entry"
+    post "files/by-ref/:ref/archive/extract", to: "files#archive_extract"
     resources :notes, only: %i[index show create update]
   end
 

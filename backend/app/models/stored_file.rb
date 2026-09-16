@@ -1,5 +1,7 @@
 class StoredFile < ApplicationRecord
   belongs_to :project
+  belongs_to :archive_source, class_name: "StoredFile", optional: true
+  has_many :extracted_files, class_name: "StoredFile", foreign_key: :archive_source_id, dependent: :restrict_with_exception
   has_one_attached :original
   has_many :file_tags, dependent: :destroy
   has_many :tags, through: :file_tags
@@ -16,6 +18,7 @@ class StoredFile < ApplicationRecord
   validates :sha256, presence: true, format: { with: /\A\h{64}\z/ }
   validate :number_is_immutable, on: :update
   validate :original_is_attached
+  validate :archive_provenance_is_complete
   before_validation :allocate_number, on: :create
   after_commit :prepare_and_index, on: %i[create update]
 
@@ -29,6 +32,10 @@ class StoredFile < ApplicationRecord
 
   def searchable_text
     searchable_representation&.content.to_s
+  end
+
+  def archive?
+    ArchiveReader.archive_filename?(filename, media_type)
   end
 
   private
@@ -65,5 +72,10 @@ class StoredFile < ApplicationRecord
 
   def original_is_attached
     errors.add(:original, "must be attached") unless original.attached? || new_record?
+  end
+
+  def archive_provenance_is_complete
+    return if archive_source_id.blank? == archive_entry_path.blank?
+    errors.add(:base, "archive provenance must include source and entry path")
   end
 end

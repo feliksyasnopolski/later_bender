@@ -8,7 +8,7 @@ ENV RAILS_ENV=production \
     BUNDLE_PATH=/usr/local/bundle
 
 RUN apt-get update -qq && \
-    apt-get install --no-install-recommends -y libpq5 libjemalloc2 && \
+    apt-get install --no-install-recommends -y libpq5 libjemalloc2 libarchive-tools && \
     rm -rf /var/lib/apt/lists/*
 
 FROM base AS build

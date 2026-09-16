@@ -12,6 +12,10 @@ class FileReader
     new(file).read(representation:, locator:)
   end
 
+  def self.read_bytes(bytes, filename:, media_type:, representation: "auto", locator: nil)
+    new(nil).read_bytes(bytes, filename:, media_type:, representation:, locator:)
+  end
+
   def self.valid_locator?(file, kind, locator)
     new(file).valid_locator?(kind, locator)
   rescue StandardError
@@ -24,6 +28,11 @@ class FileReader
 
   def generate
     bytes = @file.original.download
+    if @file.archive?
+      ArchiveReader.new(@file).build_manifest
+      @file.representations.find_or_initialize_by(kind: "metadata").update!(content: nil, media_type: @file.media_type, generator: "FileReader", generator_version: "1", status: "ready", metadata: { "byte_size" => @file.byte_size, "sha256" => @file.sha256 })
+      return
+    end
     kind, content, metadata, media_type = derive(bytes)
     @file.representations.find_or_initialize_by(kind: kind).update!(content:, media_type:, generator: "FileReader", generator_version: "1", status: "ready", metadata:)
     @file.representations.find_or_initialize_by(kind: "image_metadata").update!(content: nil, media_type: @file.media_type, generator: "FileReader", generator_version: "1", status: "ready", metadata: image_metadata(bytes)) if @file.media_type.start_with?("image/")
@@ -44,6 +53,16 @@ class FileReader
     { representation: rep.kind, content: content, locator: locator, metadata: rep.metadata }
   end
 
+  def read_bytes(bytes, filename:, media_type:, representation: "auto", locator: nil)
+    kind, content, metadata, derived_media_type = derive(bytes, filename:, media_type:)
+    selected_kind = representation == "auto" ? kind : representation
+    raise ActiveRecord::RecordNotFound unless representation == "auto" || selected_kind == kind
+    return { representation: kind, media_type: derived_media_type, metadata: metadata } if content.blank?
+    raise ArgumentError, "Invalid locator" if locator && !virtual_valid_locator?(content, metadata["coordinate"], locator, metadata)
+    content = slice(content, metadata["coordinate"], locator) if locator
+    { representation: kind, content: content, locator: locator, metadata: metadata }
+  end
+
   def valid_locator?(kind, locator)
     return false unless locator.is_a?(Hash) && %w[lines pages].include?(locator["kind"] || locator[:kind])
     rep = choose(kind)
@@ -56,17 +75,24 @@ class FileReader
 
   private
 
-  def derive(bytes)
-    if @file.media_type == "application/pdf"
+  def derive(bytes, filename: @file&.filename, media_type: @file&.media_type)
+    if media_type == "application/pdf"
       text, pages = extract_pdf(bytes)
       ["pdf_text", text, { "coordinate" => "pages", "pages" => pages }, "text/plain"]
-    elsif @file.media_type.start_with?("text/") || TEXT_TYPES.include?(@file.media_type) || @file.filename.match?(/\.(md|markdown|txt|csv|json|xml)\z/i)
-      [@file.media_type.include?("markdown") || @file.filename.match?(/\.(md|markdown)\z/i) ? "markdown" : "text", bytes.force_encoding("UTF-8").scrub.gsub("\r\n", "\n").gsub("\r", "\n"), { "coordinate" => "lines" }, "text/plain"]
-    elsif @file.media_type == "text/html" || @file.filename.match?(/\.html?\z/i)
+    elsif media_type.start_with?("text/") || TEXT_TYPES.include?(media_type) || filename.match?(/\.(md|markdown|txt|csv|json|xml)\z/i)
+      [media_type.include?("markdown") || filename.match?(/\.(md|markdown)\z/i) ? "markdown" : "text", bytes.force_encoding("UTF-8").scrub.gsub("\r\n", "\n").gsub("\r", "\n"), { "coordinate" => "lines" }, "text/plain"]
+    elsif media_type == "text/html" || filename.match?(/\.html?\z/i)
       ["html_text", bytes.force_encoding("UTF-8").scrub.gsub(/<script.*?<\/script>|<style.*?<\/style>/mi, "").gsub(/<[^>]+>/, " ").gsub(/\s+/, " ").strip, { "coordinate" => "lines" }, "text/plain"]
     else
-      ["metadata", nil, {}, @file.media_type]
+      ["metadata", nil, {}, media_type]
     end
+  end
+
+  def virtual_valid_locator?(content, coordinate, locator, metadata)
+    key = locator["kind"] || locator[:kind]
+    start = (locator["start"] || locator[:start]).to_i
+    finish = (locator["end"] || locator[:end]).to_i
+    start.positive? && finish >= start && finish <= (key == "pages" ? metadata["pages"].to_i : content.lines.length) && key == coordinate
   end
 
   def choose(kind)

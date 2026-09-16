@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_16_180001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_16_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -189,6 +189,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_180001) do
   end
 
   create_table "stored_files", force: :cascade do |t|
+    t.string "archive_entry_path"
+    t.bigint "archive_source_id"
     t.bigint "byte_size", null: false
     t.datetime "created_at", null: false
     t.string "filename", null: false
@@ -197,8 +199,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_180001) do
     t.bigint "project_id", null: false
     t.string "sha256", null: false
     t.datetime "updated_at", null: false
+    t.index ["archive_source_id"], name: "index_stored_files_on_archive_source_id"
     t.index ["project_id", "number"], name: "index_stored_files_on_project_id_and_number", unique: true
     t.index ["project_id"], name: "index_stored_files_on_project_id"
+    t.check_constraint "archive_source_id IS NULL AND archive_entry_path IS NULL OR archive_source_id IS NOT NULL AND archive_entry_path IS NOT NULL", name: "stored_files_archive_provenance_complete"
   end
 
   create_table "tags", force: :cascade do |t|
@@ -284,6 +288,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_180001) do
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
   add_foreign_key "projects", "users"
   add_foreign_key "stored_files", "projects"
+  add_foreign_key "stored_files", "stored_files", column: "archive_source_id"
   add_foreign_key "task_notes", "notes"
   add_foreign_key "task_notes", "tasks"
   add_foreign_key "task_tags", "tags"

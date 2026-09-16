@@ -1,5 +1,7 @@
 require "test_helper"
 require "stringio"
+require "open3"
+require "tempfile"
 
 class StoredFileTest < ActiveSupport::TestCase
   test "allocates project-local refs and preserves stored bytes and sha256" do
@@ -61,6 +63,39 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_equal "pdf_text", read[:representation]
     assert_includes read[:content], "PDF known page"
     assert_equal 1, read[:metadata]["pages"]
+  end
+
+  test "lists, reads, and explicitly extracts archive members without exploding the parent" do
+    user = User.create!(username: "archive-user", password: "password123")
+    project = user.projects.create!(name: "Archives", slug: "archive-files", shorthand: "AF")
+    source = Dir.mktmpdir("later-bender-archive-test")
+    FileUtils.mkdir_p(File.join(source, "docs"))
+    File.binwrite(File.join(source, "docs", "readme.md"), "alpha\nbeta\ngamma\n")
+    File.binwrite(File.join(source, "image.bin"), "\x00\x01binary".b)
+    archive_path = Tempfile.new(["archive", ".zip"])
+    archive_filename = archive_path.path
+    archive_path.close
+    archive_path.unlink
+    _output, error, status = Open3.capture3("zip", "-q", "-r", archive_filename, ".", chdir: source)
+    raise error unless status.success?
+    bytes = File.binread(archive_filename)
+    archive = create_file(project, "bundle.zip", bytes)
+    archive.update!(media_type: "application/zip")
+    FileReader.generate(archive)
+
+    assert_equal %w[docs image.bin], ArchiveReader.list(archive, depth: 0).map { |entry| entry["path"] }
+    assert_equal ["docs/readme.md"], ArchiveReader.list(archive, path: "docs", depth: 0).map { |entry| entry["path"] }
+    read = ArchiveReader.read_entry(archive, "docs/readme.md", locator: { "kind" => "lines", "start" => 2, "end" => 2 })
+    assert_equal "[L2] beta\n", read[:content]
+    assert_raises(ArchiveReader::UnsafePath) { ArchiveReader.read_entry(archive, "../secret") }
+
+    extracted = ArchiveExtractor.call(source: archive, path: "docs/readme.md")
+    assert_equal "alpha\nbeta\ngamma\n", extracted.original.download
+    assert_equal Digest::SHA256.hexdigest(extracted.original.download), extracted.sha256
+    assert_equal archive.ref, extracted.archive_source.ref
+    assert_equal "docs/readme.md", extracted.archive_entry_path
+    assert_equal 1, project.stored_files.where(archive_source: archive).count
+    assert_equal archive.ref, StoredFile.find(archive.id).ref
   end
 
   private

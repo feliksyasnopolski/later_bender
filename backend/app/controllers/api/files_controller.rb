@@ -1,7 +1,7 @@
 module Api
   class FilesController < BaseController
     before_action :set_project, only: %i[index create]
-    before_action :set_file_by_ref, only: %i[show update destroy read read_batch]
+    before_action :set_file_by_ref, only: %i[show update destroy read read_batch archive_list archive_entry archive_extract]
 
     def index
       scope = @project.stored_files.includes(:project, :tags).order(created_at: :desc)
@@ -56,6 +56,31 @@ module Api
       render json: { error: { code: "not_found", message: "Representation not found" } }, status: :not_found
     rescue ArgumentError
       render json: { error: { code: "validation_failed", message: "Invalid locator" } }, status: :unprocessable_content
+    end
+
+    def archive_list
+      render json: { entries: ArchiveReader.list(@file, path: params[:path], depth: params[:depth], limit: params[:limit]) }
+    rescue ArgumentError, ArchiveReader::Error, ArchiveReader::UnsafePath, ArchiveReader::LimitExceeded => error
+      render json: { error: { code: "validation_failed", message: error.message } }, status: :unprocessable_content
+    end
+
+    def archive_entry
+      locator = params[:locator]
+      locator = JSON.parse(locator) if locator.is_a?(String)
+      render json: { read: ArchiveReader.read_entry(@file, params[:path], representation: params[:representation].presence || "auto", locator:) }
+    rescue JSON::ParserError, ArgumentError, ArchiveReader::Error, ArchiveReader::UnsafePath, ArchiveReader::LimitExceeded => error
+      render json: { error: { code: "validation_failed", message: error.message } }, status: :unprocessable_content
+    end
+
+    def archive_extract
+      payload = request_payload
+      project = payload["project"].present? ? current_user.projects.find_by!(slug: payload["project"]) : @file.project
+      file = ArchiveExtractor.call(source: @file, path: payload.fetch("path"), project:, filename: payload["filename"], tags: payload["tags"], related_task_refs: payload["related_task_refs"], related_note_ids: payload["related_note_ids"])
+      render json: { ref: file.ref, updated_at: file.updated_at }, status: :created
+    rescue KeyError
+      render json: { error: { code: "validation_failed", message: "path is required" } }, status: :unprocessable_content
+    rescue ArgumentError, ArchiveReader::Error, ArchiveReader::UnsafePath, ArchiveReader::LimitExceeded => error
+      render json: { error: { code: "validation_failed", message: error.message } }, status: :unprocessable_content
     end
 
     private
