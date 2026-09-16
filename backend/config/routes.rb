@@ -26,12 +26,16 @@ Rails.application.routes.draw do
     resources :projects, param: :slug, only: %i[index show create update] do
       resources :tasks, only: %i[index show create update destroy]
       resources :notes, only: %i[index create]
+      resources :files, only: %i[index create]
     end
     resources :tasks, only: :index
     get "tasks/:id", to: "tasks#show"
     patch "tasks/:id", to: "tasks#update"
     get "tasks/by-ref/:ref", to: "tasks#show_by_ref"
     patch "tasks/by-ref/:ref", to: "tasks#update_by_ref"
+    get "files/by-ref/:ref", to: "files#show"
+    patch "files/by-ref/:ref", to: "files#update"
+    delete "files/by-ref/:ref", to: "files#destroy"
     resources :notes, only: %i[index show create update]
   end
 

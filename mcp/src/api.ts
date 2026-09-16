@@ -45,6 +45,12 @@ export class LaterBenderApi {
     return this.request<unknown>(path, json("POST", body));
   }
   updateNote(id: number, payload: Record<string, unknown>) { return this.request<unknown>(`/api/notes/${id}`, json("PATCH", payload)); }
+  listFiles(project: string, filters: Record<string, string | undefined>) { return this.request<unknown[]>(`/api/projects/${encodeURIComponent(project)}/files${query(filters)}`); }
+  getFile(ref: string) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}`); }
+  getFiles(refs: string[]) { return Promise.all(refs.map(async (ref) => { try { return { ref, file: await this.getFile(ref) }; } catch (error) { if (error instanceof ApiError && error.code === "not_found") return { ref, error: "not_found" }; throw error; } })); }
+  createFile(project: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/projects/${encodeURIComponent(project)}/files`, json("POST", payload)); }
+  updateFile(ref: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}`, json("PATCH", payload)); }
+  deleteFile(ref: string) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}`, { method: "DELETE" }); }
   searchMemory(input: Record<string, unknown>) { return this.request<{ results: unknown[] }>(`/api/search${query({ q: String(input.query), scope: String(input.scope || "all"), project: input.project as string | undefined, kinds: (input.kinds as string[] | undefined)?.join(","), tags: (input.tags as string[] | undefined)?.join(","), task_statuses: (input.task_statuses as string[] | undefined)?.join(","), task_priorities: (input.task_priorities as string[] | undefined)?.join(","), limit: String(input.limit || 8) })}`); }
 }
 

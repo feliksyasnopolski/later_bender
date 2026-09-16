@@ -4,6 +4,8 @@ class Tag < ApplicationRecord
   has_many :tasks, through: :task_tags
   has_many :note_tags, dependent: :destroy
   has_many :notes, through: :note_tags
+  has_many :file_tags, dependent: :destroy
+  has_many :stored_files, through: :file_tags
   before_validation :normalize_attributes
   validates :name, presence: true, uniqueness: true
   validates :slug, presence: true, uniqueness: true

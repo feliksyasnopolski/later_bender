@@ -72,6 +72,7 @@ module Api
         tags: task.tags.order(:name).pluck(:name),
         related_note_ids: task.notes.order(:id).pluck(:id),
         related_notes: task.notes.order(:id).map { |note| note_summary(note) },
+        related_files: task.stored_files.order(:id).map { |file| file_summary(file) },
         project: {
           id: task.project.id,
           name: task.project.name,
@@ -92,6 +93,7 @@ module Api
         project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug, shorthand: note.project.shorthand },
         related_task_ids: note.tasks.order(:id).pluck(:id),
         related_tasks: note.tasks.order(:id).map { |task| task_summary(task) },
+        related_files: note.stored_files.order(:id).map { |file| file_summary(file) },
         created_at: note.created_at,
         updated_at: note.updated_at
       }
@@ -103,6 +105,18 @@ module Api
 
     def note_summary(note)
       { id: note.id, title: note.title, project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug, shorthand: note.project.shorthand } }
+    end
+
+    def file_summary(file)
+      { ref: file.ref, filename: file.filename, media_type: file.media_type }
+    end
+
+    def file_list_json(file)
+      { ref: file.ref, number: file.number, filename: file.filename, media_type: file.media_type, byte_size: file.byte_size, sha256: file.sha256, tags: file.tags.order(:name).pluck(:name), project: { slug: file.project.slug, shorthand: file.project.shorthand, name: file.project.name }, created_at: file.created_at, updated_at: file.updated_at }
+    end
+
+    def file_json(file)
+      file_list_json(file).merge(related_task_refs: file.tasks.order(:id).map(&:ref), related_note_ids: file.notes.order(:id).pluck(:id))
     end
 
     def task_list_json(task)

@@ -61,6 +61,10 @@ Notes are durable context. A note always belongs to the authenticated user and m
 
 Tasks accept `related_note_ids`, an array of globally unique note IDs. On create those notes are associated; on update the field replaces the complete relation set, and an empty array clears it. Omitting the field preserves existing relations. Task responses expose the current IDs in `related_note_ids`. Notes and tasks must belong to the same user.
 
+## Files
+
+Files are immutable, project-scoped source artifacts stored through Active Storage. Their public identity is a project-local ref such as `LB-F1`; Rails IDs, storage keys, and blob details are never part of the API contract. Create a File through the project files endpoint with a provider payload containing `download_url`, optional `file_name`, and optional `mime_type`; the server downloads it, stores SHA-256 and byte size, and accepts optional `filename`, `tags`, `related_task_refs`, and `related_note_ids`. File metadata and relationships can be updated, but bytes cannot be replaced. `GET /api/files/by-ref/:ref` returns metadata and relationships without content; `DELETE` removes the canonical record and attachment.
+
 ## Tags
 
 Create or update a task with an explicit `tags` array. Tags are normalized to lowercase names and created on use. On an update, `tags` replaces all current associations; omit `tags` to leave associations unchanged; use `"tags": []` to remove them. The operation is transactional.

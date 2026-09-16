@@ -10,9 +10,32 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_16_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_16_170002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
+
+  create_table "active_storage_attachments", force: :cascade do |t|
+    t.bigint "blob_id", null: false
+    t.datetime "created_at", null: false
+    t.string "name", null: false
+    t.bigint "record_id", null: false
+    t.string "record_type", null: false
+    t.index ["blob_id"], name: "index_active_storage_attachments_on_blob_id"
+    t.index ["record_type", "record_id", "name", "blob_id"], name: "index_active_storage_attachments_uniqueness", unique: true
+    t.index ["record_type", "record_id", "name"], name: "index_active_storage_attachments_lookup"
+  end
+
+  create_table "active_storage_blobs", force: :cascade do |t|
+    t.bigint "byte_size", null: false
+    t.string "checksum"
+    t.string "content_type"
+    t.datetime "created_at", null: false
+    t.string "filename", null: false
+    t.string "key", null: false
+    t.text "metadata"
+    t.string "service_name", null: false
+    t.index ["key"], name: "index_active_storage_blobs_on_key", unique: true
+  end
 
   create_table "api_tokens", force: :cascade do |t|
     t.datetime "created_at", null: false
@@ -24,6 +47,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_120000) do
     t.bigint "user_id", null: false
     t.index ["token_digest"], name: "index_api_tokens_on_token_digest", unique: true
     t.index ["user_id"], name: "index_api_tokens_on_user_id"
+  end
+
+  create_table "file_notes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "note_id", null: false
+    t.bigint "stored_file_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["note_id"], name: "index_file_notes_on_note_id"
+    t.index ["stored_file_id", "note_id"], name: "index_file_notes_on_stored_file_id_and_note_id", unique: true
+    t.index ["stored_file_id"], name: "index_file_notes_on_stored_file_id"
+  end
+
+  create_table "file_tags", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "stored_file_id", null: false
+    t.bigint "tag_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["stored_file_id", "tag_id"], name: "index_file_tags_on_stored_file_id_and_tag_id", unique: true
+    t.index ["stored_file_id"], name: "index_file_tags_on_stored_file_id"
+    t.index ["tag_id"], name: "index_file_tags_on_tag_id"
+  end
+
+  create_table "file_tasks", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "stored_file_id", null: false
+    t.bigint "task_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["stored_file_id", "task_id"], name: "index_file_tasks_on_stored_file_id_and_task_id", unique: true
+    t.index ["stored_file_id"], name: "index_file_tasks_on_stored_file_id"
+    t.index ["task_id"], name: "index_file_tasks_on_task_id"
   end
 
   create_table "note_tags", force: :cascade do |t|
@@ -96,6 +149,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_120000) do
     t.datetime "created_at", null: false
     t.text "description"
     t.string "name", null: false
+    t.bigint "next_file_number", default: 1, null: false
     t.bigint "next_task_number", default: 1, null: false
     t.string "shorthand", null: false
     t.string "slug", null: false
@@ -104,6 +158,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_120000) do
     t.index ["shorthand"], name: "index_projects_on_shorthand", unique: true
     t.index ["user_id", "slug"], name: "index_projects_on_user_id_and_slug", unique: true
     t.index ["user_id"], name: "index_projects_on_user_id"
+  end
+
+  create_table "stored_files", force: :cascade do |t|
+    t.bigint "byte_size", null: false
+    t.datetime "created_at", null: false
+    t.string "filename", null: false
+    t.string "media_type", null: false
+    t.bigint "number", null: false
+    t.bigint "project_id", null: false
+    t.string "sha256", null: false
+    t.datetime "updated_at", null: false
+    t.index ["project_id", "number"], name: "index_stored_files_on_project_id_and_number", unique: true
+    t.index ["project_id"], name: "index_stored_files_on_project_id"
   end
 
   create_table "tags", force: :cascade do |t|
@@ -171,7 +238,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_120000) do
     t.index "lower((username)::text)", name: "index_users_on_lower_username", unique: true
   end
 
+  add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "api_tokens", "users"
+  add_foreign_key "file_notes", "notes"
+  add_foreign_key "file_notes", "stored_files"
+  add_foreign_key "file_tags", "stored_files"
+  add_foreign_key "file_tags", "tags"
+  add_foreign_key "file_tasks", "stored_files"
+  add_foreign_key "file_tasks", "tasks"
   add_foreign_key "note_tags", "notes"
   add_foreign_key "note_tags", "tags"
   add_foreign_key "notes", "projects"
@@ -179,6 +253,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_120000) do
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
   add_foreign_key "projects", "users"
+  add_foreign_key "stored_files", "projects"
   add_foreign_key "task_notes", "notes"
   add_foreign_key "task_notes", "tasks"
   add_foreign_key "task_tags", "tags"
