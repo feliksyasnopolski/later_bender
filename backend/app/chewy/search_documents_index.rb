@@ -6,7 +6,7 @@ class SearchDocumentsIndex < Chewy::Index
   field :ref, type: "keyword", value: ->(record) { record.ref if record.is_a?(Task) || record.is_a?(StoredFile) }
   field :number, type: "integer", value: ->(record) { record.number if record.is_a?(Task) || record.is_a?(StoredFile) }
   field :kind, type: "keyword", value: ->(record) { record.is_a?(StoredFile) ? "file" : record.class.name.underscore }
-  field :user_id, type: "integer", value: ->(record) { record.project.user_id }
+  field :user_id, type: "integer", value: ->(record) { record.project&.user_id || record.user_id }
   field :project_id, type: "integer", value: ->(record) { record.project_id }
   field :project_slug, type: "keyword", value: ->(record) { record.project&.slug }
   field :project_name, type: "text", value: ->(record) { record.project&.name }
