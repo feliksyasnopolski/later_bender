@@ -26,6 +26,7 @@ module Api
         task.save!
         TagReconciler.call(task, payload["tags"]) if payload.key?("tags")
         replace_related_notes(task, payload["related_note_ids"]) if payload.key?("related_note_ids")
+        replace_citations(task, payload["citations"]) if payload.key?("citations")
       end
       render json: task_json(task), status: :created
     end
@@ -36,6 +37,7 @@ module Api
         @task.update!(task_params(payload))
         TagReconciler.call(@task, payload["tags"]) if payload.key?("tags")
         replace_related_notes(@task, payload["related_note_ids"]) if payload.key?("related_note_ids")
+        replace_citations(@task, payload["citations"]) if payload.key?("citations")
       end
       render json: task_json(@task)
     end

@@ -10,6 +10,7 @@ class Task < ApplicationRecord
   has_many :notes, through: :task_notes
   has_many :file_tasks, dependent: :destroy
   has_many :stored_files, through: :file_tasks
+  has_many :citations, as: :citing, dependent: :destroy
 
   validates :title, presence: true
   validates :number, presence: true, numericality: { only_integer: true }, uniqueness: { scope: :project_id }

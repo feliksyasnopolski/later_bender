@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_16_170002) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_16_180001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -49,6 +49,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_170002) do
     t.index ["user_id"], name: "index_api_tokens_on_user_id"
   end
 
+  create_table "citations", force: :cascade do |t|
+    t.bigint "citing_id", null: false
+    t.string "citing_type", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "locator", default: {}, null: false
+    t.string "representation_kind", null: false
+    t.bigint "stored_file_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["citing_type", "citing_id"], name: "index_citations_on_citing"
+    t.index ["citing_type", "citing_id"], name: "index_citations_on_citing_type_and_citing_id"
+    t.index ["stored_file_id"], name: "index_citations_on_stored_file_id"
+  end
+
   create_table "file_notes", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.bigint "note_id", null: false
@@ -57,6 +70,21 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_170002) do
     t.index ["note_id"], name: "index_file_notes_on_note_id"
     t.index ["stored_file_id", "note_id"], name: "index_file_notes_on_stored_file_id_and_note_id", unique: true
     t.index ["stored_file_id"], name: "index_file_notes_on_stored_file_id"
+  end
+
+  create_table "file_representations", force: :cascade do |t|
+    t.text "content"
+    t.datetime "created_at", null: false
+    t.string "generator", null: false
+    t.string "generator_version", null: false
+    t.string "kind", null: false
+    t.string "media_type"
+    t.jsonb "metadata", default: {}, null: false
+    t.string "status", default: "ready", null: false
+    t.bigint "stored_file_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["stored_file_id", "kind"], name: "index_file_representations_on_stored_file_id_and_kind", unique: true
+    t.index ["stored_file_id"], name: "index_file_representations_on_stored_file_id"
   end
 
   create_table "file_tags", force: :cascade do |t|
@@ -240,8 +268,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_16_170002) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "api_tokens", "users"
+  add_foreign_key "citations", "stored_files"
   add_foreign_key "file_notes", "notes"
   add_foreign_key "file_notes", "stored_files"
+  add_foreign_key "file_representations", "stored_files"
   add_foreign_key "file_tags", "stored_files"
   add_foreign_key "file_tags", "tags"
   add_foreign_key "file_tasks", "stored_files"

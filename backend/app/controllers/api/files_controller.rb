@@ -1,7 +1,7 @@
 module Api
   class FilesController < BaseController
     before_action :set_project, only: %i[index create]
-    before_action :set_file_by_ref, only: %i[show update destroy]
+    before_action :set_file_by_ref, only: %i[show update destroy read read_batch]
 
     def index
       scope = @project.stored_files.includes(:project, :tags).order(created_at: :desc)
@@ -39,6 +39,23 @@ module Api
       ref = @file.ref
       @file.destroy!
       render json: { ref: ref }
+    end
+
+    def read
+      locator = params[:locator]
+      locator = JSON.parse(locator) if locator.is_a?(String)
+      render json: FileReader.read(@file, representation: params[:representation].presence || "auto", locator: locator)
+    rescue JSON::ParserError, ArgumentError
+      render json: { error: { code: "validation_failed", message: "Invalid locator" } }, status: :unprocessable_content
+    end
+
+    def read_batch
+      reads = Array(request_payload["reads"])
+      render json: { results: reads.map { |read| { ref: read["ref"], read: FileReader.read(@file, representation: read["representation"] || "auto", locator: read["locator"]) } } }
+    rescue ActiveRecord::RecordNotFound
+      render json: { error: { code: "not_found", message: "Representation not found" } }, status: :not_found
+    rescue ArgumentError
+      render json: { error: { code: "validation_failed", message: "Invalid locator" } }, status: :unprocessable_content
     end
 
     private

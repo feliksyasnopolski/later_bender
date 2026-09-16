@@ -36,6 +36,8 @@ Rails.application.routes.draw do
     get "files/by-ref/:ref", to: "files#show"
     patch "files/by-ref/:ref", to: "files#update"
     delete "files/by-ref/:ref", to: "files#destroy"
+    get "files/by-ref/:ref/read", to: "files#read"
+    post "files/by-ref/:ref/read-batch", to: "files#read_batch"
     resources :notes, only: %i[index show create update]
   end
 

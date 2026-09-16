@@ -112,7 +112,7 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_file", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_files", "list_notes", "list_projects", "list_tasks", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task"]);
+  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_file", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_files", "list_notes", "list_projects", "list_tasks", "read_file", "read_files", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task"]);
   assert.ok(tools.create_task.inputSchema);
   assert.ok(tools.update_task.inputSchema);
   assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
@@ -147,6 +147,7 @@ test("keeps note summary and full-note schemas separate", () => {
     related_task_ids: [7],
     related_tasks: [relatedTask],
     related_files: [],
+    citations: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z"
   };

@@ -1,7 +1,7 @@
 class SearchService
   DEFAULT_LIMIT = 20
   MAX_LIMIT = 100
-  KINDS = %w[task note].freeze
+  KINDS = %w[task note file].freeze
   RETRIEVAL_MULTIPLIER = 5
 
   def initialize(user:, q: nil, project: nil, scope: nil, kinds: nil, tags: nil, statuses: nil, priorities: nil, limit: nil, mode: :hybrid, embedding_client: EmbeddingClient.new, semantic_client: nil)
@@ -77,16 +77,20 @@ class SearchService
   end
 
   def result_for(hit, fallback_snippet: nil)
-    { id: hit.id.to_i, ref: hit.ref, number: hit.number, kind: hit.kind, title: hit.title, project: hit.project_id && { id: hit.project_id.to_i, slug: hit.project_slug, name: hit.project_name, shorthand: hit.project_shorthand }, tags: hit.tags || [], status: hit.status, priority: hit.priority, snippet: snippet_for(hit, fallback_snippet), highlights: highlights_for(hit), created_at: hit.created_at, updated_at: hit.updated_at }.tap do |result|
+    { id: hit.id.to_i, ref: hit.ref, number: hit.number, kind: hit.kind, title: hit.title, filename: (hit.filename if hit.kind == "file"), media_type: (hit.media_type if hit.kind == "file"), project: hit.project_id && { id: hit.project_id.to_i, slug: hit.project_slug, name: hit.project_name, shorthand: hit.project_shorthand }, tags: hit.tags || [], status: hit.status, priority: hit.priority, snippet: snippet_for(hit, fallback_snippet), highlights: highlights_for(hit), created_at: hit.created_at, updated_at: hit.updated_at }.tap do |result|
       result.delete(:status) if hit.kind != "task"
       result.delete(:priority) if hit.kind != "task"
+      result.delete(:filename) if hit.kind != "file"
+      result.delete(:media_type) if hit.kind != "file"
+      result[:match] = { representation: hit.representation, locator: hit.locator } if hit.kind == "file" && hit.respond_to?(:representation) && hit.representation.present?
     end
   end
 
   def semantic_result_for(hit)
-    result = { id: hit.fetch("parent_id").to_i, ref: hit["ref"], number: hit["number"], kind: hit.fetch("kind"), title: hit.fetch("title"), project: hit["project_id"] && { id: hit.fetch("project_id").to_i, slug: hit["project_slug"], name: hit["project_name"], shorthand: hit["project_shorthand"] }, tags: hit["tags"] || [], snippet: hit.fetch("chunk_text").to_s.slice(0, 280), highlights: [], created_at: hit.fetch("created_at"), updated_at: hit.fetch("updated_at") }
+    result = { id: hit.fetch("parent_id").to_i, ref: hit["ref"], number: hit["number"], kind: hit.fetch("kind"), title: hit.fetch("title"), filename: hit["filename"], media_type: hit["media_type"], project: hit["project_id"] && { id: hit.fetch("project_id").to_i, slug: hit["project_slug"], name: hit["project_name"], shorthand: hit["project_shorthand"] }, tags: hit["tags"] || [], snippet: hit.fetch("chunk_text").to_s.slice(0, 280), highlights: [], created_at: hit.fetch("created_at"), updated_at: hit.fetch("updated_at") }
     result[:status] = hit["status"] if result[:kind] == "task"
     result[:priority] = hit["priority"] if result[:kind] == "task"
+    result[:match] = { representation: hit["representation"], locator: hit["locator"] } if result[:kind] == "file"
     result
   end
 

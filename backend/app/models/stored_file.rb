@@ -7,6 +7,8 @@ class StoredFile < ApplicationRecord
   has_many :tasks, through: :file_tasks
   has_many :file_notes, dependent: :destroy
   has_many :notes, through: :file_notes
+  has_many :representations, class_name: "FileRepresentation", dependent: :destroy
+  has_many :citations, dependent: :restrict_with_exception
 
   validates :number, presence: true, numericality: { only_integer: true }, uniqueness: { scope: :project_id }
   validates :filename, presence: true
@@ -15,12 +17,35 @@ class StoredFile < ApplicationRecord
   validate :number_is_immutable, on: :update
   validate :original_is_attached
   before_validation :allocate_number, on: :create
+  after_commit :generate_representations, on: :create
+  after_commit :index_search_content, on: %i[create update]
 
   def ref
     "#{project.shorthand}-F#{number}"
   end
 
+  def searchable_representation
+    representations.where(kind: %w[text markdown html_text pdf_text], status: "ready").order(:id).first
+  end
+
+  def searchable_text
+    searchable_representation&.content.to_s
+  end
+
   private
+
+  def generate_representations
+    FileReader.generate(self)
+  rescue StandardError => e
+    Rails.logger.warn("file representation deferred for #{ref}: #{e.class}: #{e.message}")
+  end
+
+  def index_search_content
+    SearchDocumentsIndex.import([self])
+    SemanticIndexer.call(self)
+  rescue StandardError => e
+    Rails.logger.warn("file indexing deferred for #{ref}: #{e.class}: #{e.message}")
+  end
 
   def allocate_number
     return unless project&.persisted?

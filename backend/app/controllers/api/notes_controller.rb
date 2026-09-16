@@ -30,6 +30,7 @@ module Api
       Note.transaction do
         note.save!
         TagReconciler.call(note, payload["tags"]) if payload.key?("tags")
+        replace_citations(note, payload["citations"]) if payload.key?("citations")
       end
       render json: note_json(note), status: :created
     end
@@ -41,6 +42,7 @@ module Api
         @note.project = note_project(payload) if payload.key?("project")
         @note.save!
         TagReconciler.call(@note, payload["tags"]) if payload.key?("tags")
+        replace_citations(@note, payload["citations"]) if payload.key?("citations")
       end
       render json: note_json(@note)
     end

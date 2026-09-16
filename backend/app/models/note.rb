@@ -9,6 +9,7 @@ class Note < ApplicationRecord
   has_many :tasks, through: :task_notes
   has_many :file_notes, dependent: :destroy
   has_many :stored_files, through: :file_notes
+  has_many :citations, as: :citing, dependent: :destroy
 
   validates :title, presence: true
   validates :body, presence: true

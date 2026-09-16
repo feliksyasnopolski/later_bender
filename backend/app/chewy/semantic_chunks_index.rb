@@ -20,5 +20,9 @@ class SemanticChunksIndex < Chewy::Index
     field :title, type: "text"
     field :created_at, type: "date"
     field :updated_at, type: "date"
+    field :representation, type: "keyword"
+    field :locator, type: "object", enabled: false
+    field :filename, type: "keyword"
+    field :media_type, type: "keyword"
   end
 end

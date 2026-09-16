@@ -41,14 +41,21 @@ class SemanticIndexer
   end
 
   def delete_parent_chunks
-    @client.delete_by_query(index: INDEX, refresh: true, body: { query: { bool: { filter: [ { term: { kind: @record.class.name.underscore } }, { term: { parent_id: @record.id } } ] } } })
+    @client.delete_by_query(index: INDEX, refresh: true, body: { query: { bool: { filter: [ { term: { kind: (@record.is_a?(StoredFile) ? "file" : @record.class.name.underscore) } }, { term: { parent_id: @record.id } } ] } } })
   rescue Elasticsearch::API::NotFound
     nil
   end
 
   def document(text, vector, index)
     project = @record.project
-    { kind: @record.class.name.underscore, parent_id: @record.id, ref: (@record.ref if @record.is_a?(Task)), number: (@record.number if @record.is_a?(Task)), chunk_index: index, chunk_text: text, vector:, user_id: @record.is_a?(Task) ? project.user_id : @record.user_id, project_id: @record.project_id, project_slug: project&.slug, project_name: project&.name, project_shorthand: project&.shorthand, tags: @record.tags.map(&:name), title: @record.title, created_at: @record.created_at, updated_at: @record.updated_at }.tap do |data|
+      { kind: @record.is_a?(StoredFile) ? "file" : @record.class.name.underscore, parent_id: @record.id, ref: (@record.ref if @record.is_a?(Task) || @record.is_a?(StoredFile)), number: (@record.number if @record.is_a?(Task) || @record.is_a?(StoredFile)), chunk_index: index, chunk_text: text, vector:, user_id: (project&.user_id || @record.user_id), project_id: @record.project_id, project_slug: project&.slug, project_name: project&.name, project_shorthand: project&.shorthand, tags: @record.tags.map(&:name), title: @record.is_a?(StoredFile) ? @record.filename : @record.title, created_at: @record.created_at, updated_at: @record.updated_at }.tap do |data|
+      if @record.is_a?(StoredFile)
+        representation = @record.searchable_representation
+        data[:representation] = representation&.kind
+        data[:locator] = { "kind" => representation&.metadata&.fetch("coordinate", "lines"), "start" => 1, "end" => representation&.content.to_s.lines.length }
+        data[:filename] = @record.filename
+        data[:media_type] = @record.media_type
+      end
       data[:status] = @record.status if @record.is_a?(Task)
       data[:priority] = @record.priority if @record.is_a?(Task)
     end

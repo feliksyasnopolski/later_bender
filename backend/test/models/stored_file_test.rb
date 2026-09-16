@@ -37,6 +37,18 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_equal Digest::SHA256.hexdigest(bytes), file.sha256
   end
 
+  test "derives bounded readable text with line coordinates" do
+    user = User.create!(username: "reader-user", password: "password123")
+    project = user.projects.create!(name: "Reader", slug: "reader-files", shorthand: "RF")
+    file = create_file(project, "source.md", "alpha\r\nbeta\r\ngamma")
+    FileReader.generate(file)
+
+    read = FileReader.read(file, locator: { "kind" => "lines", "start" => 2, "end" => 3 })
+    assert_equal "markdown", read[:representation]
+    assert_equal "[L2] beta\n[L3] gamma", read[:content]
+    assert_not FileReader.valid_locator?(file, "markdown", { "kind" => "lines", "start" => 1, "end" => 4 })
+  end
+
   private
 
   def create_file(project, filename, bytes)

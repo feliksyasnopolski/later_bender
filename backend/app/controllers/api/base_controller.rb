@@ -73,6 +73,7 @@ module Api
         related_note_ids: task.notes.order(:id).pluck(:id),
         related_notes: task.notes.order(:id).map { |note| note_summary(note) },
         related_files: task.stored_files.order(:id).map { |file| file_summary(file) },
+        citations: task.citations.order(:id).map { |citation| citation_json(citation) },
         project: {
           id: task.project.id,
           name: task.project.name,
@@ -94,6 +95,7 @@ module Api
         related_task_ids: note.tasks.order(:id).pluck(:id),
         related_tasks: note.tasks.order(:id).map { |task| task_summary(task) },
         related_files: note.stored_files.order(:id).map { |file| file_summary(file) },
+        citations: note.citations.order(:id).map { |citation| citation_json(citation) },
         created_at: note.created_at,
         updated_at: note.updated_at
       }
@@ -116,7 +118,22 @@ module Api
     end
 
     def file_json(file)
-      file_list_json(file).merge(related_task_refs: file.tasks.order(:id).map(&:ref), related_note_ids: file.notes.order(:id).pluck(:id))
+      file_list_json(file).merge(related_task_refs: file.tasks.order(:id).map(&:ref), related_note_ids: file.notes.order(:id).pluck(:id), representations: file.representations.where(status: "ready").order(:kind).map { |representation| { kind: representation.kind, media_type: representation.media_type, coordinate: representation.metadata["coordinate"] } })
+    end
+
+    def citation_json(citation)
+      { file: citation.stored_file.ref, representation: citation.representation_kind, locator: citation.locator }
+    end
+
+    def replace_citations(record, values)
+      citations = Array(values).map do |value|
+        value = value.to_h.stringify_keys
+        shorthand, number = value.fetch("file").to_s.split("-F", 2)
+        file = current_user.projects.where(shorthand: shorthand.to_s.upcase).joins(:stored_files).merge(StoredFile.where(number: number)).first!.stored_files.find_by!(number: number)
+        record.citations.build(stored_file: file, representation_kind: value.fetch("representation", "auto") == "auto" ? file.searchable_representation&.kind : value.fetch("representation"), locator: value.fetch("locator"))
+      end
+      record.citations.destroy_all
+      citations.each(&:save!)
     end
 
     def task_list_json(task)

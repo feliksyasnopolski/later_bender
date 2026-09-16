@@ -54,6 +54,8 @@ class SemanticChunker
   def source_text
     if @record.is_a?(Note)
       [ @record.title, @record.body ].compact.join("\n\n")
+    elsif @record.is_a?(StoredFile)
+      @record.searchable_text
     else
       [ @record.title, @record.context, @record.intended_direction ].compact.join("\n\n")
     end
