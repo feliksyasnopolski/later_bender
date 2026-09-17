@@ -44,23 +44,25 @@ class FileReader
   def read(representation: "auto", locator: nil)
     rep = choose(representation)
     raise ActiveRecord::RecordNotFound unless rep
-    return { representation: rep.kind, media_type: rep.media_type, metadata: rep.metadata } if rep.content.blank?
+    return { kind: "metadata", representation: rep.kind, coordinate: nil, locator: nil, media_type: rep.media_type, metadata: rep.metadata } if rep.content.blank?
 
     content = rep.content
     coordinate = rep.metadata["coordinate"] || "lines"
     raise ArgumentError, "Invalid locator" if locator && !valid_locator?(rep.kind, locator)
+    effective_locator = locator || full_locator(coordinate, content, rep.metadata)
     content = slice(content, coordinate, locator) if locator
-    { representation: rep.kind, content: content, locator: locator, metadata: rep.metadata }
+    { kind: coordinate == "pages" ? "pdf" : "text", representation: rep.kind, coordinate:, locator: effective_locator, media_type: rep.media_type, content:, metadata: rep.metadata }
   end
 
   def read_bytes(bytes, filename:, media_type:, representation: "auto", locator: nil)
     kind, content, metadata, derived_media_type = derive(bytes, filename:, media_type:)
     selected_kind = representation == "auto" ? kind : representation
     raise ActiveRecord::RecordNotFound unless representation == "auto" || selected_kind == kind
-    return { representation: kind, media_type: derived_media_type, metadata: metadata } if content.blank?
+    return { kind: "metadata", representation: kind, coordinate: nil, locator: nil, media_type: derived_media_type, metadata: metadata } if content.blank?
     raise ArgumentError, "Invalid locator" if locator && !virtual_valid_locator?(content, metadata["coordinate"], locator, metadata)
+    effective_locator = locator || full_locator(metadata["coordinate"], content, metadata)
     content = slice(content, metadata["coordinate"], locator) if locator
-    { representation: kind, content: content, locator: locator, metadata: metadata }
+    { kind: metadata["coordinate"] == "pages" ? "pdf" : "text", representation: kind, coordinate: metadata["coordinate"], locator: effective_locator, media_type: derived_media_type, content:, metadata: metadata }
   end
 
   def valid_locator?(kind, locator)
@@ -114,10 +116,15 @@ class FileReader
     finish = (locator["end"] || locator[:end]).to_i
     if coordinate == "pages"
       pages = content.split(/(?=\[P\d+\])/)
-      pages[(start - 1)..finish].to_a.join
+      pages[(start - 1)...finish].to_a.join
     else
       content.lines.each_with_index.map { |line, i| "[L#{i + 1}] #{line}" if i + 1 >= start && i + 1 <= finish }.compact.join
     end
+  end
+
+  def full_locator(coordinate, content, metadata)
+    finish = coordinate == "pages" ? metadata["pages"].to_i : content.lines.length
+    { "kind" => coordinate, "start" => 1, "end" => finish }
   end
 
   def image_metadata(bytes)

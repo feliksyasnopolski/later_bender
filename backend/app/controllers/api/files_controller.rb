@@ -4,14 +4,23 @@ module Api
     before_action :set_file_by_ref, only: %i[show update destroy read read_batch egress download archive_list archive_entry archive_extract]
 
     def index
-      scope = @project.stored_files.includes(:project, :tags).order(created_at: :desc)
+      scope = @project.stored_files.includes(:project, :tags)
       tag_values = (params[:tags] || params[:tag]).to_s.split(",").reject(&:blank?)
       if tag_values.present?
         matching_ids = FileTag.joins(:tag).where(tags: { slug: tag_values.map(&:parameterize) }).group(:stored_file_id).having("COUNT(DISTINCT tags.id) = ?", tag_values.length).select(:stored_file_id)
         scope = scope.where(id: matching_ids)
       end
-      scope = scope.limit(params[:limit].to_i.clamp(1, 100)) if params[:limit].present?
-      render json: scope.map { |file| file_list_json(file) }
+      if params[:paginated].to_s == "true"
+        sort = { "created_at" => :created_at, "updated_at" => :updated_at, "filename" => :filename, "size" => :byte_size }.fetch(params[:sort].presence || "created_at", :created_at)
+        order = %w[asc desc].include?(params[:order]) ? params[:order] : "desc"
+        context = pagination_context("files", current_user.id, @project.slug, normalized_tags, sort, order)
+        files, next_cursor = paginate_relation(scope, primary: sort, direction: order, context:, limit: params[:limit])
+        render json: { files: files.map { |file| file_list_json(file) }, next_cursor: }
+      else
+        scope = scope.order(created_at: :desc)
+        scope = scope.limit(params[:limit].to_i.clamp(1, 100)) if params[:limit].present?
+        render json: scope.map { |file| file_list_json(file) }
+      end
     end
 
     def create
@@ -44,7 +53,8 @@ module Api
     def read
       locator = params[:locator]
       locator = JSON.parse(locator) if locator.is_a?(String)
-      render json: FileReader.read(@file, representation: params[:representation].presence || "auto", locator: locator)
+      read = FileReader.read(@file, representation: params[:representation].presence || "auto", locator: locator)
+      render json: read.merge(source: { kind: "file", ref: @file.ref })
     rescue JSON::ParserError, ArgumentError
       render json: { error: { code: "validation_failed", message: "Invalid locator" } }, status: :unprocessable_content
     end
@@ -85,7 +95,14 @@ module Api
     end
 
     def archive_list
-      render json: { entries: ArchiveReader.list(@file, path: params[:path], depth: params[:depth], limit: params[:limit]) }
+      if params[:paginated].to_s == "true"
+        values = ArchiveReader.entries(@file, path: params[:path], depth: params[:depth])
+        context = pagination_context("archive", current_user.id, @file.ref, @file.sha256, params[:path], params[:depth])
+        entries, next_cursor = paginate_values(values, primary: "path", context:, limit: params[:limit])
+        render json: { entries:, next_cursor: }
+      else
+        render json: { entries: ArchiveReader.list(@file, path: params[:path], depth: params[:depth], limit: params[:limit]) }
+      end
     rescue ArgumentError, ArchiveReader::Error, ArchiveReader::UnsafePath, ArchiveReader::LimitExceeded => error
       render json: { error: { code: "validation_failed", message: error.message } }, status: :unprocessable_content
     end
@@ -93,7 +110,8 @@ module Api
     def archive_entry
       locator = params[:locator]
       locator = JSON.parse(locator) if locator.is_a?(String)
-      render json: { read: ArchiveReader.read_entry(@file, params[:path], representation: params[:representation].presence || "auto", locator:) }
+      read = ArchiveReader.read_entry(@file, params[:path], representation: params[:representation].presence || "auto", locator:)
+      render json: { read: read.merge(source: { kind: "archive_entry", ref: @file.ref, path: params[:path] }) }
     rescue JSON::ParserError, ArgumentError, ArchiveReader::Error, ArchiveReader::UnsafePath, ArchiveReader::LimitExceeded => error
       render json: { error: { code: "validation_failed", message: error.message } }, status: :unprocessable_content
     end

@@ -43,7 +43,9 @@ Rails.application.routes.draw do
     get "files/by-ref/:ref/archive", to: "files#archive_list"
     get "files/by-ref/:ref/archive/entry", to: "files#archive_entry"
     post "files/by-ref/:ref/archive/extract", to: "files#archive_extract"
-    resources :notes, only: %i[index show create update destroy]
+    resources :notes, only: %i[index show create update destroy] do
+      patch :edit, on: :member
+    end
   end
 
   # Defines the root path route ("/")

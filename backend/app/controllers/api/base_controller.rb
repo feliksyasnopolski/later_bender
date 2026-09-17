@@ -1,11 +1,17 @@
 module Api
   class BaseController < ActionController::API
+    include CursorPagination
+
     rescue_from ActiveRecord::RecordNotFound do
       render json: { error: { code: "not_found", message: "Resource not found" } }, status: :not_found
     end
 
     rescue_from ActiveRecord::RecordInvalid do |error|
       render_validation_errors(error.record)
+    end
+
+    rescue_from CursorPagination::InvalidCursor do |error|
+      render json: { error: { code: "validation_failed", message: error.message } }, status: :unprocessable_content
     end
 
     before_action :authenticate_user!
@@ -145,7 +151,11 @@ module Api
       { id: note.id, title: note.title, excerpt: note.body.to_s.tr("\n", " ").strip[0, 240], tags: note.tags.order(:name).pluck(:name), project: note.project && { id: note.project.id, name: note.project.name, slug: note.project.slug, shorthand: note.project.shorthand }, created_at: note.created_at, updated_at: note.updated_at }
     end
 
-    def task_scope(scope)
+    def normalized_tags
+      (params[:tags] || params[:tag]).to_s.split(",").reject(&:blank?).map(&:parameterize).sort
+    end
+
+    def task_scope(scope, apply_limit: true)
       scope = scope.where({ status: params[:status] }) if params[:status].present?
       scope = scope.where({ priority: params[:priority] }) if params[:priority].present?
       tag_values = (params[:tags] || params[:tag]).to_s.split(",").reject(&:blank?)
@@ -157,7 +167,7 @@ module Api
         query = "%#{ActiveRecord::Base.sanitize_sql_like(params[:q].to_s)}%"
         scope = scope.where("tasks.title ILIKE :query OR tasks.context ILIKE :query OR tasks.intended_direction ILIKE :query", { query: query })
       end
-      scope = scope.limit(params[:limit].to_i.clamp(1, 100)) if params[:limit].present?
+      scope = scope.limit(params[:limit].to_i.clamp(1, 100)) if apply_limit && params[:limit].present?
       scope.order({ position: :asc, id: :asc })
     end
   end

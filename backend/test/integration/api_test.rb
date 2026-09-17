@@ -282,4 +282,151 @@ class ApiTest < ActionDispatch::IntegrationTest
     patch "/api/projects/writing/tasks/#{task_id}", params: { related_note_ids: [] }.to_json, headers: json_headers(@raw_token)
     assert_equal [], json_body["related_note_ids"]
   end
+
+  test "task pagination traverses filtered board order without duplicates and rejects mismatched cursors" do
+    first = @project.tasks.create!(title: "First", status: "ready", position: 1000)
+    second = @project.tasks.create!(title: "Second", status: "ready", position: 1000)
+    third = @project.tasks.create!(title: "Third", status: "ready", position: 2000)
+    @project.tasks.create!(title: "Filtered out", status: "done", position: 500)
+
+    get "/api/projects/writing/tasks", params: { paginated: true, summary: true, status: "ready", limit: 2 }, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal [ first.ref, second.ref ], json_body["tasks"].map { |task| task["ref"] }
+    cursor = json_body["next_cursor"]
+    assert cursor.present?
+
+    get "/api/projects/writing/tasks", params: { paginated: true, summary: true, status: "ready", limit: 2, cursor: cursor }, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal [ third.ref ], json_body["tasks"].map { |task| task["ref"] }
+    assert_nil json_body["next_cursor"]
+
+    get "/api/projects/writing/tasks", params: { paginated: true, summary: true, status: "done", limit: 2, cursor: cursor }, headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    assert_equal "validation_failed", json_body.dig("error", "code")
+    get "/api/projects/writing/tasks", params: { paginated: true, cursor: "malformed" }, headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+  end
+
+  test "note pagination supports deterministic created and updated ordering" do
+    old = @user.notes.create!(title: "Old", body: "old")
+    middle = @user.notes.create!(title: "Middle", body: "middle")
+    recent = @user.notes.create!(title: "Recent", body: "recent")
+    old.update_columns(created_at: Time.utc(2026, 1, 1), updated_at: Time.utc(2026, 1, 3))
+    middle.update_columns(created_at: Time.utc(2026, 1, 2), updated_at: Time.utc(2026, 1, 2))
+    recent.update_columns(created_at: Time.utc(2026, 1, 3), updated_at: Time.utc(2026, 1, 1))
+
+    get "/api/notes", params: { paginated: true, scope: "global", sort: "updated_at", order: "desc", limit: 2, summary: true }, headers: json_headers(@raw_token)
+    assert_equal [ old.id, middle.id ], json_body["notes"].map { |note| note["id"] }
+    cursor = json_body["next_cursor"]
+    get "/api/notes", params: { paginated: true, scope: "global", sort: "updated_at", order: "desc", limit: 2, summary: true, cursor: cursor }, headers: json_headers(@raw_token)
+    assert_equal [ recent.id ], json_body["notes"].map { |note| note["id"] }
+    assert_nil json_body["next_cursor"]
+
+    get "/api/notes", params: { paginated: true, scope: "global", sort: "created_at", order: "asc", summary: true }, headers: json_headers(@raw_token)
+    assert_equal [ old.id, middle.id, recent.id ], json_body["notes"].map { |note| note["id"] }
+  end
+
+  test "file browse sorting supports every public sort in both directions with stable ties" do
+    alpha = create_file("alpha.txt", "a")
+    beta = create_file("beta.txt", "bbbb")
+    gamma = create_file("gamma.txt", "cc")
+    alpha.update_columns(created_at: Time.utc(2026, 1, 1), updated_at: Time.utc(2026, 1, 3))
+    beta.update_columns(created_at: Time.utc(2026, 1, 2), updated_at: Time.utc(2026, 1, 2))
+    gamma.update_columns(created_at: Time.utc(2026, 1, 2), updated_at: Time.utc(2026, 1, 1))
+
+    expectations = {
+      ["created_at", "asc"] => %w[alpha.txt beta.txt gamma.txt],
+      ["created_at", "desc"] => %w[gamma.txt beta.txt alpha.txt],
+      ["updated_at", "asc"] => %w[gamma.txt beta.txt alpha.txt],
+      ["updated_at", "desc"] => %w[alpha.txt beta.txt gamma.txt],
+      ["filename", "asc"] => %w[alpha.txt beta.txt gamma.txt],
+      ["filename", "desc"] => %w[gamma.txt beta.txt alpha.txt],
+      ["size", "asc"] => %w[alpha.txt gamma.txt beta.txt],
+      ["size", "desc"] => %w[beta.txt gamma.txt alpha.txt]
+    }
+    expectations.each do |(sort, order), filenames|
+      get "/api/projects/writing/files", params: { paginated: true, sort: sort, order: order }, headers: json_headers(@raw_token)
+      assert_response :success
+      assert_equal filenames, json_body["files"].map { |file| file["filename"] }, "#{sort} #{order}"
+    end
+
+    get "/api/projects/writing/files", params: { paginated: true, sort: "created_at", order: "desc", limit: 2 }, headers: json_headers(@raw_token)
+    first_page = json_body
+    get "/api/projects/writing/files", params: { paginated: true, sort: "created_at", order: "desc", limit: 2, cursor: first_page["next_cursor"] }, headers: json_headers(@raw_token)
+    assert_equal %w[gamma.txt beta.txt alpha.txt], first_page["files"].map { |file| file["filename"] } + json_body["files"].map { |file| file["filename"] }
+    assert_nil json_body["next_cursor"]
+  end
+
+  test "targeted note edits apply in order atomically and honor optimistic concurrency" do
+    note = @user.notes.create!(title: "Durable", body: "alpha beta")
+    expected = note.updated_at.as_json
+    patch "/api/notes/#{note.id}/edit", params: { operations: [{ operation: "replace", old_text: "alpha", new_text: "one" }, { operation: "append", text: "\nmore" }], expected_updated_at: expected }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "one beta\nmore", note.reload.body
+
+    unchanged = note.body
+    patch "/api/notes/#{note.id}/edit", params: { operations: [{ operation: "append", text: " temporary" }, { operation: "replace", old_text: "missing", new_text: "never" }] }.to_json, headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    assert_equal unchanged, note.reload.body
+
+    note.update!(body: "same same")
+    patch "/api/notes/#{note.id}/edit", params: { operations: [{ operation: "replace", old_text: "same", new_text: "once" }] }.to_json, headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    assert_equal "same same", note.reload.body
+
+    patch "/api/notes/#{note.id}/edit", params: { operations: [{ operation: "append", text: " stale" }], expected_updated_at: expected }.to_json, headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    assert_equal "same same", note.reload.body
+  end
+
+  test "file reads identify source representation coordinate and effective locator" do
+    text = create_file("source.txt", "one\ntwo\nthree\n", media_type: "text/plain")
+    image = create_file("pixel.png", "png", media_type: "image/png")
+
+    get "/api/files/by-ref/#{text.ref}/read", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "text", json_body["kind"]
+    assert_equal({ "kind" => "file", "ref" => text.ref }, json_body["source"])
+    assert_equal "lines", json_body["coordinate"]
+    assert_equal({ "kind" => "lines", "start" => 1, "end" => 3 }, json_body["locator"])
+
+    get "/api/files/by-ref/#{text.ref}/read", params: { locator: { kind: "lines", start: 2, end: 2 }.to_json }, headers: json_headers(@raw_token)
+    assert_equal "[L2] two\n", json_body["content"]
+    assert_equal({ "kind" => "lines", "start" => 2, "end" => 2 }, json_body["locator"])
+
+    get "/api/files/by-ref/#{image.ref}/read", headers: json_headers(@raw_token)
+    assert_equal "metadata", json_body["kind"]
+    assert_nil json_body["coordinate"]
+    assert_nil json_body["locator"]
+  end
+
+  test "archive pagination traverses deterministic paths and rejects a cursor from another view" do
+    Dir.mktmpdir("later-bender-api-archive") do |source|
+      %w[c.txt a.txt b.txt].each { |name| File.binwrite(File.join(source, name), name) }
+      archive_path = File.join(source, "bundle.zip")
+      _output, error, status = Open3.capture3("zip", "-q", archive_path, "a.txt", "b.txt", "c.txt", chdir: source)
+      raise error unless status.success?
+      archive = create_file("bundle.zip", File.binread(archive_path), media_type: "application/zip")
+
+      get "/api/files/by-ref/#{archive.ref}/archive", params: { paginated: true, depth: 0, limit: 2 }, headers: json_headers(@raw_token)
+      assert_response :success
+      assert_equal %w[a.txt b.txt], json_body["entries"].map { |entry| entry["path"] }
+      cursor = json_body["next_cursor"]
+      get "/api/files/by-ref/#{archive.ref}/archive", params: { paginated: true, depth: 0, limit: 2, cursor: cursor }, headers: json_headers(@raw_token)
+      assert_equal ["c.txt"], json_body["entries"].map { |entry| entry["path"] }
+      assert_nil json_body["next_cursor"]
+
+      get "/api/files/by-ref/#{archive.ref}/archive", params: { paginated: true, depth: 1, limit: 2, cursor: cursor }, headers: json_headers(@raw_token)
+      assert_response :unprocessable_content
+    end
+  end
+
+  private
+
+  def create_file(filename, bytes, media_type: "text/plain")
+    file = StoredFile.new(project: @project, filename: filename, media_type: media_type, byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes))
+    file.original.attach(io: StringIO.new(bytes), filename: filename, content_type: media_type)
+    file.save!
+    file
+  end
 end

@@ -3,7 +3,14 @@ module Api
     before_action :set_project, only: %i[show update]
 
     def index
-      render json: current_user.projects.order({ created_at: :desc }).map { |project| project_json(project) }
+      scope = current_user.projects
+      if params[:paginated].to_s == "true"
+        context = pagination_context("projects", current_user.id, "created_at", "desc")
+        projects, next_cursor = paginate_relation(scope, primary: :created_at, direction: :desc, context:, limit: params[:limit])
+        render json: { projects: projects.map { |project| project_json(project) }, next_cursor: }
+      else
+        render json: scope.order({ created_at: :desc }).map { |project| project_json(project) }
+      end
     end
 
     def show

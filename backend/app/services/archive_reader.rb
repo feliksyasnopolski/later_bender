@@ -26,17 +26,21 @@ class ArchiveReader
   end
 
   def self.list(file, path: nil, depth: nil, limit: nil)
+    result = entries(file, path:, depth:)
+    requested_limit = limit.nil? ? 50 : Integer(limit)
+    result.first([[requested_limit, 1].max, MAX_LIST_LIMIT].min)
+  end
+
+  def self.entries(file, path: nil, depth: nil)
     entries = manifest(file)
     prefix = normalize_prefix(path)
     max_depth = depth.nil? ? 1 : Integer(depth)
     raise ArgumentError, "depth must be non-negative" if max_depth.negative?
-    result = entries.select do |entry|
+    entries.select do |entry|
       next false unless prefix.empty? || entry["path"].start_with?(prefix)
       relative = entry["path"].delete_prefix(prefix).delete_prefix("/")
       relative.split("/").length <= max_depth + 1
-    end
-    requested_limit = limit.nil? ? 50 : Integer(limit)
-    result.first([[requested_limit, 1].max, MAX_LIST_LIMIT].min)
+    end.sort_by { |entry| entry.fetch("path") }
   rescue JSON::ParserError
     raise Error, "archive manifest is invalid"
   end

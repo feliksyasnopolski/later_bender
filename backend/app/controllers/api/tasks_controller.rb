@@ -8,7 +8,14 @@ module Api
       scope = Task.includes(:project, :tags).joins(:project).where(projects: { user_id: current_user.id })
       scope = scope.where(projects: { id: @project.id }) if @project
       scope = scope.where({ projects: { slug: params[:project] } }) if params[:project].present? && !@project
-      render json: task_scope(scope).map { |task| params[:summary].to_s == "true" ? task_list_json(task) : task_json(task) }
+      scope = task_scope(scope, apply_limit: params[:paginated].to_s != "true")
+      if params[:paginated].to_s == "true"
+        context = pagination_context("tasks", current_user.id, @project&.slug || params[:project], params[:status], params[:priority], normalized_tags, params[:q], "position", "asc")
+        tasks, next_cursor = paginate_relation(scope, primary: :position, direction: :asc, context:, limit: params[:limit])
+        render json: { tasks: tasks.map { |task| params[:summary].to_s == "true" ? task_list_json(task) : task_json(task) }, next_cursor: }
+      else
+        render json: scope.map { |task| params[:summary].to_s == "true" ? task_list_json(task) : task_json(task) }
+      end
     end
 
     def show

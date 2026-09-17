@@ -1,10 +1,16 @@
 module Api
   class NotesController < BaseController
+    class EditError < StandardError; end
+
+    rescue_from EditError do |error|
+      render json: { error: { code: "validation_failed", message: error.message } }, status: :unprocessable_content
+    end
+
     before_action :set_project, only: %i[index create]
-    before_action :set_note, only: %i[show update destroy]
+    before_action :set_note, only: %i[show update edit destroy]
 
     def index
-      scope = current_user.notes.includes(:project, :tags).order(created_at: :desc)
+      scope = current_user.notes.includes(:project, :tags)
       scope = scope.where(project: @project) if @project
       scope = scope.where(project_id: nil) if params[:projectless].to_s == "true" || params[:scope] == "global"
       scope = scope.where(project: current_user.projects.find_by!(slug: params[:project])) if params[:project].present? && !@project
@@ -15,7 +21,45 @@ module Api
       end
       scope = scope.where(project_id: nil) if params[:scope] == "global"
       scope = scope.where.not(project_id: nil) if params[:scope] == "project" && params[:project].blank? && !@project
-      render json: scope.limit(params[:limit].to_i.clamp(1, 100)).map { |note| params[:summary].to_s == "true" ? note_list_json(note) : note_json(note) }
+      if params[:paginated].to_s == "true"
+        sort = %w[created_at updated_at].include?(params[:sort]) ? params[:sort] : "updated_at"
+        order = %w[asc desc].include?(params[:order]) ? params[:order] : "desc"
+        context = pagination_context("notes", current_user.id, @project&.slug || params[:project], params[:scope], normalized_tags, sort, order)
+        notes, next_cursor = paginate_relation(scope, primary: sort.to_sym, direction: order, context:, limit: params[:limit])
+        render json: { notes: notes.map { |note| params[:summary].to_s == "true" ? note_list_json(note) : note_json(note) }, next_cursor: }
+      else
+        render json: scope.order(created_at: :desc).limit(params[:limit].to_i.clamp(1, 100)).map { |note| params[:summary].to_s == "true" ? note_list_json(note) : note_json(note) }
+      end
+    end
+
+    def edit
+      payload = request_payload
+      operations = Array(payload["operations"])
+      raise_edit_error("operations must contain at least one edit") if operations.empty?
+
+      @note.with_lock do
+        expected = payload["expected_updated_at"]
+        raise_edit_error("Note has changed since expected_updated_at") if expected.present? && expected != @note.updated_at.as_json
+        body = @note.body.dup
+        operations.each do |operation|
+          case operation["operation"]
+          when "append"
+            raise_edit_error("append text must be a string") unless operation["text"].is_a?(String)
+            body << operation["text"]
+          when "replace"
+            old_text = operation["old_text"]
+            new_text = operation["new_text"]
+            raise_edit_error("replace text must be strings and old_text must not be empty") unless old_text.is_a?(String) && old_text.present? && new_text.is_a?(String)
+            matches = body.scan(Regexp.new(Regexp.escape(old_text))).length
+            raise_edit_error("old_text must match exactly once; found #{matches}") unless matches == 1
+            body = body.sub(old_text, new_text)
+          else
+            raise_edit_error("Unsupported note edit operation")
+          end
+        end
+        @note.update!(body:)
+      end
+      render json: note_json(@note)
     end
 
     def show
@@ -54,6 +98,10 @@ module Api
     end
 
     private
+
+    def raise_edit_error(message)
+      raise EditError, message
+    end
 
     def set_project
       slug = request.path_parameters[:project_slug]
