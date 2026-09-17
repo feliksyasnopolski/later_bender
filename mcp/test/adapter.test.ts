@@ -15,14 +15,14 @@ function apiFor(responses: Array<{ status: number; body: unknown }>, publicBaseU
 }
 
 test("sends bearer auth and maps project and task endpoints", async () => {
-  const { api, calls } = apiFor([{ status: 200, body: [] }, { status: 200, body: {} }, { status: 200, body: [] }]);
+  const { api, calls } = apiFor([{ status: 200, body: { projects: [], next_cursor: null } }, { status: 200, body: {} }, { status: 200, body: { tasks: [], next_cursor: null } }]);
   await api.listProjects();
   await api.getProject("my project");
   await api.listTasks("writing", { status: "ready", q: "draft" });
-  assert.equal(calls[0].url, "https://example.test/laterbender/api/projects");
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/projects?paginated=true");
   assert.equal(calls[0].init.headers && new Headers(calls[0].init.headers).get("Authorization"), "Bearer secret");
   assert.equal(calls[1].url, "https://example.test/laterbender/api/projects/my%20project");
-  assert.equal(calls[2].url, "https://example.test/laterbender/api/projects/writing/tasks?status=ready&q=draft&summary=true");
+  assert.equal(calls[2].url, "https://example.test/laterbender/api/projects/writing/tasks?status=ready&q=draft&paginated=true&summary=true");
 });
 
 test("create_task uses the project-scoped task endpoint and task payload", async () => {
@@ -33,10 +33,11 @@ test("create_task uses the project-scoped task endpoint and task payload", async
   assert.equal(calls[0].init.method, "POST");
 });
 
-test("project responses omit persistence-only archive timestamps", async () => {
+test("project responses omit persistence-only ids and archive timestamps", async () => {
   const { api } = apiFor([{ status: 200, body: { id: 1, slug: "writing", name: "Writing", archived_at: null } }]);
   const project = await api.getProject("writing") as Record<string, unknown>;
   assert.equal(project.archived_at, undefined);
+  assert.equal(project.id, undefined);
 });
 
 test("update_task sends only supplied fields", async () => {
@@ -180,8 +181,8 @@ test("retrieve_file defaults to a bounded embedded resource with a clean filenam
 test("create and update mutation handlers return only an acknowledgement", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api } = apiFor([
-    { status: 201, body: { id: 3, name: "Created project", description: "large description", updated_at: "2026-01-01T00:00:00Z" } },
-    { status: 200, body: { id: 3, name: "Updated project", description: "large description", updated_at: "2026-01-02T00:00:00Z" } },
+    { status: 201, body: { id: 3, slug: "created-project", shorthand: "CP", name: "Created project", description: "large description", updated_at: "2026-01-01T00:00:00Z" } },
+    { status: 200, body: { id: 3, slug: "created-project", shorthand: "CP", name: "Updated project", description: "large description", updated_at: "2026-01-02T00:00:00Z" } },
     { status: 201, body: { ref: "LB-8", title: "Created", context: "large context", updated_at: "2026-01-03T00:00:00Z" } },
     { status: 201, body: { id: 18, title: "Created note", body: "large body", updated_at: "2026-01-04T00:00:00Z" } },
     { status: 200, body: { ref: "LB-7", title: "Ship", context: "large context", intended_direction: "large direction", updated_at: "2026-01-05T00:00:00Z" } },
@@ -196,8 +197,8 @@ test("create and update mutation handlers return only an acknowledgement", async
   const createdNoteResult = await tools.create_note.handler({ title: "Created note", body: "large body" });
   const taskResult = await tools.update_task.handler({ ref: "LB-7", context: "large context" });
   const noteResult = await tools.update_note.handler({ id: 17, body: "large body" });
-  assert.deepEqual(createdProjectResult.structuredContent, { project: { id: 3, updated_at: "2026-01-01T00:00:00Z" } });
-  assert.deepEqual(updatedProjectResult.structuredContent, { project: { id: 3, updated_at: "2026-01-02T00:00:00Z" } });
+  assert.deepEqual(createdProjectResult.structuredContent, { project: { slug: "created-project", shorthand: "CP", updated_at: "2026-01-01T00:00:00Z" } });
+  assert.deepEqual(updatedProjectResult.structuredContent, { project: { slug: "created-project", updated_at: "2026-01-02T00:00:00Z" } });
   assert.deepEqual(createdTaskResult.structuredContent, { task: { ref: "LB-8", updated_at: "2026-01-03T00:00:00Z" } });
   assert.deepEqual(createdNoteResult.structuredContent, { note: { id: 18, updated_at: "2026-01-04T00:00:00Z" } });
   assert.deepEqual(taskResult.structuredContent, { task: { ref: "LB-7", updated_at: "2026-01-05T00:00:00Z" } });
@@ -215,6 +216,65 @@ test("create and update mutation handlers return only an acknowledgement", async
   assert.equal(tools.update_note.outputSchema.safeParse(noteResult.structuredContent).success, true);
 });
 
+test("browse tools preserve opaque cursors and strip internal project ids", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const project = { id: 3, slug: "writing", shorthand: "WR", name: "Writing" };
+  const { api, calls } = apiFor([{ status: 200, body: { tasks: [{ id: 9, ref: "WR-9", number: 9, project, title: "Ship", status: "ready", position: 1000, priority: "high", tags: [], related_note_ids: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }], next_cursor: "opaque-next" } }]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const result = await tools.list_tasks.handler({ project: "writing", status: "ready", limit: 1, cursor: "opaque-current" });
+
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/projects/writing/tasks?status=ready&limit=1&cursor=opaque-current&paginated=true&summary=true");
+  assert.deepEqual(result.structuredContent, { tasks: [{ ref: "WR-9", number: 9, project: { slug: "writing", shorthand: "WR", name: "Writing" }, title: "Ship", status: "ready", position: 1000, priority: "high", tags: [], related_note_ids: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }], next_cursor: "opaque-next" });
+  assert.equal(tools.list_tasks.outputSchema.safeParse(result.structuredContent).success, true);
+});
+
+test("get_note translates internal task ids into external refs", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const project = { id: 3, slug: "writing", shorthand: "WR", name: "Writing" };
+  const { api } = apiFor([{ status: 200, body: { id: 17, project, title: "Decision", body: "Keep it boring", tags: [], related_task_ids: [99], related_tasks: [{ id: 99, ref: "WR-7", number: 7, title: "Ship", status: "doing", priority: "normal", project }], related_files: [], citations: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-02T00:00:00Z" } }]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const result = await tools.get_note.handler({ id: 17 });
+
+  assert.deepEqual(result.structuredContent.note.related_task_refs, ["WR-7"]);
+  assert.equal(result.structuredContent.note.related_task_ids, undefined);
+  assert.equal(result.structuredContent.note.related_tasks[0].id, undefined);
+  assert.equal(result.structuredContent.note.project.id, undefined);
+  assert.equal(tools.get_note.outputSchema.safeParse(result.structuredContent).success, true);
+});
+
+test("edit_note sends an ordered atomic edit batch and returns a compact acknowledgement", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api, calls } = apiFor([{ status: 200, body: { id: 17, body: "changed body", updated_at: "2026-01-02T00:00:00Z" } }]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+  const operations = [{ operation: "append", text: "\nMore" }, { operation: "replace", old_text: "old", new_text: "new" }];
+
+  const result = await tools.edit_note.handler({ id: 17, operations, expected_updated_at: "2026-01-01T00:00:00Z" });
+
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/notes/17/edit");
+  assert.equal(calls[0].init.method, "PATCH");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { operations, expected_updated_at: "2026-01-01T00:00:00Z" });
+  assert.deepEqual(result.structuredContent, { note: { id: 17, updated_at: "2026-01-02T00:00:00Z" } });
+});
+
+test("read tools publish explicit text, PDF, metadata, and batch error schemas", () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
+  const tools = (server as any)._registeredTools as Record<string, any>;
+  const textRead = { kind: "text", source: { kind: "file", ref: "LB-F1" }, representation: "text", coordinate: "lines", locator: { kind: "lines", start: 1, end: 2 }, media_type: "text/plain", content: "one\ntwo\n", metadata: { coordinate: "lines" } };
+  const pdfRead = { kind: "pdf", source: { kind: "archive_entry", ref: "LB-F2", path: "report.pdf" }, representation: "pdf_text", coordinate: "pages", locator: { kind: "pages", start: 2, end: 2 }, media_type: "text/plain", content: "[P2]\ntext\n", metadata: { coordinate: "pages", pages: 3 } };
+  const metadataRead = { kind: "metadata", source: { kind: "file", ref: "LB-F3" }, representation: "metadata", coordinate: null, locator: null, media_type: "image/png", metadata: { byte_size: 8 } };
+
+  assert.equal(tools.read_file.outputSchema.safeParse({ read: textRead }).success, true);
+  assert.equal(tools.read_archive_entry.outputSchema.safeParse({ read: pdfRead }).success, true);
+  assert.equal(tools.read_file.outputSchema.safeParse({ read: metadataRead }).success, true);
+  assert.equal(tools.read_files.outputSchema.safeParse({ results: [{ ref: "LB-F1", read: textRead }, { ref: "LB-F404", error: "not_found" }, { ref: "LB-F1", error: "invalid_locator" }] }).success, true);
+});
+
 test("preserves Rails validation failures and distinguishes auth/backend errors", async () => {
   const validation = apiFor([{ status: 422, body: { error: { code: "validation_failed", message: "Validation failed", details: { title: ["can't be blank"] } } } }]);
   await assert.rejects(validation.api.createProject({ name: "" }), (error: unknown) => error instanceof ApiError && error.code === "validation_failed" && error.details?.title?.[0] === "can't be blank");
@@ -228,7 +288,7 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image"]);
+  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image"]);
   assert.ok(tools.create_task.inputSchema);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", representation: "text", locator: { kind: "lines", start: 138, end: 152 } }]).success, true);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", locator: { kind: "bytes", start: 1, end: 2 } }]).success, false);
@@ -236,8 +296,8 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.match(tools.create_task.description, /exact evidence pointers into canonical Files/);
   assert.match(tools.create_note.description, /distinct from broader related_files relationships/);
   assert.match(tools.list_tasks.description, /Tasks, Notes, and Files/);
-  assert.match(tools.read_file.description, /omitted.*auto.*line coordinates.*PDF.*page coordinates/i);
-  assert.match(tools.read_files.description, /bounded follow-up reads and citations/i);
+  assert.match(tools.read_file.description, /canonical File.*effective representation.*coordinate system.*effective locator/i);
+  assert.match(tools.read_files.description, /typed results.*bounded follow-up reads and citations/i);
   assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
   assert.equal(tools.update_task.annotations.destructiveHint, true);
   assert.deepEqual(tools.create_file._meta, { "openai/fileParams": ["file"] });
@@ -256,12 +316,12 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.equal(tools.delete_note.inputSchema.shape.id.safeParse(17).success, true);
   assert.equal(tools.delete_note.inputSchema.shape.id.safeParse(0).success, false);
   assert.equal(tools.search_memory.annotations.openWorldHint, false);
-  assert.deepEqual(Object.keys(tools.list_tasks.inputSchema.shape), ["project", "status", "priority", "tags", "limit"]);
-  assert.equal(tools.list_tasks.outputSchema.safeParse({ tasks: [{ ref: "WR-1", number: 1, project: { id: 2, slug: "writing", shorthand: "WR", name: "Writing" }, title: "Ship", status: "backlog", position: 1000, priority: "normal", tags: [], related_note_ids: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
-  assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "task", ref: "WR-1", number: 1, project: { id: 2, slug: "writing", shorthand: "WR", name: "Writing" }, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "backlog", priority: "normal", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
+  assert.deepEqual(Object.keys(tools.list_tasks.inputSchema.shape), ["project", "status", "priority", "tags", "limit", "cursor"]);
+  assert.equal(tools.list_tasks.outputSchema.safeParse({ tasks: [{ ref: "WR-1", number: 1, project: { slug: "writing", shorthand: "WR", name: "Writing" }, title: "Ship", status: "backlog", position: 1000, priority: "normal", tags: [], related_note_ids: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }], next_cursor: null }).success, true);
+  assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "task", ref: "WR-1", number: 1, project: { slug: "writing", shorthand: "WR", name: "Writing" }, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "backlog", priority: "normal", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], status: "done", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, false);
-  assert.equal(tools.get_note.outputSchema.safeParse({ note: { id: 1, project: null, title: "Decision", tags: [], body: "evidence", related_task_ids: [], related_tasks: [], related_files: [], citations: [{ file: "LB-F7", representation: "text", locator: { kind: "pages", start: 1, end: 2 } }], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" } }).success, true);
+  assert.equal(tools.get_note.outputSchema.safeParse({ note: { id: 1, project: null, title: "Decision", tags: [], body: "evidence", related_task_refs: [], related_tasks: [], related_files: [], citations: [{ file: "LB-F7", representation: "text", locator: { kind: "pages", start: 1, end: 2 } }], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" } }).success, true);
   assert.equal(tools.list_notes.inputSchema.safeParse({ scope: "project" }).success, false);
   assert.equal(tools.list_notes.inputSchema.safeParse({ scope: "global", project: "writing" }).success, false);
   assert.equal(tools.list_notes.inputSchema.safeParse({}).success, true);
@@ -273,7 +333,7 @@ test("keeps note summary and full-note schemas separate", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  const project = { id: 2, slug: "writing", shorthand: "WR", name: "Writing" };
+  const project = { slug: "writing", shorthand: "WR", name: "Writing" };
   const relatedTask = { ref: "WR-7", number: 7, title: "Ship", status: "backlog", priority: "normal", project };
   const fullNote = {
     id: 17,
@@ -281,14 +341,14 @@ test("keeps note summary and full-note schemas separate", () => {
     title: "Decision",
     body: "Keep the API boring",
     tags: ["architecture"],
-    related_task_ids: [7],
+    related_task_refs: ["WR-7"],
     related_tasks: [relatedTask],
     related_files: [],
     citations: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z"
   };
-  const summary = { ...fullNote, excerpt: fullNote.body, related_task_ids: undefined, related_tasks: undefined };
+  const summary = { ...fullNote, excerpt: fullNote.body, related_task_refs: undefined, related_tasks: undefined };
 
   for (const toolName of ["get_note"]) {
     assert.equal(tools[toolName].outputSchema.safeParse({ note: fullNote }).success, true, toolName);
@@ -297,8 +357,8 @@ test("keeps note summary and full-note schemas separate", () => {
   assert.equal(tools.update_note.outputSchema.safeParse({ note: { id: 17, updated_at: fullNote.updated_at } }).success, true);
   assert.equal(tools.get_note.outputSchema.safeParse({ note: { ...fullNote, excerpt: undefined } }).success, true);
   assert.equal(tools.get_note.outputSchema.safeParse({ note: { ...fullNote, body: undefined } }).success, false);
-  assert.equal(tools.list_notes.outputSchema.safeParse({ notes: [{ ...summary, related_task_ids: undefined, related_tasks: undefined }] }).success, true);
-  assert.equal(tools.list_notes.outputSchema.safeParse({ notes: [{ ...summary, excerpt: undefined, related_task_ids: undefined, related_tasks: undefined }] }).success, false);
+  assert.equal(tools.list_notes.outputSchema.safeParse({ notes: [{ ...summary, related_task_refs: undefined, related_tasks: undefined }], next_cursor: null }).success, true);
+  assert.equal(tools.list_notes.outputSchema.safeParse({ notes: [{ ...summary, excerpt: undefined, related_task_refs: undefined, related_tasks: undefined }], next_cursor: null }).success, false);
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 17, project, title: "Decision", snippet: "Keep the API boring", highlights: [], tags: ["architecture"], created_at: fullNote.created_at, updated_at: fullNote.updated_at }] }).success, true);
 });
 
@@ -314,10 +374,11 @@ test("projects mixed search results to their strict compact contracts", async ()
   const tools = (server as any)._registeredTools as Record<string, any>;
 
   const result = await tools.search_memory.handler({ query: "ship" });
+  const publicProject = { slug: "writing", shorthand: "WR", name: "Writing" };
   assert.deepEqual(result.structuredContent.results, [
-    { kind: "task", ref: "WR-7", number: 7, project, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "ready", priority: "high", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+    { kind: "task", ref: "WR-7", number: 7, project: publicProject, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "ready", priority: "high", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
     { kind: "note", id: 8, project: null, title: "Decision", snippet: "Keep it boring", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
-    { kind: "note", id: 9, project, title: "Project note", snippet: "A project detail", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }
+    { kind: "note", id: 9, project: publicProject, title: "Project note", snippet: "A project detail", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }
   ]);
   assert.equal(tools.search_memory.outputSchema.safeParse(result.structuredContent).success, true);
   assert.equal(result.structuredContent.results[0].id, undefined);

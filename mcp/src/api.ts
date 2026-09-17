@@ -13,6 +13,8 @@ export type FileEgress = {
   download_path: string;
 };
 
+export type Page<T> = { items: T[]; next_cursor: string | null };
+
 export class LaterBenderApi {
   constructor(
     private readonly baseUrl = process.env.LATER_BENDER_API_BASE_URL,
@@ -38,19 +40,19 @@ export class LaterBenderApi {
     return body as T;
   }
 
-  listProjects() { return this.request<unknown[]>("/api/projects").then((projects) => projects.map(projectView)); }
+  listProjects(input: { limit?: number; cursor?: string } = {}) { return this.request<{ projects: unknown[]; next_cursor: string | null }>(`/api/projects${query({ paginated: "true", limit: input.limit?.toString(), cursor: input.cursor })}`).then((response) => ({ items: response.projects.map(projectView), next_cursor: response.next_cursor })); }
   getProject(slug: string) { return this.request<unknown>(`/api/projects/${encodeURIComponent(slug)}`).then(projectView); }
   createProject(payload: Record<string, unknown>) { return this.request<unknown>("/api/projects", json("POST", payload)).then(projectView); }
   updateProject(slug: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/projects/${encodeURIComponent(slug)}`, json("PATCH", payload)).then(projectView); }
-  listTasks(project: string, filters: Record<string, string | undefined>) { return this.request<unknown[]>(`/api/projects/${encodeURIComponent(project)}/tasks${query({ ...filters, summary: "true" })}`); }
+  listTasks(project: string, filters: Record<string, string | undefined>) { return this.request<{ tasks: unknown[]; next_cursor: string | null }>(`/api/projects/${encodeURIComponent(project)}/tasks${query({ ...filters, paginated: "true", summary: "true" })}`).then((response) => ({ items: response.tasks, next_cursor: response.next_cursor })); }
   getTask(ref: string) { return this.request<unknown>(`/api/tasks/by-ref/${encodeURIComponent(ref)}`); }
   createTask(project: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/projects/${encodeURIComponent(project)}/tasks`, json("POST", payload)); }
   updateTask(ref: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/tasks/by-ref/${encodeURIComponent(ref)}`, json("PATCH", payload)); }
   getTasks(refs: string[]) { return Promise.all(refs.map(async (ref) => { try { return { ref, task: await this.getTask(ref) }; } catch (error) { if (error instanceof ApiError && error.code === "not_found") return { ref, error: "not_found" }; throw error; } })); }
-  listNotes(input: { scope?: string; project?: string; tags?: string[]; limit?: number }) {
+  listNotes(input: { scope?: string; project?: string; tags?: string[]; limit?: number; cursor?: string; sort?: string; order?: string }) {
     const scope = input.scope || "global";
     const path = scope === "project" && input.project ? `/api/projects/${encodeURIComponent(input.project)}/notes` : "/api/notes";
-    return this.request<unknown[]>(`${path}${query({ scope, tag: input.tags?.join(","), limit: input.limit?.toString(), summary: "true" })}`);
+    return this.request<{ notes: unknown[]; next_cursor: string | null }>(`${path}${query({ scope, tag: input.tags?.join(","), limit: input.limit?.toString(), cursor: input.cursor, sort: input.sort, order: input.order, paginated: "true", summary: "true" })}`).then((response) => ({ items: response.notes, next_cursor: response.next_cursor }));
   }
   getNote(id: number) { return this.request<unknown>(`/api/notes/${id}`); }
   deleteNote(id: number) { return this.request<unknown>(`/api/notes/${id}`, { method: "DELETE" }); }
@@ -61,7 +63,8 @@ export class LaterBenderApi {
     return this.request<unknown>(path, json("POST", body));
   }
   updateNote(id: number, payload: Record<string, unknown>) { return this.request<unknown>(`/api/notes/${id}`, json("PATCH", payload)); }
-  listFiles(project: string, filters: Record<string, string | undefined>) { return this.request<unknown[]>(`/api/projects/${encodeURIComponent(project)}/files${query(filters)}`); }
+  editNote(id: number, payload: Record<string, unknown>) { return this.request<unknown>(`/api/notes/${id}/edit`, json("PATCH", payload)); }
+  listFiles(project: string, filters: Record<string, string | undefined>) { return this.request<{ files: unknown[]; next_cursor: string | null }>(`/api/projects/${encodeURIComponent(project)}/files${query({ ...filters, paginated: "true" })}`).then((response) => ({ items: response.files, next_cursor: response.next_cursor })); }
   getFile(ref: string) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}`); }
   getFileEgress(ref: string) { return this.request<{ file: FileEgress }>(`/api/files/by-ref/${encodeURIComponent(ref)}/egress`).then((response) => response.file); }
   fileDownloadUrl(downloadPath: string) {
@@ -82,7 +85,7 @@ export class LaterBenderApi {
   deleteFile(ref: string) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}`, { method: "DELETE" }); }
   readFile(ref: string, representation = "auto", locator?: Record<string, unknown>) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}/read${query({ representation, locator: locator ? JSON.stringify(locator) : undefined })}`); }
   readFiles(reads: Array<Record<string, unknown>>) { return Promise.all(reads.map(async (read) => { const ref = String(read.ref); try { return { ref, read: await this.readFile(ref, String(read.representation || "auto"), read.locator as Record<string, unknown> | undefined) }; } catch (error) { if (error instanceof ApiError && error.code === "not_found") return { ref, error: "not_found" }; if (error instanceof ApiError && error.code === "validation_failed") return { ref, error: "invalid_locator" }; throw error; } })); }
-  listArchive(ref: string, input: Record<string, unknown>) { return this.request<unknown[]>(`/api/files/by-ref/${encodeURIComponent(ref)}/archive${query({ path: input.path as string | undefined, depth: input.depth?.toString(), limit: input.limit?.toString() })}`).then((response: any) => response.entries); }
+  listArchive(ref: string, input: Record<string, unknown>) { return this.request<{ entries: unknown[]; next_cursor: string | null }>(`/api/files/by-ref/${encodeURIComponent(ref)}/archive${query({ path: input.path as string | undefined, depth: input.depth?.toString(), limit: input.limit?.toString(), cursor: input.cursor as string | undefined, paginated: "true" })}`).then((response) => ({ items: response.entries, next_cursor: response.next_cursor })); }
   readArchiveEntry(ref: string, path: string, representation = "auto", locator?: Record<string, unknown>) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}/archive/entry${query({ path, representation, locator: locator ? JSON.stringify(locator) : undefined })}`).then((response: any) => response.read); }
   extractArchiveEntry(ref: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}/archive/extract`, json("POST", payload)); }
   searchMemory(input: Record<string, unknown>) { return this.request<{ results: unknown[] }>(`/api/search${query({ q: String(input.query), scope: String(input.scope || "all"), project: input.project as string | undefined, kinds: (input.kinds as string[] | undefined)?.join(","), tags: (input.tags as string[] | undefined)?.join(","), task_statuses: (input.task_statuses as string[] | undefined)?.join(","), task_priorities: (input.task_priorities as string[] | undefined)?.join(","), limit: String(input.limit || 8) })}`); }
@@ -90,7 +93,7 @@ export class LaterBenderApi {
 
 function projectView(project: unknown): unknown {
   if (!project || typeof project !== "object") return project;
-  const { archived_at: _archivedAt, ...view } = project as Record<string, unknown>;
+  const { id: _id, archived_at: _archivedAt, ...view } = project as Record<string, unknown>;
   return view;
 }
 
