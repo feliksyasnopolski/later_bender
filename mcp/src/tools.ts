@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createHash } from "node:crypto";
 import { z } from "zod";
-import { ApiError, LaterBenderApi } from "./api.js";
+import { ApiError, type FileEgress, LaterBenderApi } from "./api.js";
 
 const statuses = z.enum(["backlog", "ready", "doing", "done", "dropped"]);
 const priorities = z.enum(["low", "normal", "high"]);
@@ -65,6 +66,8 @@ const fileSearchView = (value: any): any => ({ kind: "file", ref: value.ref, num
 const citationInput = z.object({ file: z.string(), representation: z.string().optional(), locator });
 const taskFields = { title: z.string().optional(), status: statuses.optional(), position: z.number().int().optional(), priority: priorities.optional(), context: z.string().optional(), intended_direction: z.string().optional(), tags: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional(), citations: z.array(citationInput).optional() };
 const providedFile = z.object({ download_url: z.string().optional(), file_id: z.string().optional(), mime_type: z.string().optional(), file_name: z.string().optional() }).strict();
+const fileEgressTransport = z.enum(["resource_link", "embedded_resource"]);
+const MAX_EMBEDDED_FILE_BYTES = 20 * 1024 * 1024;
 
 const noteScopeInput = z.object({ scope: z.enum(["global", "project", "all"]).optional(), project: z.string().optional(), tags: z.array(z.string()).optional(), limit: z.number().int().positive().max(100).optional() }).superRefine((value, context) => {
   if (value.scope === "project" && !value.project) context.addIssue({ code: z.ZodIssueCode.custom, path: ["project"], message: "scope=project requires project" });
@@ -74,6 +77,19 @@ const searchInput = z.object({ query: z.string(), scope: z.enum(["all", "global"
   if (value.scope === "project" && !value.project) context.addIssue({ code: z.ZodIssueCode.custom, path: ["project"], message: "scope=project requires project" });
   if (value.scope !== "project" && value.project) context.addIssue({ code: z.ZodIssueCode.custom, path: ["project"], message: "project requires scope=project" });
 });
+
+async function canonicalFileBytes(api: LaterBenderApi, file: FileEgress, limit?: number): Promise<Uint8Array> {
+  if (limit !== undefined && file.byte_size > limit) throw new ApiError("validation_failed", 422, `File is too large to embed: ${file.byte_size} bytes exceeds the ${limit} byte limit`);
+  const bytes = await api.downloadFile(file.download_path);
+  if (bytes.byteLength !== file.byte_size) throw new ApiError("backend_unavailable", 502, `Canonical file size mismatch for ${file.ref}`);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (sha256 !== file.sha256) throw new ApiError("backend_unavailable", 502, `Canonical file digest mismatch for ${file.ref}`);
+  return bytes;
+}
+
+function egressMetadata(file: FileEgress) {
+  return { ref: file.ref, filename: file.filename, media_type: file.media_type, byte_size: file.byte_size, sha256: file.sha256 };
+}
 
 export function registerTools(server: McpServer, api: LaterBenderApi): void {
   server.registerTool("list_projects", { description: "List projects visible to the authenticated user.", inputSchema: {}, outputSchema: { projects: z.array(project) }, annotations: readAnnotations }, () => safe("projects", () => api.listProjects()));
@@ -96,6 +112,35 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
   server.registerTool("list_files", { description: "Browse immutable canonical Files in a project. Tags match all supplied tags.", inputSchema: { project: z.string(), tags: z.array(z.string()).optional(), limit: z.number().int().positive().max(100).optional() }, outputSchema: { files: z.array(fileSummary) }, annotations: readAnnotations }, ({ project: projectSlug, tags, limit }) => safe("files", () => api.listFiles(projectSlug, { tags: tags?.join(","), limit: limit?.toString() }).then((files: any[]) => files.map(fileView))));
   server.registerTool("get_file", { description: "Fetch canonical File metadata, relationships, and available readable representations by ref. Original bytes are not returned.", inputSchema: { ref: z.string() }, outputSchema: { file }, annotations: readAnnotations }, ({ ref }) => safe("file", () => api.getFile(ref).then(fileView)));
   server.registerTool("get_files", { description: "Fetch canonical Files by exact refs, preserving order and returning per-ref not_found entries.", inputSchema: { refs: z.array(z.string()).min(1).max(100) }, outputSchema: { results: z.array(z.union([z.object({ ref: z.string(), file }), z.object({ ref: z.string(), error: z.literal("not_found") })])) }, annotations: readAnnotations }, ({ refs }) => safe("results", () => api.getFiles(refs).then((results: any[]) => results.map((entry) => entry.file ? { ...entry, file: fileView(entry.file) } : entry))));
+  server.registerTool("view_file_image", { description: "Return the exact canonical bytes of an image File as standard MCP image content for native multimodal inspection. The File must have an image media type.", inputSchema: { ref: z.string() }, annotations: readAnnotations }, async ({ ref }) => {
+    try {
+      const file = await api.getFileEgress(ref);
+      if (!file.media_type.startsWith("image/")) throw new ApiError("validation_failed", 422, `${file.ref} is not an image File`);
+      const bytes = await canonicalFileBytes(api, file, MAX_EMBEDDED_FILE_BYTES);
+      return {
+        content: [
+          { type: "text" as const, text: JSON.stringify({ file: egressMetadata(file) }) },
+          { type: "image" as const, data: Buffer.from(bytes).toString("base64"), mimeType: file.media_type }
+        ]
+      };
+    } catch (error) {
+      return failure(error);
+    }
+  });
+  server.registerTool("retrieve_file", { description: "Return an immutable canonical File using standard MCP file content. Defaults to a short-lived resource_link suitable for client-native attachment/materialization. Use embedded_resource only as the single fallback when a client cannot consume resource links; embedded payloads are limited to 20 MiB.", inputSchema: { ref: z.string(), transport: fileEgressTransport.optional() }, annotations: readAnnotations }, async ({ ref, transport = "resource_link" }) => {
+    try {
+      const file = await api.getFileEgress(ref);
+      const downloadUrl = api.fileDownloadUrl(file.download_path);
+      const text = { type: "text" as const, text: JSON.stringify({ file: egressMetadata(file), transport }) };
+      if (transport === "resource_link") {
+        return { content: [text, { type: "resource_link" as const, uri: downloadUrl, name: file.filename, mimeType: file.media_type, size: file.byte_size, description: `Canonical Later Bender File ${file.ref}; SHA-256 ${file.sha256}` }] };
+      }
+      const bytes = await canonicalFileBytes(api, file, MAX_EMBEDDED_FILE_BYTES);
+      return { content: [text, { type: "resource" as const, resource: { uri: downloadUrl, mimeType: file.media_type, blob: Buffer.from(bytes).toString("base64") } }] };
+    } catch (error) {
+      return failure(error);
+    }
+  });
   server.registerTool("create_file", { description: "Ingest an attached immutable source artifact into a project. The file argument is a provider-supplied attachment payload; do not construct download URLs or base64 data.", inputSchema: { project: z.string(), file: providedFile, filename: z.string().optional(), tags: z.array(z.string()).optional(), related_task_refs: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional() }, outputSchema: fileMutationOutput, annotations: createAnnotations, _meta: { "openai/fileParams": ["file"] } }, ({ project: projectSlug, file: provided, ...rest }) => compactMutation("file", () => api.createFile(projectSlug, { file: provided, ...rest })));
   server.registerTool("update_file_metadata", { description: "Update mutable File metadata only. File bytes and integrity are immutable; omitted tags and relationships preserve them, while empty arrays clear them.", inputSchema: { ref: z.string(), filename: z.string().optional(), tags: z.array(z.string()).optional(), related_task_refs: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional() }, outputSchema: fileMutationOutput, annotations: updateAnnotations }, ({ ref, ...payload }) => compactMutation("file", () => api.updateFile(ref, payload)));
   server.registerTool("manage_files", { description: "Manage canonical File lifecycle operations. Supports permanently deleting a File by its external ref; File content remains immutable.", inputSchema: { operations: z.array(fileManagementOperation).min(1).max(100) }, outputSchema: manageFilesOutput, annotations: { ...updateAnnotations, idempotentHint: false } }, ({ operations }) => safe("results", () => Promise.all(operations.map(async (operation) => {

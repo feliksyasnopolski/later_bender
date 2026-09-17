@@ -4,13 +4,13 @@ import { ApiError, LaterBenderApi } from "../src/api.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "../src/tools.js";
 
-function apiFor(responses: Array<{ status: number; body: unknown }>) {
+function apiFor(responses: Array<{ status: number; body: unknown }>, publicBaseUrl?: string) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const api = new LaterBenderApi("https://example.test/laterbender", "secret", async (url, init) => {
     calls.push({ url: String(url), init });
     const response = responses.shift()!;
     return new Response(JSON.stringify(response.body), { status: response.status, headers: { "content-type": "application/json" } });
-  });
+  }, publicBaseUrl);
   return { api, calls };
 }
 
@@ -100,6 +100,79 @@ test("manage_files deletes independently, preserves order, and reports missing r
   assert.equal(tools.manage_files.outputSchema.safeParse(result.structuredContent).success, true);
 });
 
+test("view_file_image emits digest-verified canonical bytes as MCP image content", async () => {
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const sha256 = "4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6";
+  const calls: string[] = [];
+  const api = new LaterBenderApi("http://backend.internal", "secret", async (url) => {
+    calls.push(String(url));
+    if (String(url).endsWith("/egress")) {
+      return new Response(JSON.stringify({ file: { ref: "LB-F9", filename: "pixel.png", media_type: "image/png", byte_size: bytes.byteLength, sha256, download_path: "/rails/active_storage/blobs/redirect/signed/pixel.png" } }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response(bytes, { status: 200, headers: { "content-type": "image/png" } });
+  }, "https://laterbender-api.example");
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const result = await tools.view_file_image.handler({ ref: "LB-F9" });
+
+  assert.deepEqual(calls, [
+    "http://backend.internal/api/files/by-ref/LB-F9/egress",
+    "http://backend.internal/rails/active_storage/blobs/redirect/signed/pixel.png"
+  ]);
+  assert.deepEqual(result.content[1], { type: "image", data: bytes.toString("base64"), mimeType: "image/png" });
+  assert.deepEqual(JSON.parse(result.content[0].text), { file: { ref: "LB-F9", filename: "pixel.png", media_type: "image/png", byte_size: bytes.byteLength, sha256 } });
+  assert.equal(result.structuredContent, undefined);
+});
+
+test("retrieve_file emits a public MCP resource link without downloading bytes", async () => {
+  const sha256 = "a".repeat(64);
+  const { api, calls } = apiFor([{ status: 200, body: { file: { ref: "LB-F10", filename: "report.pdf", media_type: "application/pdf", byte_size: 1234, sha256, download_path: "/rails/active_storage/blobs/redirect/signed/report.pdf" } } }], "https://files.example.test");
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const result = await tools.retrieve_file.handler({ ref: "LB-F10" });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(result.content[1], {
+    type: "resource_link",
+    uri: "https://files.example.test/rails/active_storage/blobs/redirect/signed/report.pdf",
+    name: "report.pdf",
+    mimeType: "application/pdf",
+    size: 1234,
+    description: `Canonical Later Bender File LB-F10; SHA-256 ${sha256}`
+  });
+  assert.equal(result.structuredContent, undefined);
+});
+
+test("retrieve_file supports one bounded embedded-resource fallback", async () => {
+  const bytes = Buffer.from("exact binary bytes\u0000", "utf8");
+  const sha256 = "bba2a0ad2ef7c1a046daeca1721c6973e26811ca5663113889b3d78ccd6c68cf";
+  let requestCount = 0;
+  const api = new LaterBenderApi("http://backend.internal", "secret", async () => {
+    requestCount += 1;
+    if (requestCount === 1) return new Response(JSON.stringify({ file: { ref: "LB-F11", filename: "payload.bin", media_type: "application/octet-stream", byte_size: bytes.byteLength, sha256, download_path: "/rails/active_storage/blobs/redirect/signed/payload.bin" } }), { status: 200, headers: { "content-type": "application/json" } });
+    return new Response(bytes, { status: 200 });
+  }, "https://files.example.test");
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const result = await tools.retrieve_file.handler({ ref: "LB-F11", transport: "embedded_resource" });
+
+  assert.deepEqual(result.content[1], {
+    type: "resource",
+    resource: {
+      uri: "https://files.example.test/rails/active_storage/blobs/redirect/signed/payload.bin",
+      mimeType: "application/octet-stream",
+      blob: bytes.toString("base64")
+    }
+  });
+  assert.equal(requestCount, 2);
+});
+
 test("create and update mutation handlers return only an acknowledgement", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api } = apiFor([
@@ -151,7 +224,7 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task"]);
+  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image"]);
   assert.ok(tools.create_task.inputSchema);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", representation: "text", locator: { kind: "lines", start: 138, end: 152 } }]).success, true);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", locator: { kind: "bytes", start: 1, end: 2 } }]).success, false);
@@ -164,6 +237,10 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
   assert.equal(tools.update_task.annotations.destructiveHint, true);
   assert.deepEqual(tools.create_file._meta, { "openai/fileParams": ["file"] });
+  assert.equal(tools.retrieve_file.inputSchema.shape.transport.safeParse("resource_link").success, true);
+  assert.equal(tools.retrieve_file.inputSchema.shape.transport.safeParse("embedded_resource").success, true);
+  assert.equal(tools.retrieve_file.inputSchema.shape.transport.safeParse("base64_json").success, false);
+  assert.equal(tools.view_file_image.annotations.readOnlyHint, true);
   assert.match(tools.manage_files.description, /File lifecycle operations/);
   assert.equal(tools.manage_files.annotations.destructiveHint, true);
   assert.equal(tools.manage_files.annotations.idempotentHint, false);

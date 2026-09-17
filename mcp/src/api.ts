@@ -4,9 +4,24 @@ export class ApiError extends Error {
   constructor(public readonly code: ApiErrorCode, public readonly status: number, message: string, public readonly details?: unknown) { super(message); this.name = "ApiError"; }
 }
 
+export type FileEgress = {
+  ref: string;
+  filename: string;
+  media_type: string;
+  byte_size: number;
+  sha256: string;
+  download_path: string;
+};
+
 export class LaterBenderApi {
-  constructor(private readonly baseUrl = process.env.LATER_BENDER_API_BASE_URL, private readonly token?: string, private readonly fetcher: typeof fetch = fetch) {
+  constructor(
+    private readonly baseUrl = process.env.LATER_BENDER_API_BASE_URL,
+    private readonly token?: string,
+    private readonly fetcher: typeof fetch = fetch,
+    private readonly publicBaseUrl = process.env.LATER_BENDER_PUBLIC_API_BASE_URL || process.env.LATER_BENDER_OAUTH_ISSUER || baseUrl
+  ) {
     if (!baseUrl) throw new Error("LATER_BENDER_API_BASE_URL is required");
+    if (!publicBaseUrl) throw new Error("LATER_BENDER_PUBLIC_API_BASE_URL is required");
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -48,6 +63,20 @@ export class LaterBenderApi {
   updateNote(id: number, payload: Record<string, unknown>) { return this.request<unknown>(`/api/notes/${id}`, json("PATCH", payload)); }
   listFiles(project: string, filters: Record<string, string | undefined>) { return this.request<unknown[]>(`/api/projects/${encodeURIComponent(project)}/files${query(filters)}`); }
   getFile(ref: string) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}`); }
+  getFileEgress(ref: string) { return this.request<{ file: FileEgress }>(`/api/files/by-ref/${encodeURIComponent(ref)}/egress`).then((response) => response.file); }
+  fileDownloadUrl(downloadPath: string) {
+    if (!downloadPath.startsWith("/") || downloadPath.startsWith("//")) throw new ApiError("backend_unavailable", 502, "Backend returned an invalid file download path");
+    return new URL(downloadPath, this.publicBaseUrl).href;
+  }
+  async downloadFile(downloadPath: string): Promise<Uint8Array> {
+    if (!downloadPath.startsWith("/") || downloadPath.startsWith("//")) throw new ApiError("backend_unavailable", 502, "Backend returned an invalid file download path");
+    const url = new URL(downloadPath, this.baseUrl).href;
+    let response: Response;
+    try { response = await this.fetcher(url, { headers: { Accept: "*/*" } }); }
+    catch (error) { throw new ApiError("backend_unavailable", 503, error instanceof Error ? error.message : "Backend unavailable"); }
+    if (!response.ok) throw new ApiError(response.status === 404 ? "not_found" : "backend_unavailable", response.status, response.statusText || "File download failed");
+    return new Uint8Array(await response.arrayBuffer());
+  }
   getFiles(refs: string[]) { return Promise.all(refs.map(async (ref) => { try { return { ref, file: await this.getFile(ref) }; } catch (error) { if (error instanceof ApiError && error.code === "not_found") return { ref, error: "not_found" }; throw error; } })); }
   createFile(project: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/projects/${encodeURIComponent(project)}/files`, json("POST", payload)); }
   updateFile(ref: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}`, json("PATCH", payload)); }

@@ -1,7 +1,7 @@
 module Api
   class FilesController < BaseController
     before_action :set_project, only: %i[index create]
-    before_action :set_file_by_ref, only: %i[show update destroy read read_batch archive_list archive_entry archive_extract]
+    before_action :set_file_by_ref, only: %i[show update destroy read read_batch egress archive_list archive_entry archive_extract]
 
     def index
       scope = @project.stored_files.includes(:project, :tags).order(created_at: :desc)
@@ -56,6 +56,25 @@ module Api
       render json: { error: { code: "not_found", message: "Representation not found" } }, status: :not_found
     rescue ArgumentError
       render json: { error: { code: "validation_failed", message: "Invalid locator" } }, status: :unprocessable_content
+    end
+
+    def egress
+      download_path = Rails.application.routes.url_helpers.rails_blob_path(
+        @file.original,
+        disposition: "attachment",
+        expires_in: 10.minutes,
+        only_path: true
+      )
+      render json: {
+        file: {
+          ref: @file.ref,
+          filename: @file.filename,
+          media_type: @file.media_type,
+          byte_size: @file.byte_size,
+          sha256: @file.sha256,
+          download_path: download_path
+        }
+      }
     end
 
     def archive_list

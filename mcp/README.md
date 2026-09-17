@@ -9,12 +9,16 @@ and returns Rails response data or structured error codes.
 ```sh
 LATER_BENDER_API_BASE_URL=http://localhost:3000 \
 LATER_BENDER_OAUTH_ISSUER=http://localhost:3000 \
+LATER_BENDER_PUBLIC_API_BASE_URL=http://localhost:3000 \
 MCP_RESOURCE_URL=http://localhost:3001/mcp \
 MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL=true \
 npm run build && npm start
 ```
 
 The MCP endpoint is `/mcp` and the health check is `/health`.
+`LATER_BENDER_PUBLIC_API_BASE_URL` is the browser-reachable Rails origin used
+for short-lived canonical File resource links; the adapter uses the internal
+API base URL when it must fetch and verify bytes for image or embedded content.
 
 ## Production shape
 

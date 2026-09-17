@@ -199,6 +199,43 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_raises(ActiveRecord::RecordNotFound) { StoredFile.find(file.id) }
   end
 
+  test "issues a short-lived canonical file download and preserves exact bytes" do
+    bytes = "\x89PNG\r\n\x1a\ncanonical-image".b
+    file = StoredFile.new(project: @project, filename: "evidence.png", media_type: "image/png", byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes))
+    file.original.attach(io: StringIO.new(bytes), filename: "evidence.png", content_type: "image/png")
+    file.save!
+
+    get "/api/files/by-ref/#{file.ref}/egress", headers: json_headers(@raw_token)
+    assert_response :success
+    egress = json_body.fetch("file")
+    assert_equal file.ref, egress["ref"]
+    assert_equal "evidence.png", egress["filename"]
+    assert_equal "image/png", egress["media_type"]
+    assert_equal bytes.bytesize, egress["byte_size"]
+    assert_equal Digest::SHA256.hexdigest(bytes), egress["sha256"]
+    assert_match %r{\A/rails/active_storage/blobs/redirect/}, egress["download_path"]
+
+    get egress.fetch("download_path")
+    follow_redirect! while response.redirect?
+    assert_response :success
+    assert_equal bytes, response.body.b
+    assert_equal "image/png", response.media_type
+    assert_match(/attachment/, response.headers["Content-Disposition"])
+    assert_match(/evidence\.png/, response.headers["Content-Disposition"])
+  end
+
+  test "does not issue file egress for another user" do
+    other = User.create!(username: "file-owner", password: "password123")
+    project = other.projects.create!(name: "Private files", slug: "private-files", shorthand: "PF")
+    bytes = "private"
+    file = StoredFile.new(project: project, filename: "private.bin", media_type: "application/octet-stream", byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes))
+    file.original.attach(io: StringIO.new(bytes), filename: "private.bin", content_type: "application/octet-stream")
+    file.save!
+
+    get "/api/files/by-ref/#{file.ref}/egress", headers: json_headers(@raw_token)
+    assert_response :not_found
+  end
+
   test "does not expose another user's notes or permit cross-user task relations" do
     other = User.create!(username: "other-user", password: "password123")
     other_project = other.projects.create!(name: "Private", slug: "private")
