@@ -60,7 +60,7 @@ const readAnnotations = { readOnlyHint: true, destructiveHint: false, idempotent
 const createAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 const updateAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
 const result = (root: string, data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify({ [root]: data }) }], structuredContent: { [root]: data } });
-const failure = (error: unknown) => { const e = error instanceof ApiError ? error : new ApiError("backend_unavailable", 503, error instanceof Error ? error.message : "Backend unavailable"); return { content: [{ type: "text" as const, text: JSON.stringify({ error: { code: e.code, message: e.message } }) }], structuredContent: { error: { code: e.code, message: e.message } }, isError: true }; };
+const failure = (error: unknown) => { const e = error instanceof ApiError ? error : new ApiError("backend_unavailable", 503, error instanceof Error ? error.message : "Backend unavailable"); return { content: [{ type: "text" as const, text: JSON.stringify({ error: { code: e.code, message: e.message } }) }], isError: true }; };
 const safe = (root: string, fn: () => Promise<unknown>) => fn().then((data) => result(root, data)).catch(failure);
 const safeObject = (fn: () => Promise<Record<string, unknown>>) => fn().then((data) => ({ content: [{ type: "text" as const, text: JSON.stringify(data) }], structuredContent: data })).catch(failure);
 const compactMutation = (root: string, fn: () => Promise<unknown>) => safe(root, () => fn().then((value) => {

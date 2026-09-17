@@ -284,6 +284,19 @@ test("preserves Rails validation failures and distinguishes auth/backend errors"
   await assert.rejects(unavailable.listProjects(), (error: unknown) => error instanceof ApiError && error.code === "backend_unavailable");
 });
 
+test("tool failures use standard error content without schema-invalid structured content", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api } = apiFor([{ status: 422, body: { error: { code: "validation_failed", message: "Invalid cursor" } } }]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const result = await tools.list_tasks.handler({ project: "writing", cursor: "bad" });
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent, undefined);
+  assert.deepEqual(JSON.parse(result.content[0].text), { error: { code: "validation_failed", message: "Invalid cursor" } });
+});
+
 test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
