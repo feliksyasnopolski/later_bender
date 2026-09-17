@@ -222,6 +222,16 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal "image/png", response.media_type
     assert_match(/attachment/, response.headers["Content-Disposition"])
     assert_match(/evidence\.png/, response.headers["Content-Disposition"])
+
+    get "/api/files/by-ref/#{file.ref}/download", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal bytes, response.body.b
+    assert_equal "image/png", response.media_type
+    assert_match(/attachment/, response.headers["Content-Disposition"])
+    assert_match(/evidence\.png/, response.headers["Content-Disposition"])
+
+    get "/api/files/by-ref/#{file.ref}/download"
+    assert_response :unauthorized
   end
 
   test "does not issue file egress for another user" do

@@ -1,7 +1,7 @@
 module Api
   class FilesController < BaseController
     before_action :set_project, only: %i[index create]
-    before_action :set_file_by_ref, only: %i[show update destroy read read_batch egress archive_list archive_entry archive_extract]
+    before_action :set_file_by_ref, only: %i[show update destroy read read_batch egress download archive_list archive_entry archive_extract]
 
     def index
       scope = @project.stored_files.includes(:project, :tags).order(created_at: :desc)
@@ -75,6 +75,13 @@ module Api
           download_path: download_path
         }
       }
+    end
+
+    def download
+      send_data @file.original.download,
+        filename: @file.filename,
+        type: @file.media_type,
+        disposition: "attachment"
     end
 
     def archive_list

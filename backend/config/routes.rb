@@ -39,6 +39,7 @@ Rails.application.routes.draw do
     get "files/by-ref/:ref/read", to: "files#read"
     post "files/by-ref/:ref/read-batch", to: "files#read_batch"
     get "files/by-ref/:ref/egress", to: "files#egress"
+    get "files/by-ref/:ref/download", to: "files#download"
     get "files/by-ref/:ref/archive", to: "files#archive_list"
     get "files/by-ref/:ref/archive/entry", to: "files#archive_entry"
     post "files/by-ref/:ref/archive/extract", to: "files#archive_extract"

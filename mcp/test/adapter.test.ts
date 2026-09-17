@@ -104,11 +104,13 @@ test("view_file_image emits digest-verified canonical bytes as MCP image content
   const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const sha256 = "4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6";
   const calls: string[] = [];
-  const api = new LaterBenderApi("http://backend.internal", "secret", async (url) => {
+  let downloadAuthorization: string | null = null;
+  const api = new LaterBenderApi("http://backend.internal", "secret", async (url, init) => {
     calls.push(String(url));
     if (String(url).endsWith("/egress")) {
       return new Response(JSON.stringify({ file: { ref: "LB-F9", filename: "pixel.png", media_type: "image/png", byte_size: bytes.byteLength, sha256, download_path: "/rails/active_storage/blobs/redirect/signed/pixel.png" } }), { status: 200, headers: { "content-type": "application/json" } });
     }
+    downloadAuthorization = new Headers(init?.headers).get("authorization");
     return new Response(bytes, { status: 200, headers: { "content-type": "image/png" } });
   }, "https://laterbender-api.example");
   const server = new McpServer({ name: "test", version: "1" });
@@ -119,8 +121,9 @@ test("view_file_image emits digest-verified canonical bytes as MCP image content
 
   assert.deepEqual(calls, [
     "http://backend.internal/api/files/by-ref/LB-F9/egress",
-    "http://backend.internal/rails/active_storage/blobs/redirect/signed/pixel.png"
+    "http://backend.internal/api/files/by-ref/LB-F9/download"
   ]);
+  assert.equal(downloadAuthorization, "Bearer secret");
   assert.deepEqual(result.content[1], { type: "image", data: bytes.toString("base64"), mimeType: "image/png" });
   assert.deepEqual(JSON.parse(result.content[0].text), { file: { ref: "LB-F9", filename: "pixel.png", media_type: "image/png", byte_size: bytes.byteLength, sha256 } });
   assert.equal(result.structuredContent, undefined);

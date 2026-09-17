@@ -68,11 +68,10 @@ export class LaterBenderApi {
     if (!downloadPath.startsWith("/") || downloadPath.startsWith("//")) throw new ApiError("backend_unavailable", 502, "Backend returned an invalid file download path");
     return new URL(downloadPath, this.publicBaseUrl).href;
   }
-  async downloadFile(downloadPath: string): Promise<Uint8Array> {
-    if (!downloadPath.startsWith("/") || downloadPath.startsWith("//")) throw new ApiError("backend_unavailable", 502, "Backend returned an invalid file download path");
-    const url = new URL(downloadPath, this.baseUrl).href;
+  async downloadFile(ref: string): Promise<Uint8Array> {
+    const url = `${this.baseUrl!.replace(/\/$/, "")}/api/files/by-ref/${encodeURIComponent(ref)}/download`;
     let response: Response;
-    try { response = await this.fetcher(url, { headers: { Accept: "*/*" } }); }
+    try { response = await this.fetcher(url, { headers: { Accept: "*/*", ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) } }); }
     catch (error) { throw new ApiError("backend_unavailable", 503, error instanceof Error ? error.message : "Backend unavailable"); }
     if (!response.ok) throw new ApiError(response.status === 404 ? "not_found" : "backend_unavailable", response.status, response.statusText || "File download failed");
     return new Uint8Array(await response.arrayBuffer());

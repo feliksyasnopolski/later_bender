@@ -80,7 +80,7 @@ const searchInput = z.object({ query: z.string(), scope: z.enum(["all", "global"
 
 async function canonicalFileBytes(api: LaterBenderApi, file: FileEgress, limit?: number): Promise<Uint8Array> {
   if (limit !== undefined && file.byte_size > limit) throw new ApiError("validation_failed", 422, `File is too large to embed: ${file.byte_size} bytes exceeds the ${limit} byte limit`);
-  const bytes = await api.downloadFile(file.download_path);
+  const bytes = await api.downloadFile(file.ref);
   if (bytes.byteLength !== file.byte_size) throw new ApiError("backend_unavailable", 502, `Canonical file size mismatch for ${file.ref}`);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   if (sha256 !== file.sha256) throw new ApiError("backend_unavailable", 502, `Canonical file digest mismatch for ${file.ref}`);
