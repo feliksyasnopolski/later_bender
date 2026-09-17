@@ -177,6 +177,32 @@ test("retrieve_file defaults to a bounded embedded resource with a clean filenam
   assert.equal(requestCount, 2);
 });
 
+test("retrieve_file openai_meta_probe emits one experimental response file reference", async () => {
+  const sha256 = "d279e6df6cef6b455e684f84e0a170118a69afd4489e294cf541899dcfc8f2c1";
+  const { api, calls } = apiFor([{ status: 200, body: { file: { ref: "LB-F6", filename: "archive-fixture.zip", media_type: "application/zip", byte_size: 732, sha256, download_path: "/rails/active_storage/blobs/redirect/signed/archive-fixture.zip?disposition=attachment" } } }], "https://files.example.test");
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const result = await tools.retrieve_file.handler({ ref: "LB-F6", transport: "openai_meta_probe" });
+
+  assert.equal(calls.length, 1);
+  assert.equal(result.content.length, 1);
+  assert.deepEqual(result._meta, {
+    "openai/file": {
+      download_url: "https://files.example.test/rails/active_storage/blobs/redirect/signed/archive-fixture.zip?disposition=attachment",
+      file_id: "later-bender:LB-F6",
+      mime_type: "application/zip",
+      file_name: "archive-fixture.zip"
+    }
+  });
+  assert.deepEqual(JSON.parse(result.content[0].text), {
+    file: { ref: "LB-F6", filename: "archive-fixture.zip", media_type: "application/zip", byte_size: 732, sha256 },
+    transport: "openai_meta_probe"
+  });
+  assert.equal(result.structuredContent, undefined);
+});
+
 test("create and update mutation handlers return only an acknowledgement", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api } = apiFor([
@@ -243,7 +269,9 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.deepEqual(tools.create_file._meta, { "openai/fileParams": ["file"] });
   assert.equal(tools.retrieve_file.inputSchema.shape.transport.safeParse("resource_link").success, true);
   assert.equal(tools.retrieve_file.inputSchema.shape.transport.safeParse("embedded_resource").success, true);
+  assert.equal(tools.retrieve_file.inputSchema.shape.transport.safeParse("openai_meta_probe").success, true);
   assert.equal(tools.retrieve_file.inputSchema.shape.transport.safeParse("base64_json").success, false);
+  assert.match(tools.retrieve_file.description, /openai_meta_probe.*experimental.*_meta/i);
   assert.equal(tools.view_file_image.annotations.readOnlyHint, true);
   assert.match(tools.manage_files.description, /File lifecycle operations/);
   assert.equal(tools.manage_files.annotations.destructiveHint, true);
