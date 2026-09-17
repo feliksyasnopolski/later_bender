@@ -66,11 +66,7 @@ const fileSearchView = (value: any): any => ({ kind: "file", ref: value.ref, num
 const citationInput = z.object({ file: z.string(), representation: z.string().optional(), locator });
 const taskFields = { title: z.string().optional(), status: statuses.optional(), position: z.number().int().optional(), priority: priorities.optional(), context: z.string().optional(), intended_direction: z.string().optional(), tags: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional(), citations: z.array(citationInput).optional() };
 const providedFile = z.object({ download_url: z.string().optional(), file_id: z.string().optional(), mime_type: z.string().optional(), file_name: z.string().optional() }).strict();
-const fileEgressTransport = z.enum(["resource_link", "embedded_resource", "openai_meta_probe"]);
-// Experimental only: OpenAI documents `openai/fileParams` on tool descriptors
-// for inbound files, but does not document a result-side file-reference key.
-// This single minimal placement is a controlled probe, not a production contract.
-const OPENAI_META_PROBE_KEY = "openai/file";
+const fileEgressTransport = z.enum(["resource_link", "embedded_resource"]);
 const MAX_EMBEDDED_FILE_BYTES = 20 * 1024 * 1024;
 
 const noteScopeInput = z.object({ scope: z.enum(["global", "project", "all"]).optional(), project: z.string().optional(), tags: z.array(z.string()).optional(), limit: z.number().int().positive().max(100).optional() }).superRefine((value, context) => {
@@ -131,24 +127,11 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       return failure(error);
     }
   });
-  server.registerTool("retrieve_file", { description: "Return an immutable canonical File using standard MCP file content. Defaults to an embedded_resource for client-native attachment/materialization; embedded payloads are limited to 20 MiB. Use resource_link as the supported alternative for clients that consume short-lived download links. openai_meta_probe is an experimental response-side _meta probe, not a supported contract.", inputSchema: { ref: z.string(), transport: fileEgressTransport.optional() }, annotations: readAnnotations }, async ({ ref, transport = "embedded_resource" }) => {
+  server.registerTool("retrieve_file", { description: "Return an immutable canonical File using standard MCP file content. Defaults to an embedded_resource for client-native attachment/materialization; embedded payloads are limited to 20 MiB. Use resource_link as the single alternative for clients that consume short-lived download links.", inputSchema: { ref: z.string(), transport: fileEgressTransport.optional() }, annotations: readAnnotations }, async ({ ref, transport = "embedded_resource" }) => {
     try {
       const file = await api.getFileEgress(ref);
       const downloadUrl = api.fileDownloadUrl(file.download_path);
       const text = { type: "text" as const, text: JSON.stringify({ file: egressMetadata(file), transport }) };
-      if (transport === "openai_meta_probe") {
-        return {
-          content: [text],
-          _meta: {
-            [OPENAI_META_PROBE_KEY]: {
-              download_url: downloadUrl,
-              file_id: `later-bender:${file.ref}`,
-              mime_type: file.media_type,
-              file_name: file.filename
-            }
-          }
-        };
-      }
       if (transport === "resource_link") {
         return { content: [text, { type: "resource_link" as const, uri: downloadUrl, name: file.filename, mimeType: file.media_type, size: file.byte_size, description: `Canonical Later Bender File ${file.ref}; SHA-256 ${file.sha256}` }] };
       }
