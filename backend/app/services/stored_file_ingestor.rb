@@ -9,38 +9,56 @@ class StoredFileIngestor
     new(...).call
   end
 
-  def initialize(project:, payload:, filename: nil, tags: nil, related_task_refs: nil, related_note_ids: nil, opener: URI.method(:open))
+  def initialize(project:, payload: nil, url: nil, filename: nil, tags: nil, related_task_refs: nil, related_note_ids: nil, opener: URI.method(:open), url_fetcher: UrlFileFetcher.method(:call))
     @project = project
     @payload = payload
-    @filename = filename.presence || payload["file_name"].presence
+    @url = url
+    @filename = filename.presence || payload&.dig("file_name").presence
     @tags = tags
     @related_task_refs = related_task_refs
     @related_note_ids = related_note_ids
     @opener = opener
+    @url_fetcher = url_fetcher
   end
 
   def call
-    raise ActiveRecord::RecordInvalid, invalid_record("filename", "is required") if @filename.blank?
+    file_source = !@payload.nil?
+    url_source = !@url.nil?
+    raise FileIngestionError.new("source_required", "Exactly one of file or url is required") unless file_source || url_source
+    raise FileIngestionError.new("source_conflict", "Exactly one of file or url is required") if file_source && url_source
+    raise ActiveRecord::RecordInvalid, invalid_record("filename", "is required") if file_source && @filename.blank?
     tasks = resolve_tasks if @related_task_refs
     notes = resolve_notes if @related_note_ids
 
-    tempfile = Tempfile.new([ "later-bender-file", File.extname(@filename) ])
-    tempfile.binmode
-    digest = Digest::SHA256.new
-    begin
-      byte_size = download_to(tempfile, digest)
-    rescue OpenURI::HTTPError, SocketError, Timeout::Error, IOError => error
-      raise ActiveRecord::RecordInvalid, invalid_record("file", "provider download failed: #{error.message}")
+    if url_source
+      fetched = @url_fetcher.call(url: @url, filename: @filename)
+      tempfile = fetched.tempfile
+      @filename = fetched.filename
+      media_type = fetched.media_type
+      byte_size = fetched.byte_size
+      sha256 = fetched.sha256
+      origin = fetched.origin
+    else
+      tempfile = Tempfile.new([ "later-bender-file", File.extname(@filename) ])
+      tempfile.binmode
+      digest = Digest::SHA256.new
+      begin
+        byte_size = download_to(tempfile, digest)
+      rescue OpenURI::HTTPError, SocketError, Timeout::Error, IOError => error
+        raise ActiveRecord::RecordInvalid, invalid_record("file", "provider download failed: #{error.message}")
+      end
+      tempfile.rewind
+      media_type = supplied_media_type.presence || "application/octet-stream"
+      sha256 = digest.hexdigest
+      origin = nil
     end
-    tempfile.rewind
-    media_type = supplied_media_type.presence || "application/octet-stream"
 
     begin
       StoredFile.transaction do
-        file = @project.stored_files.new(filename: @filename, media_type: media_type, byte_size: byte_size, sha256: digest.hexdigest)
+        file = @project.stored_files.new(filename: @filename, media_type:, byte_size:, sha256:, origin:)
         file.save!
         file.original.attach(io: tempfile, filename: @filename, content_type: media_type)
-        file.update!(byte_size: byte_size, sha256: digest.hexdigest)
+        file.update!(byte_size:, sha256:)
         TagReconciler.call(file, @tags) if @tags
         file.tasks = tasks if @related_task_refs
         file.notes = notes if @related_note_ids

@@ -17,6 +17,8 @@ class StoredFile < ApplicationRecord
   validates :byte_size, presence: true, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validates :sha256, presence: true, format: { with: /\A\h{64}\z/ }
   validate :number_is_immutable, on: :update
+  validate :origin_is_immutable, on: :update
+  validate :url_origin_is_valid
   validate :original_is_attached
   validate :archive_provenance_is_complete
   before_validation :allocate_number, on: :create
@@ -68,6 +70,16 @@ class StoredFile < ApplicationRecord
 
   def number_is_immutable
     errors.add(:number, "cannot be changed") if number_changed?
+  end
+
+  def origin_is_immutable
+    errors.add(:origin, "cannot be changed") if origin_changed?
+  end
+
+  def url_origin_is_valid
+    return if origin.blank?
+    required = %w[kind requested_url final_url fetched_at]
+    errors.add(:origin, "is invalid") unless origin.is_a?(Hash) && origin["kind"] == "url" && required.all? { |key| origin[key].present? }
   end
 
   def original_is_attached

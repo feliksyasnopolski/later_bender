@@ -199,6 +199,34 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_raises(ActiveRecord::RecordNotFound) { StoredFile.find(file.id) }
   end
 
+  test "creates a URL-backed file with structured provenance and stable source errors" do
+    post "/api/projects/writing/files", params: {}.to_json, headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    assert_equal "source_required", json_body.dig("error", "code")
+
+    post "/api/projects/writing/files", params: { file: {}, url: "https://public.example/report.txt" }.to_json, headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    assert_equal "source_conflict", json_body.dig("error", "code")
+
+    bytes = "downloaded evidence\n"
+    origin = {
+      "kind" => "url",
+      "requested_url" => "https://public.example/report.txt",
+      "final_url" => "https://cdn.example/report.txt",
+      "fetched_at" => "2026-09-17T12:00:00.000000Z"
+    }
+    file = StoredFile.new(project: @project, filename: "report.txt", media_type: "text/plain", byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes), origin:)
+    file.original.attach(io: StringIO.new(bytes), filename: "report.txt", content_type: "text/plain")
+    file.save!
+
+    get "/api/files/by-ref/#{file.ref}", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "report.txt", json_body["filename"]
+    assert_equal bytes.bytesize, json_body["byte_size"]
+    assert_equal Digest::SHA256.hexdigest(bytes), json_body["sha256"]
+    assert_equal origin, json_body.dig("provenance", "origin")
+  end
+
   test "issues a short-lived canonical file download and preserves exact bytes" do
     bytes = "\x89PNG\r\n\x1a\ncanonical-image".b
     file = StoredFile.new(project: @project, filename: "evidence.png", media_type: "image/png", byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes))

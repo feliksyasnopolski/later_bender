@@ -31,7 +31,9 @@ const noteDeletionOutput = { note: z.object({ id: z.number() }) };
 const fileProject = z.object({ slug: z.string(), shorthand: z.string(), name: z.string() });
 const fileSummary = z.object({ ref: z.string(), number: z.number(), filename: z.string(), media_type: z.string(), byte_size: z.number(), sha256: z.string(), tags: z.array(z.string()), project: fileProject, created_at: timestamp, updated_at: timestamp });
 const representation = z.object({ kind: z.string(), media_type: z.string().nullable(), coordinate: z.string().nullable() });
-const file = fileSummary.extend({ related_task_refs: z.array(z.string()), related_note_ids: z.array(z.number()), representations: z.array(representation) });
+const urlOrigin = z.object({ kind: z.literal("url"), requested_url: z.string(), final_url: z.string(), fetched_at: timestamp, etag: z.string().optional(), last_modified: z.string().optional() });
+const fileProvenance = z.object({ archive_ref: z.string().optional(), entry_path: z.string().optional(), origin: urlOrigin.optional() }).nullable();
+const file = fileSummary.extend({ related_task_refs: z.array(z.string()), related_note_ids: z.array(z.number()), representations: z.array(representation), provenance: fileProvenance });
 const archiveEntry = z.object({ path: z.string(), kind: z.enum(["file", "directory", "symlink"]), uncompressed_size: z.number().nullable(), compressed_size: z.number().nullable(), media_type: z.string().nullable(), encrypted: z.boolean(), readable: z.boolean() });
 const fileMutationOutput = { file: z.object({ ref: z.string(), updated_at: timestamp }) };
 const fileManagementOperation = z.discriminatedUnion("operation", [
@@ -80,6 +82,10 @@ const fileSearchView = (value: any): any => ({ kind: "file", ref: value.ref, num
 const citationInput = z.object({ file: z.string(), representation: z.string().optional(), locator });
 const taskFields = { title: z.string().optional(), status: statuses.optional(), position: z.number().int().optional(), priority: priorities.optional(), context: z.string().optional(), intended_direction: z.string().optional(), tags: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional(), citations: z.array(citationInput).optional() };
 const providedFile = z.object({ download_url: z.string().optional(), file_id: z.string().optional(), mime_type: z.string().optional(), file_name: z.string().optional() }).strict();
+const createFileInput = z.object({ project: z.string(), file: providedFile.optional(), url: z.string().min(1).optional(), filename: z.string().optional(), tags: z.array(z.string()).optional(), related_task_refs: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional() }).superRefine((value, context) => {
+  if (value.file === undefined && value.url === undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["file"], message: "Exactly one of file or url is required" });
+  if (value.file !== undefined && value.url !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["url"], message: "Exactly one of file or url is required" });
+});
 const fileEgressTransport = z.enum(["resource_link", "embedded_resource"]);
 const MAX_EMBEDDED_FILE_BYTES = 20 * 1024 * 1024;
 
@@ -159,7 +165,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       return failure(error);
     }
   });
-  server.registerTool("create_file", { description: "Ingest an attached immutable source artifact into a project. The file argument is a provider-supplied attachment payload; do not construct download URLs or base64 data.", inputSchema: { project: z.string(), file: providedFile, filename: z.string().optional(), tags: z.array(z.string()).optional(), related_task_refs: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional() }, outputSchema: fileMutationOutput, annotations: createAnnotations, _meta: { "openai/fileParams": ["file"] } }, ({ project: projectSlug, file: provided, ...rest }) => compactMutation("file", () => api.createFile(projectSlug, { file: provided, ...rest })));
+  server.registerTool("create_file", { description: "Create one canonical immutable File from exactly one source. For an attached artifact, supply the provider-supplied file payload; do not construct attachment URLs or base64 data. For a remote public HTTP(S) artifact, supply url and Later Bender will fetch it with bounded network-safety controls. Exactly one of file or url is required.", inputSchema: createFileInput, outputSchema: fileMutationOutput, annotations: createAnnotations, _meta: { "openai/fileParams": ["file"] } }, ({ project: projectSlug, file: provided, url, ...rest }) => compactMutation("file", () => api.createFile(projectSlug, { ...(provided === undefined ? {} : { file: provided }), ...(url === undefined ? {} : { url }), ...rest })));
   server.registerTool("update_file_metadata", { description: "Update mutable File metadata only. File bytes and integrity are immutable; omitted tags and relationships preserve them, while empty arrays clear them.", inputSchema: { ref: z.string(), filename: z.string().optional(), tags: z.array(z.string()).optional(), related_task_refs: z.array(z.string()).optional(), related_note_ids: z.array(z.number().int().positive()).optional() }, outputSchema: fileMutationOutput, annotations: updateAnnotations }, ({ ref, ...payload }) => compactMutation("file", () => api.updateFile(ref, payload)));
   server.registerTool("manage_files", { description: "Manage canonical File lifecycle operations. Supports permanently deleting a File by its external ref; File content remains immutable.", inputSchema: { operations: z.array(fileManagementOperation).min(1).max(100) }, outputSchema: manageFilesOutput, annotations: { ...updateAnnotations, idempotentHint: false } }, ({ operations }) => safe("results", () => Promise.all(operations.map(async (operation) => {
     try {

@@ -101,6 +101,33 @@ test("manage_files deletes independently, preserves order, and reports missing r
   assert.equal(tools.manage_files.outputSchema.safeParse(result.structuredContent).success, true);
 });
 
+test("create_file accepts exactly one attachment or URL source and preserves URL acknowledgements", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api, calls } = apiFor([{ status: 201, body: { ref: "LB-F20", updated_at: "2026-09-17T12:00:00Z", filename: "ignored.txt" } }]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+  const schema = tools.create_file.inputSchema;
+
+  assert.equal(schema.safeParse({ project: "later-bender", file: { file_id: "file-1" } }).success, true);
+  assert.equal(schema.safeParse({ project: "later-bender", url: "https://example.com/report.pdf" }).success, true);
+  assert.equal(schema.safeParse({ project: "later-bender" }).success, false);
+  assert.equal(schema.safeParse({ project: "later-bender", file: {}, url: "https://example.com/report.pdf" }).success, false);
+  assert.deepEqual(tools.create_file._meta, { "openai/fileParams": ["file"] });
+  assert.match(tools.create_file.description, /attached artifact.*file.*remote public HTTP\(S\).*url.*Exactly one/s);
+
+  const result = await tools.create_file.handler({ project: "later-bender", url: "https://example.com/report.pdf", tags: ["source"] });
+  assert.deepEqual(result.structuredContent, { file: { ref: "LB-F20", updated_at: "2026-09-17T12:00:00Z" } });
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { url: "https://example.com/report.pdf", tags: ["source"] });
+});
+
+test("preserves stable URL-ingestion errors from the backend", async () => {
+  const { api } = apiFor([{ status: 422, body: { error: { code: "blocked_destination", message: "URL points to a blocked destination" } } }]);
+  await assert.rejects(
+    api.createFile("later-bender", { url: "http://127.0.0.1/" }),
+    (error: unknown) => error instanceof ApiError && error.code === "blocked_destination" && error.message === "URL points to a blocked destination"
+  );
+});
+
 test("view_file_image emits digest-verified canonical bytes as MCP image content", async () => {
   const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   const sha256 = "4c4b6a3be1314ab86138bef4314dde022e600960d8689a2c8f8631802d20dab6";
@@ -335,6 +362,7 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, true);
   assert.equal(tools.search_memory.outputSchema.safeParse({ results: [{ kind: "note", id: 1, project: null, title: "Decision", snippet: "Decision", highlights: [], tags: [], status: "done", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }] }).success, false);
   assert.equal(tools.get_note.outputSchema.safeParse({ note: { id: 1, project: null, title: "Decision", tags: [], body: "evidence", related_task_refs: [], related_tasks: [], related_files: [], citations: [{ file: "LB-F7", representation: "text", locator: { kind: "pages", start: 1, end: 2 } }], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" } }).success, true);
+  assert.equal(tools.get_file.outputSchema.safeParse({ file: { ref: "LB-F7", number: 7, filename: "report.txt", media_type: "text/plain", byte_size: 4, sha256: "a".repeat(64), tags: [], project: { slug: "later-bender", shorthand: "LB", name: "Later Bender" }, related_task_refs: [], related_note_ids: [], representations: [], provenance: { origin: { kind: "url", requested_url: "https://example.com/report.txt", final_url: "https://cdn.example.com/report.txt", fetched_at: "2026-09-17T12:00:00Z" } }, created_at: "2026-09-17T12:00:00Z", updated_at: "2026-09-17T12:00:00Z" } }).success, true);
   assert.equal(tools.list_notes.inputSchema.safeParse({ scope: "project" }).success, false);
   assert.equal(tools.list_notes.inputSchema.safeParse({ scope: "global", project: "writing" }).success, false);
   assert.equal(tools.list_notes.inputSchema.safeParse({}).success, true);

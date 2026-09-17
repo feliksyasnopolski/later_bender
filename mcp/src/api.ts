@@ -1,4 +1,4 @@
-export type ApiErrorCode = "unauthorized" | "not_found" | "validation_failed" | "backend_unavailable";
+export type ApiErrorCode = "unauthorized" | "not_found" | "validation_failed" | "backend_unavailable" | "source_required" | "source_conflict" | "unsupported_url_scheme" | "invalid_url" | "blocked_destination" | "redirect_blocked_destination" | "too_many_redirects" | "fetch_timeout" | "upstream_http_failure" | "file_too_large" | "empty_fetch";
 
 export class ApiError extends Error {
   constructor(public readonly code: ApiErrorCode, public readonly status: number, message: string, public readonly details?: unknown) { super(message); this.name = "ApiError"; }
@@ -34,7 +34,7 @@ export class LaterBenderApi {
     const body = await response.json().catch(() => undefined);
     if (!response.ok) {
       const error = body?.error;
-      const code: ApiErrorCode = response.status === 401 ? "unauthorized" : response.status === 404 ? "not_found" : response.status === 422 ? "validation_failed" : "backend_unavailable";
+      const code: ApiErrorCode = response.status === 401 ? "unauthorized" : response.status === 404 ? "not_found" : response.status === 422 && typeof error?.code === "string" ? error.code : response.status === 422 ? "validation_failed" : "backend_unavailable";
       throw new ApiError(code, response.status, error?.message || (typeof error === "string" ? error : response.statusText), error?.details);
     }
     return body as T;

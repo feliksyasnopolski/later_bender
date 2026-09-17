@@ -39,6 +39,33 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_equal Digest::SHA256.hexdigest(bytes), file.sha256
   end
 
+  test "persists a URL fetch through the canonical immutable ingestion path" do
+    user = User.create!(username: "url-ingest-user", password: "password123")
+    project = user.projects.create!(name: "URL ingest", slug: "url-ingest", shorthand: "UI")
+    bytes = "remote bytes\n"
+    tempfile = Tempfile.new("url-ingest-test")
+    tempfile.binmode
+    tempfile.write(bytes)
+    tempfile.rewind
+    origin = {
+      "kind" => "url",
+      "requested_url" => "https://public.example/source",
+      "final_url" => "https://cdn.example/source.txt",
+      "fetched_at" => "2026-09-17T12:00:00.000000Z"
+    }
+    result = UrlFileFetcher::Result.new(tempfile:, filename: "source.txt", media_type: "text/plain", byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes), origin:)
+    fetcher = ->(**) { result }
+
+    file = StoredFileIngestor.call(project:, url: "https://public.example/source", tags: [ "evidence" ], url_fetcher: fetcher)
+
+    assert_equal bytes, file.original.download
+    assert_equal "source.txt", file.filename
+    assert_equal "text/plain", file.media_type
+    assert_equal origin, file.origin
+    assert_equal [ "evidence" ], file.tags.pluck(:name)
+    assert_raises(ActiveRecord::RecordInvalid) { file.update!(origin: origin.merge("final_url" => "https://other.example/")) }
+  end
+
   test "derives bounded readable text with line coordinates" do
     user = User.create!(username: "reader-user", password: "password123")
     project = user.projects.create!(name: "Reader", slug: "reader-files", shorthand: "RF")

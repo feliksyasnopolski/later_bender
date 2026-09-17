@@ -25,8 +25,12 @@ module Api
 
     def create
       payload = request_payload
-      file = StoredFileIngestor.call(project: @project, payload: payload.fetch("file", {}), filename: payload["filename"], tags: payload["tags"], related_task_refs: payload["related_task_refs"], related_note_ids: payload["related_note_ids"])
+      file = StoredFileIngestor.call(project: @project, payload: payload["file"], url: payload["url"], filename: payload["filename"], tags: payload["tags"], related_task_refs: payload["related_task_refs"], related_note_ids: payload["related_note_ids"])
       render json: { ref: file.ref, updated_at: file.updated_at }, status: :created
+    end
+
+    rescue_from FileIngestionError do |error|
+      render json: { error: { code: error.code, message: error.message } }, status: :unprocessable_content
     end
 
     def show
