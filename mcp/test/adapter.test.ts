@@ -136,7 +136,7 @@ test("retrieve_file emits a public MCP resource link without downloading bytes",
   registerTools(server, api);
   const tools = (server as any)._registeredTools as Record<string, any>;
 
-  const result = await tools.retrieve_file.handler({ ref: "LB-F10" });
+  const result = await tools.retrieve_file.handler({ ref: "LB-F10", transport: "resource_link" });
 
   assert.equal(calls.length, 1);
   assert.deepEqual(result.content[1], {
@@ -150,20 +150,20 @@ test("retrieve_file emits a public MCP resource link without downloading bytes",
   assert.equal(result.structuredContent, undefined);
 });
 
-test("retrieve_file supports one bounded embedded-resource fallback", async () => {
+test("retrieve_file defaults to a bounded embedded resource with a clean filename URI", async () => {
   const bytes = Buffer.from("exact binary bytes\u0000", "utf8");
   const sha256 = "bba2a0ad2ef7c1a046daeca1721c6973e26811ca5663113889b3d78ccd6c68cf";
   let requestCount = 0;
   const api = new LaterBenderApi("http://backend.internal", "secret", async () => {
     requestCount += 1;
-    if (requestCount === 1) return new Response(JSON.stringify({ file: { ref: "LB-F11", filename: "payload.bin", media_type: "application/octet-stream", byte_size: bytes.byteLength, sha256, download_path: "/rails/active_storage/blobs/redirect/signed/payload.bin" } }), { status: 200, headers: { "content-type": "application/json" } });
+    if (requestCount === 1) return new Response(JSON.stringify({ file: { ref: "LB-F11", filename: "payload.bin", media_type: "application/octet-stream", byte_size: bytes.byteLength, sha256, download_path: "/rails/active_storage/blobs/redirect/signed/payload.bin?disposition=attachment" } }), { status: 200, headers: { "content-type": "application/json" } });
     return new Response(bytes, { status: 200 });
   }, "https://files.example.test");
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, api);
   const tools = (server as any)._registeredTools as Record<string, any>;
 
-  const result = await tools.retrieve_file.handler({ ref: "LB-F11", transport: "embedded_resource" });
+  const result = await tools.retrieve_file.handler({ ref: "LB-F11" });
 
   assert.deepEqual(result.content[1], {
     type: "resource",
@@ -173,6 +173,7 @@ test("retrieve_file supports one bounded embedded-resource fallback", async () =
       blob: bytes.toString("base64")
     }
   });
+  assert.equal(JSON.parse(result.content[0].text).transport, "embedded_resource");
   assert.equal(requestCount, 2);
 });
 

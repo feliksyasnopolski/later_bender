@@ -127,7 +127,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       return failure(error);
     }
   });
-  server.registerTool("retrieve_file", { description: "Return an immutable canonical File using standard MCP file content. Defaults to a short-lived resource_link suitable for client-native attachment/materialization. Use embedded_resource only as the single fallback when a client cannot consume resource links; embedded payloads are limited to 20 MiB.", inputSchema: { ref: z.string(), transport: fileEgressTransport.optional() }, annotations: readAnnotations }, async ({ ref, transport = "resource_link" }) => {
+  server.registerTool("retrieve_file", { description: "Return an immutable canonical File using standard MCP file content. Defaults to an embedded_resource for client-native attachment/materialization; embedded payloads are limited to 20 MiB. Use resource_link as the single alternative for clients that consume short-lived download links.", inputSchema: { ref: z.string(), transport: fileEgressTransport.optional() }, annotations: readAnnotations }, async ({ ref, transport = "embedded_resource" }) => {
     try {
       const file = await api.getFileEgress(ref);
       const downloadUrl = api.fileDownloadUrl(file.download_path);
@@ -136,7 +136,9 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
         return { content: [text, { type: "resource_link" as const, uri: downloadUrl, name: file.filename, mimeType: file.media_type, size: file.byte_size, description: `Canonical Later Bender File ${file.ref}; SHA-256 ${file.sha256}` }] };
       }
       const bytes = await canonicalFileBytes(api, file, MAX_EMBEDDED_FILE_BYTES);
-      return { content: [text, { type: "resource" as const, resource: { uri: downloadUrl, mimeType: file.media_type, blob: Buffer.from(bytes).toString("base64") } }] };
+      const embeddedUri = new URL(downloadUrl);
+      embeddedUri.search = "";
+      return { content: [text, { type: "resource" as const, resource: { uri: embeddedUri.href, mimeType: file.media_type, blob: Buffer.from(bytes).toString("base64") } }] };
     } catch (error) {
       return failure(error);
     }
