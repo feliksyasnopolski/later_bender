@@ -10,6 +10,7 @@ Group=docker
 EnvironmentFile=/etc/later-bender/workspace-runner.env
 WorkingDirectory=/opt/later-bender/runner
 ExecStart=/usr/bin/python3 /opt/later-bender/runner/server.py
+ExecStartPre=/opt/later-bender/runner/network-policy.sh
 Restart=always
 RestartSec=2
 NoNewPrivileges=false

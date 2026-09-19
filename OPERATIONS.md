@@ -120,8 +120,14 @@ runner source is under `runner/`; it uses the host Docker daemon and stores
 transient state under `/var/lib/later-bender/workspaces`. Rails reaches it via
 `WORKSPACE_RUNNER_URL` with the out-of-band `workspace-runner-token` Secret
 key. Rails/MCP pods must not receive Docker or containerd sockets. Keep the
-runner on an isolated listener/network and complete the runner's network,
-resource, restart, and cleanup acceptance before advertising capabilities.
+runner on an isolated listener/network. The host service creates the
+`later-bender-workspaces` bridge, applies the `DOCKER-USER` and bridge-input
+egress policy from `runner/network-policy.sh`, and disables IPv6 in Workspace
+containers. Public IPv4 egress is allowed; host, private, Kubernetes,
+database, Elasticsearch, and other-Workspace destinations are denied. The
+runner and the `workspaces:reap` CronJob independently reap expired state.
+Disk quota remains a documented soft limit; do not represent it as a hard
+enforcement boundary.
 
 ## Deployment verification
 

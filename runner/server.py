@@ -28,12 +28,21 @@ TOKEN = os.environ.get("WORKSPACE_RUNNER_TOKEN", "")
 HOST = os.environ.get("WORKSPACE_RUNNER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("WORKSPACE_RUNNER_PORT", "8787"))
 NETWORK = os.environ.get("WORKSPACE_DOCKER_NETWORK", "none")
+DEFAULT_TTL_SECONDS = int(os.environ.get("WORKSPACE_DEFAULT_TTL_SECONDS", "86400"))
+REAPER_INTERVAL_SECONDS = int(os.environ.get("WORKSPACE_REAPER_INTERVAL_SECONDS", "60"))
 MAX_CHUNK = 256 * 1024
 lock = threading.RLock()
 
 
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def expiry(payload):
+    requested = int(payload.get("ttl_seconds", DEFAULT_TTL_SECONDS))
+    if requested < 1 or requested > 7 * 24 * 60 * 60:
+        raise ValueError("invalid_expiry")
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + requested))
 
 
 def docker(*args, check=True):
@@ -65,6 +74,24 @@ def setup():
             terminating_signal TEXT, timeout_seconds REAL, output_dir TEXT NOT NULL
           );
         """)
+
+
+def reap_expired():
+    with db() as connection:
+        rows = connection.execute("SELECT handle FROM workspaces WHERE expires_at IS NOT NULL AND expires_at <= ?", (now(),)).fetchall()
+    for row in rows:
+        docker("rm", "-f", row["handle"], check=False)
+        with db() as connection:
+            connection.execute("DELETE FROM workspaces WHERE handle=?", (row["handle"],))
+
+
+def reaper_loop():
+    while True:
+        try:
+            reap_expired()
+        except Exception:
+            pass
+        time.sleep(REAPER_INTERVAL_SECONDS)
 
 
 def limits(payload):
@@ -255,10 +282,10 @@ class Handler(BaseHTTPRequestHandler):
         if unavailable: raise ValueError("capability_unavailable")
         workspace_dir = ROOT / handle
         (workspace_dir / "workspace").mkdir(mode=0o700, parents=True)
-        docker_args = ["run", "-d", "--name", handle, "--network", NETWORK, "--pids-limit", str(limits_value["pids"]), "--memory", str(limits_value["memory_bytes"]), "--cpus", str(limits_value["cpus"]), "-v", f"{workspace_dir / 'workspace'}:/workspace", "-v", f"{workspace_dir}:/runner-output", IMAGE, "sleep", "infinity"]
+        docker_args = ["run", "-d", "--name", handle, "--network", NETWORK, "--sysctl", "net.ipv6.conf.all.disable_ipv6=1", "--sysctl", "net.ipv6.conf.default.disable_ipv6=1", "--pids-limit", str(limits_value["pids"]), "--memory", str(limits_value["memory_bytes"]), "--cpus", str(limits_value["cpus"]), "-v", f"{workspace_dir / 'workspace'}:/workspace", "-v", f"{workspace_dir}:/runner-output", IMAGE, "sleep", "infinity"]
         docker(*docker_args)
         timestamp = now()
-        values = (handle, payload.get("label"), "ready", payload.get("environment", "linux"), payload.get("architecture", "arm64"), timestamp, timestamp, None, json.dumps(limits_value), json.dumps(capabilities), str(workspace_dir))
+        values = (handle, payload.get("label"), "ready", payload.get("environment", "linux"), payload.get("architecture", "arm64"), timestamp, timestamp, expiry(payload), json.dumps(limits_value), json.dumps(capabilities), str(workspace_dir))
         with db() as connection: connection.execute("INSERT INTO workspaces VALUES (?,?,?,?,?,?,?,?,?,?,?)", values)
         with db() as connection: row = connection.execute("SELECT * FROM workspaces WHERE handle=?", (handle,)).fetchone()
         self.send_json(201, workspace_json(row))
@@ -332,4 +359,5 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("WORKSPACE_RUNNER_TOKEN is required")
     setup()
+    threading.Thread(target=reaper_loop, daemon=True).start()
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

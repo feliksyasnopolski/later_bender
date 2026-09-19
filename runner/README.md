@@ -16,9 +16,15 @@ Required production settings are `WORKSPACE_STORAGE`, `WORKSPACE_IMAGE`,
 stdout/stderr byte streams in runner-owned files, so a process restart does not
 turn a still-running Docker execution into a false terminal state.
 
-The current first slice enforces CPU, memory, and PID limits and uses Docker's
-configured network. Its default capability advertisement is conservative
-(`internet: false`); production must supply and validate the intended isolated
-network before advertising public internet access. Disk is currently a soft
-limit. Host/private/MicroK8s network isolation and hard disk quotas remain
-explicit production acceptance gates, not claims made by this local prototype.
+The runner creates a dedicated IPv4 bridge and installs host-side `DOCKER-USER`
+and bridge-input rules. Workspaces can reach public IPv4 destinations, while
+host, Docker, Kubernetes, database, Elasticsearch, link-local, reserved,
+private, and other-Workspace destinations are denied. IPv6 is disabled inside
+the container, so it cannot bypass the IPv4 policy. The policy is installed by
+`network-policy.sh` before the service starts.
+
+Workspaces receive a bounded TTL (one day by default, at most seven days).
+The runner reaper removes expired containers and metadata, and the Rails
+`workspaces:reap` task removes expired canonical Workspace records. Disk is
+currently a soft limit; a hard quota is intentionally not added until it can
+be done without disproportionate machinery.
