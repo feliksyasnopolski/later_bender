@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class AuthTest < ActionDispatch::IntegrationTest
-  test "logs in, manages own bearer tokens, and logs out" do
+RSpec.describe "Auth API", type: :request do
+  it "logs in, manages own bearer tokens, and logs out" do
     User.create!(username: "Alice", password: "password123")
 
     post "/api/auth/login", params: { username: "alice", password: "password123" }.to_json, headers: json_headers
@@ -29,7 +29,7 @@ class AuthTest < ActionDispatch::IntegrationTest
     assert_nil ApiToken.authenticate(session_token)
   end
 
-  test "uses confirmed TOTP for one-time password recovery" do
+  it "uses confirmed TOTP for one-time password recovery" do
     user = User.create!(username: "recoverable", password: "password123")
     _session, old_token = ApiToken.issue!(user: user, name: "old")
     credential = user.totp_credentials.create!(secret: ROTP::Base32.random, confirmed_at: Time.current)
@@ -47,7 +47,7 @@ class AuthTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 
-  test "accepts a valid Doorkeeper bearer token through the existing API" do
+  it "accepts a valid Doorkeeper bearer token through the existing API" do
     user = User.create!(username: "oauth-api", password: "password123")
     application = Doorkeeper::Application.create!(name: "MCP API test", redirect_uri: "https://client.example/callback", confidential: false, scopes: "mcp")
     oauth_token = Doorkeeper::AccessToken.create!(application: application, resource_owner_id: user.id, scopes: "mcp", expires_in: 30.days.to_i)
@@ -57,7 +57,7 @@ class AuthTest < ActionDispatch::IntegrationTest
     assert_equal user.id, json_body.fetch("id")
   end
 
-  test "redirects an unauthenticated OAuth authorization request to login" do
+  it "redirects an unauthenticated OAuth authorization request to login" do
     payload = {
       client_name: "MCP authorization test",
       redirect_uris: [ "https://chatgpt.com/connector/oauth/test" ],
@@ -82,7 +82,7 @@ class AuthTest < ActionDispatch::IntegrationTest
     assert_includes response.location, "/users/sign_in"
   end
 
-  test "returns to OAuth authorization after web login" do
+  it "returns to OAuth authorization after web login" do
     user = User.create!(username: "oauth-login", password: "password123")
     payload = {
       client_name: "MCP callback test",

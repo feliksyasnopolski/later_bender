@@ -7,7 +7,7 @@ class Project < ApplicationRecord
 
   validates :name, presence: true
   validates :slug, presence: true, uniqueness: { scope: :user_id }, format: { with: /\A[a-z0-9]+(?:-[a-z0-9]+)*\z/ }
-  validates :shorthand, presence: true, uniqueness: true, format: { with: /\A[A-Z][A-Z0-9]{0,11}\z/ }
+  validates :shorthand, presence: true, uniqueness: { scope: :user_id }, format: { with: /\A[A-Z][A-Z0-9]{0,11}\z/ }
   before_validation :set_slug, if: -> { slug.blank? && name.present? }
   before_validation :normalize_shorthand
   validate :shorthand_is_immutable, on: :update

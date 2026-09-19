@@ -1,7 +1,7 @@
-require "test_helper"
+require "rails_helper"
 
-class NoteTest < ActiveSupport::TestCase
-  test "requires a user-owned project when scoped" do
+RSpec.describe "Note model" do
+  it "requires a user-owned project when scoped" do
     user = User.create!(username: "note-user", password: "password123")
     other = User.create!(username: "note-other", password: "password123")
     note = user.notes.new(title: "Decision", body: "Context", project: other.projects.create!(name: "Other"))
@@ -10,7 +10,7 @@ class NoteTest < ActiveSupport::TestCase
     assert_includes note.errors[:project], "must belong to the note's user"
   end
 
-  test "shares the existing tag model" do
+  it "shares the existing tag model" do
     user = User.create!(username: "tag-note-user", password: "password123")
     note = user.notes.create!(title: "Decision", body: "Context")
     TagReconciler.call(note, [ "Rails", "rails" ])
@@ -19,7 +19,7 @@ class NoteTest < ActiveSupport::TestCase
     assert_equal 1, Tag.count
   end
 
-  test "rejects a task and note owned by different users" do
+  it "rejects a task and note owned by different users" do
     user = User.create!(username: "task-note-user", password: "password123")
     other = User.create!(username: "task-note-other", password: "password123")
     task = user.projects.create!(name: "Work").tasks.create!(title: "Task", status: "backlog")

@@ -5,6 +5,9 @@ CI.run do
 
   step "Style: Ruby", "bin/rubocop"
 
+  step "Tests: RSpec", "bundle exec rspec"
+  step "Contract: OpenAPI drift", "bundle exec rake openapi:check"
+
   step "Security: Gem audit", "bin/bundler-audit"
   step "Security: Brakeman code analysis", "bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error"
 

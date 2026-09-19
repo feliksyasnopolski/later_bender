@@ -1,10 +1,10 @@
-require "test_helper"
+require "rails_helper"
 require "stringio"
 require "open3"
 require "tempfile"
 
-class StoredFileTest < ActiveSupport::TestCase
-  test "allocates project-local refs and preserves stored bytes and sha256" do
+RSpec.describe "StoredFile model" do
+  it "allocates project-local refs and preserves stored bytes and sha256" do
     user = User.create!(username: "file-user", password: "password123")
     first_project = user.projects.create!(name: "First", slug: "first-files", shorthand: "FF")
     second_project = user.projects.create!(name: "Second", slug: "second-files", shorthand: "SF")
@@ -22,13 +22,13 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_equal Digest::SHA256.hexdigest(bytes), first.sha256
   end
 
-  test "requires a project and does not allow number changes" do
+  it "requires a project and does not allow number changes" do
     file = StoredFile.new(filename: "x", media_type: "text/plain", byte_size: 1, sha256: "a" * 64)
     assert_not file.valid?
     assert_includes file.errors[:project], "must exist"
   end
 
-  test "ingests a streamed provider response from an IO without each_body" do
+  it "ingests a streamed provider response from an IO without each_body" do
     user = User.create!(username: "ingest-user", password: "password123")
     project = user.projects.create!(name: "Ingest", slug: "ingest-files", shorthand: "IF")
     bytes = "provider bytes\x00".b
@@ -39,7 +39,7 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_equal Digest::SHA256.hexdigest(bytes), file.sha256
   end
 
-  test "persists a URL fetch through the canonical immutable ingestion path" do
+  it "persists a URL fetch through the canonical immutable ingestion path" do
     user = User.create!(username: "url-ingest-user", password: "password123")
     project = user.projects.create!(name: "URL ingest", slug: "url-ingest", shorthand: "UI")
     bytes = "remote bytes\n"
@@ -66,7 +66,7 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_raises(ActiveRecord::RecordInvalid) { file.update!(origin: origin.merge("final_url" => "https://other.example/")) }
   end
 
-  test "derives bounded readable text with line coordinates" do
+  it "derives bounded readable text with line coordinates" do
     user = User.create!(username: "reader-user", password: "password123")
     project = user.projects.create!(name: "Reader", slug: "reader-files", shorthand: "RF")
     file = create_file(project, "source.md", "alpha\r\nbeta\r\ngamma")
@@ -78,7 +78,7 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_not FileReader.valid_locator?(file, "markdown", { "kind" => "lines", "start" => 1, "end" => 4 })
   end
 
-  test "derives page-aware text from a small PDF stream" do
+  it "derives page-aware text from a small PDF stream" do
     user = User.create!(username: "pdf-user", password: "password123")
     project = user.projects.create!(name: "PDF", slug: "pdf-files", shorthand: "PF")
     pdf = "%PDF-1.4\n1 0 obj\n<<>>\nstream\n(PDF known page)\nendstream\n%%EOF".b
@@ -92,7 +92,7 @@ class StoredFileTest < ActiveSupport::TestCase
     assert_equal 1, read[:metadata]["pages"]
   end
 
-  test "lists, reads, and explicitly extracts archive members without exploding the parent" do
+  it "lists, reads, and explicitly extracts archive members without exploding the parent" do
     user = User.create!(username: "archive-user", password: "password123")
     project = user.projects.create!(name: "Archives", slug: "archive-files", shorthand: "AF")
     source = Dir.mktmpdir("later-bender-archive-test")

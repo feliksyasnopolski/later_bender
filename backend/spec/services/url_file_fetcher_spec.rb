@@ -1,6 +1,6 @@
-require "test_helper"
+require "rails_helper"
 
-class UrlFileFetcherTest < ActiveSupport::TestCase
+RSpec.describe "URL file fetcher" do
   FakeResponse = Struct.new(:code, :headers, :chunks) do
     def [](name)
       headers[name.downcase]
@@ -11,7 +11,7 @@ class UrlFileFetcherTest < ActiveSupport::TestCase
     end
   end
 
-  test "downloads exact HTTPS bytes with explicit filename and transport provenance" do
+  it "downloads exact HTTPS bytes with explicit filename and transport provenance" do
     response = fake_response(200, [ "exact ", "bytes\x00".b ], "content-type" => "text/plain; charset=utf-8", "content-disposition" => 'attachment; filename="ignored.txt"', "etag" => '"v1"', "last-modified" => "Wed, 17 Sep 2026 10:00:00 GMT")
     result, requests = fetch("https://public.example/source", response, filename: "chosen.txt", clock: -> { Time.utc(2026, 9, 17, 12, 0, 0) })
 
@@ -33,7 +33,7 @@ class UrlFileFetcherTest < ActiveSupport::TestCase
     result&.tempfile&.close!
   end
 
-  test "supports HTTP and filename precedence fallbacks" do
+  it "supports HTTP and filename precedence fallbacks" do
     disposition, = fetch("http://public.example/path/original", fake_response(200, [ "one" ], "content-disposition" => "attachment; filename*=UTF-8''report%20one.txt"))
     assert_equal "report one.txt", disposition.filename
     disposition.tempfile.close!
@@ -48,7 +48,7 @@ class UrlFileFetcherTest < ActiveSupport::TestCase
     fallback.tempfile.close!
   end
 
-  test "follows bounded redirects and records requested and final URLs" do
+  it "follows bounded redirects and records requested and final URLs" do
     responses = {
       "https://public.example/start" => fake_response(302, [], "location" => "https://cdn.example/final.txt"),
       "https://cdn.example/final.txt" => fake_response(200, [ "final" ])
@@ -62,7 +62,7 @@ class UrlFileFetcherTest < ActiveSupport::TestCase
     result&.tempfile&.close!
   end
 
-  test "rejects advertised and streamed over-limit bodies" do
+  it "rejects advertised and streamed over-limit bodies" do
     error = assert_fetch_error("file_too_large") do
       fetch("https://public.example/big", fake_response(200, [], "content-length" => "5"), max_bytes: 4)
     end
@@ -73,7 +73,7 @@ class UrlFileFetcherTest < ActiveSupport::TestCase
     end
   end
 
-  test "returns stable errors for timeout HTTP failure empty response and redirect limit" do
+  it "returns stable errors for timeout HTTP failure empty response and redirect limit" do
     assert_fetch_error("fetch_timeout") { fetch("https://public.example/slow", Net::ReadTimeout.new("secret socket detail")) }
     assert_fetch_error("upstream_http_failure") { fetch("https://public.example/missing", fake_response(404, [ "not found" ])) }
     assert_fetch_error("empty_fetch") { fetch("https://public.example/empty", fake_response(200, [])) }
@@ -85,7 +85,7 @@ class UrlFileFetcherTest < ActiveSupport::TestCase
     end
   end
 
-  test "rejects malformed unsupported authenticated and private destinations" do
+  it "rejects malformed unsupported authenticated and private destinations" do
     assert_fetch_error("invalid_url") { fetch("https://", fake_response(200, [ "x" ])) }
     assert_fetch_error("unsupported_url_scheme") { fetch("ftp://public.example/file", fake_response(200, [ "x" ])) }
     assert_fetch_error("invalid_url") { fetch("https://user:pass@public.example/file", fake_response(200, [ "x" ])) }
@@ -98,7 +98,7 @@ class UrlFileFetcherTest < ActiveSupport::TestCase
   end
 
 
-  test "allows a globally routable IPv6 destination" do
+  it "allows a globally routable IPv6 destination" do
     result, requests = fetch("https://ipv6.example/file.txt", fake_response(200, [ "ipv6" ]), resolver: ->(*) { [ "2606:4700:4700::1111" ] })
     assert_equal "2606:4700:4700::1111", requests.fetch(0).fetch(:address)
     assert_equal "ipv6", result.tempfile.read
@@ -106,7 +106,7 @@ class UrlFileFetcherTest < ActiveSupport::TestCase
     result&.tempfile&.close!
   end
 
-  test "rejects a hostname or redirect that resolves into blocked address space" do
+  it "rejects a hostname or redirect that resolves into blocked address space" do
     assert_fetch_error("blocked_destination") do
       fetch("https://mixed.example/file", fake_response(200, [ "x" ]), resolver: ->(*) { [ "8.8.8.8", "10.0.0.1" ] })
     end

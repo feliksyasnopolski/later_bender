@@ -1,14 +1,14 @@
-require "test_helper"
+require "rails_helper"
 
-class ApiTest < ActionDispatch::IntegrationTest
-  setup do
+RSpec.describe "Api API", type: :request do
+  before do
     @user = User.create!(username: "test-user", password: "password123")
     @token, @raw_token = ApiToken.issue!(user: @user, name: "test client")
     @project = @user.projects.create!(name: "Writing", slug: "writing", shorthand: "WR")
     @other_project = @user.projects.create!(name: "Other", slug: "other", shorthand: "OT")
   end
 
-  test "rejects missing and revoked bearer tokens" do
+  it "rejects missing and revoked bearer tokens" do
     get "/api/projects", headers: json_headers
     assert_response :unauthorized
 
@@ -17,13 +17,13 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
-  test "creates a project through the authenticated API" do
+  it "creates a project through the authenticated API" do
     post "/api/projects", params: { name: "New Project", description: "A backlog" }.to_json, headers: json_headers(@raw_token)
     assert_response :created
     assert_equal "new-project", json_body["slug"]
   end
 
-  test "creates a task with tags and replaces tags on update" do
+  it "creates a task with tags and replaces tags on update" do
     post "/api/projects/writing/tasks", params: {
       title: "Ship API", status: "backlog", priority: "high", tags: [ "Rails", "deployment" ]
     }.to_json, headers: json_headers(@raw_token)
@@ -39,7 +39,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal [ "auth" ], Task.find(task_id).tags.pluck(:name)
   end
 
-  test "task tag filters match all supplied tags" do
+  it "task tag filters match all supplied tags" do
     @project.tasks.create!(title: "Both tags", status: "backlog").tap { |task| TagReconciler.call(task, ["one", "two"]) }
     @project.tasks.create!(title: "One tag", status: "backlog").tap { |task| TagReconciler.call(task, ["one"]) }
 
@@ -48,7 +48,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal ["Both tags"], json_body.map { |task| task["title"] }
   end
 
-  test "reuses an existing tag when creating a task" do
+  it "reuses an existing tag when creating a task" do
     Tag.create!(name: "deployment", slug: "deployment")
 
     post "/api/projects/writing/tasks", params: {
@@ -60,7 +60,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal 1, Tag.count
   end
 
-  test "nested listing is project scoped and global search filters tasks" do
+  it "nested listing is project scoped and global search filters tasks" do
     @project.tasks.create!(title: "Find this prose", status: "ready", context: "important writing")
     @other_project.tasks.create!(title: "Do not leak", status: "ready")
 
@@ -73,7 +73,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal [ "Find this prose" ], json_body.map { |task| task["title"] }
   end
 
-  test "task listing uses explicit position and position updates persist" do
+  it "task listing uses explicit position and position updates persist" do
     later = @project.tasks.create!(title: "Later", status: "backlog", position: 2000)
     first = @project.tasks.create!(title: "First", status: "backlog", position: 1000)
 
@@ -88,20 +88,20 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal ["Later", "First"], json_body.map { |task| task["title"] }
   end
 
-  test "returns structured validation errors" do
+  it "returns structured validation errors" do
     post "/api/projects/writing/tasks", params: { title: "", status: "later" }.to_json, headers: json_headers(@raw_token)
     assert_response :unprocessable_content
     assert_equal "validation_failed", json_body.dig("error", "code")
     assert json_body.dig("error", "details", "status")
   end
 
-  test "does not allow a nested route to reach another project's task" do
+  it "does not allow a nested route to reach another project's task" do
     task = @other_project.tasks.create!(title: "Private", status: "backlog")
     get "/api/projects/writing/tasks/#{task.id}", headers: json_headers(@raw_token)
     assert_response :not_found
   end
 
-  test "gets and updates an owned task by global id and keeps task lists compact" do
+  it "gets and updates an owned task by global id and keeps task lists compact" do
     task = @project.tasks.create!(title: "Detailed task", status: "backlog", context: "Long context that belongs only in exact reads")
 
     get "/api/tasks/#{task.id}", headers: json_headers(@raw_token)
@@ -118,7 +118,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_nil json_body.first["context"]
   end
 
-  test "gets and updates an owned task by external ref" do
+  it "gets and updates an owned task by external ref" do
     task = @project.tasks.create!(title: "Ref task", status: "backlog")
 
     get "/api/tasks/by-ref/WR-#{task.number}", headers: json_headers(@raw_token)
@@ -131,7 +131,31 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal "done", json_body["status"]
   end
 
-  test "creates, lists, reads, and updates global and project notes" do
+  it "resolves identical task refs within the authenticated user's namespace" do
+    other = User.create!(username: "other-ref-user", password: "password123")
+    other_project = other.projects.create!(name: "Writing", slug: "writing", shorthand: "WR")
+    own_task = @project.tasks.create!(title: "Own ref", status: "backlog")
+    other_task = other_project.tasks.create!(title: "Other ref", status: "backlog")
+    assert_equal own_task.ref, other_task.ref
+
+    get "/api/tasks/by-ref/#{own_task.ref}", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal own_task.id, json_body["id"]
+
+    _other_token, other_raw_token = ApiToken.issue!(user: other, name: "other client")
+    get "/api/tasks/by-ref/#{other_task.ref}", headers: json_headers(other_raw_token)
+    assert_response :success
+    assert_equal other_task.id, json_body["id"]
+
+    get "/api/tasks/by-ref/#{other_task.ref}", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal own_task.id, json_body["id"]
+
+    get "/api/tasks/by-ref/WR-999999", headers: json_headers(@raw_token)
+    assert_response :not_found
+  end
+
+  it "creates, lists, reads, and updates global and project notes" do
     post "/api/notes", params: { title: "Decision", body: "Keep the API boring", tags: [ "Context" ] }.to_json, headers: json_headers(@raw_token)
     assert_response :created
     global_id = json_body["id"]
@@ -157,7 +181,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_nil json_body["project"]
   end
 
-  test "deletes an owned note and cascades its relationships and citations" do
+  it "deletes an owned note and cascades its relationships and citations" do
     task = @project.tasks.create!(title: "Related", status: "backlog")
     file = StoredFile.new(project: @project, filename: "source.txt", media_type: "text/plain", byte_size: 12, sha256: Digest::SHA256.hexdigest("source line\n"))
     file.original.attach(io: StringIO.new("source line\n"), filename: "source.txt", content_type: "text/plain")
@@ -177,13 +201,13 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_raises(ActiveRecord::RecordNotFound) { FileNote.find(file_note.id) }
   end
 
-  test "deleting a missing note returns the established not found error" do
+  it "deleting a missing note returns the established not found error" do
     delete "/api/notes/999999", headers: json_headers(@raw_token)
     assert_response :not_found
     assert_equal "not_found", json_body.dig("error", "code")
   end
 
-  test "deletes an owned file through its canonical ref and returns not found afterward" do
+  it "deletes an owned file through its canonical ref and returns not found afterward" do
     bytes = "throwaway file\n"
     file = StoredFile.new(project: @project, filename: "throwaway.txt", media_type: "text/plain", byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes))
     file.original.attach(io: StringIO.new(bytes), filename: "throwaway.txt", content_type: "text/plain")
@@ -199,7 +223,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_raises(ActiveRecord::RecordNotFound) { StoredFile.find(file.id) }
   end
 
-  test "creates a URL-backed file with structured provenance and stable source errors" do
+  it "creates a URL-backed file with structured provenance and stable source errors" do
     post "/api/projects/writing/files", params: {}.to_json, headers: json_headers(@raw_token)
     assert_response :unprocessable_content
     assert_equal "source_required", json_body.dig("error", "code")
@@ -227,7 +251,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal origin, json_body.dig("provenance", "origin")
   end
 
-  test "issues a short-lived canonical file download and preserves exact bytes" do
+  it "issues a short-lived canonical file download and preserves exact bytes" do
     bytes = "\x89PNG\r\n\x1a\ncanonical-image".b
     file = StoredFile.new(project: @project, filename: "evidence.png", media_type: "image/png", byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes))
     file.original.attach(io: StringIO.new(bytes), filename: "evidence.png", content_type: "image/png")
@@ -262,7 +286,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_response :unauthorized
   end
 
-  test "does not issue file egress for another user" do
+  it "does not issue file egress for another user" do
     other = User.create!(username: "file-owner", password: "password123")
     project = other.projects.create!(name: "Private files", slug: "private-files", shorthand: "PF")
     bytes = "private"
@@ -274,7 +298,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
-  test "does not expose another user's notes or permit cross-user task relations" do
+  it "does not expose another user's notes or permit cross-user task relations" do
     other = User.create!(username: "other-user", password: "password123")
     other_project = other.projects.create!(name: "Private", slug: "private")
     other_note = other.notes.create!(title: "Private note", body: "Secret", project: other_project)
@@ -295,7 +319,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_empty other_task.notes
   end
 
-  test "task related notes replace, clear, and preserve predictably" do
+  it "task related notes replace, clear, and preserve predictably" do
     first = @user.notes.create!(title: "First", body: "One")
     second = @user.notes.create!(title: "Second", body: "Two")
     post "/api/projects/writing/tasks", params: { title: "Relate", status: "backlog", related_note_ids: [ first.id, second.id ] }.to_json, headers: json_headers(@raw_token)
@@ -311,7 +335,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal [], json_body["related_note_ids"]
   end
 
-  test "task pagination traverses filtered board order without duplicates and rejects mismatched cursors" do
+  it "task pagination traverses filtered board order without duplicates and rejects mismatched cursors" do
     first = @project.tasks.create!(title: "First", status: "ready", position: 1000)
     second = @project.tasks.create!(title: "Second", status: "ready", position: 1000)
     third = @project.tasks.create!(title: "Third", status: "ready", position: 2000)
@@ -335,7 +359,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_response :unprocessable_content
   end
 
-  test "note pagination supports deterministic created and updated ordering" do
+  it "note pagination supports deterministic created and updated ordering" do
     old = @user.notes.create!(title: "Old", body: "old")
     middle = @user.notes.create!(title: "Middle", body: "middle")
     recent = @user.notes.create!(title: "Recent", body: "recent")
@@ -354,7 +378,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal [ old.id, middle.id, recent.id ], json_body["notes"].map { |note| note["id"] }
   end
 
-  test "file browse sorting supports every public sort in both directions with stable ties" do
+  it "file browse sorting supports every public sort in both directions with stable ties" do
     alpha = create_file("alpha.txt", "a")
     beta = create_file("beta.txt", "bbbb")
     gamma = create_file("gamma.txt", "cc")
@@ -385,7 +409,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_nil json_body["next_cursor"]
   end
 
-  test "targeted note edits apply in order atomically and honor optimistic concurrency" do
+  it "targeted note edits apply in order atomically and honor optimistic concurrency" do
     note = @user.notes.create!(title: "Durable", body: "alpha beta")
     expected = note.updated_at.as_json
     patch "/api/notes/#{note.id}/edit", params: { operations: [{ operation: "replace", old_text: "alpha", new_text: "one" }, { operation: "append", text: "\nmore" }], expected_updated_at: expected }.to_json, headers: json_headers(@raw_token)
@@ -407,7 +431,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_equal "same same", note.reload.body
   end
 
-  test "file reads identify source representation coordinate and effective locator" do
+  it "file reads identify source representation coordinate and effective locator" do
     text = create_file("source.txt", "one\ntwo\nthree\n", media_type: "text/plain")
     image = create_file("pixel.png", "png", media_type: "image/png")
 
@@ -428,7 +452,7 @@ class ApiTest < ActionDispatch::IntegrationTest
     assert_nil json_body["locator"]
   end
 
-  test "archive pagination traverses deterministic paths and rejects a cursor from another view" do
+  it "archive pagination traverses deterministic paths and rejects a cursor from another view" do
     Dir.mktmpdir("later-bender-api-archive") do |source|
       %w[c.txt a.txt b.txt].each { |name| File.binwrite(File.join(source, name), name) }
       archive_path = File.join(source, "bundle.zip")
