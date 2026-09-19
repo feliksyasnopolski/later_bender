@@ -23,4 +23,5 @@ jq -n '{ok: true}' >/dev/null
 python3 -c 'import json; print(json.dumps({"ok": True}))' >/dev/null
 ruby -e 'abort unless RUBY_VERSION'
 node --version >/dev/null
+npm --version >/dev/null
 printf 'workspace image smoke test passed\n'
