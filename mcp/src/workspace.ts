@@ -127,7 +127,15 @@ const noRuntime = () => Promise.resolve({
   content: [{ type: "text" as const, text: JSON.stringify({ error: { code: "workspace_unavailable", message: "Workspace execution is not available yet" } }) }],
   isError: true
 });
-const runtime = (api: LaterBenderApi | undefined, name: string) => api ? ((input: any) => workspaceOperation(api, name, input)) : noRuntime;
+const nestedResults: Record<string, string> = {
+  create_workspace: "workspace", get_workspace: "workspace", exec_workspace: "execution", get_workspace_execution: "execution", cancel_workspace_execution: "execution"
+};
+const runtime = (api: LaterBenderApi | undefined, name: string) => api ? (async (input: any) => {
+  const result = await workspaceOperation(api, name, input);
+  if (result && typeof result === "object" && (result.isError || Array.isArray(result.content))) return result;
+  const structuredContent = nestedResults[name] ? { [nestedResults[name]]: result } : result;
+  return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
+}) : noRuntime;
 async function workspaceOperation(api: LaterBenderApi, name: string, input: any): Promise<any> {
   try {
     switch (name) {

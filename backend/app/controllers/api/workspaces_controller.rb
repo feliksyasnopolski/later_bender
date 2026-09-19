@@ -83,19 +83,23 @@ module Api
 
     def cancel
       execution = @workspace.workspace_executions.find_by!(ref: params[:execution_ref])
+      previous_state = execution.state
       result = runner.request(:post, "/executions/#{execution.ref}/cancel")
       execution.update!(execution_attributes(result))
+      @workspace.append_event!("execution", transcript_execution_payload(result, execution)) if previous_state != execution.state
       render json: execution_json(execution)
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
     end
 
     def transcript
+      refresh_workspace_executions!
       events = @workspace.workspace_events.order(:sequence)
       render json: { workspace: @workspace.ref, events: events.map { |event| event.payload.merge("kind" => event.kind, "sequence" => event.sequence, "occurred_at" => event.occurred_at.iso8601, "workspace" => @workspace.ref) }, next_cursor: nil }
     end
 
     def promote_transcript
+      refresh_workspace_executions!
       payload = request_payload
       from = payload["from_sequence"].to_i if payload["from_sequence"]
       to = payload["to_sequence"].to_i if payload["to_sequence"]
@@ -136,8 +140,10 @@ module Api
     def cancel_by_ref
       execution = find_execution_by_ref
       @workspace = execution.workspace
+      previous_state = execution.state
       result = runner.request(:post, "/executions/#{execution.ref}/cancel")
       execution.update!(execution_attributes(result))
+      @workspace.append_event!("execution", transcript_execution_payload(result, execution)) if previous_state != execution.state
       render json: execution_json(execution)
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
@@ -177,11 +183,14 @@ module Api
     rescue WorkspaceRunnerClient::Unavailable
       execution
     end
-    def set_workspace = @workspace = current_user.workspaces.find_by!(ref: params[:ref] || params[:workspace_ref])
+    def refresh_workspace_executions!
+      @workspace.workspace_executions.where(state: "running").find_each { |execution| refresh_execution!(execution) }
+    end
+    def set_workspace = @workspace = current_user.workspaces.find_by_public_ref(params[:ref] || params[:workspace_ref]) || raise(ActiveRecord::RecordNotFound)
 
     def workspace_attributes(result, payload)
       result = result.fetch("workspace", result)
-      { ref: result.fetch("ref", "WS-#{SecureRandom.hex(8)}"), label: payload["label"], state: result.fetch("state", "ready"), environment: result.fetch("environment", payload["environment"] || "linux"), architecture: result.fetch("architecture", payload["architecture"] || "arm64"), os_name: result.dig("os", "name") || "Linux", os_version: result.dig("os", "version") || "unknown", shell: result.fetch("shell", "/bin/bash"), workspace_root: result.fetch("workspace_root", "/workspace"), limits: result.fetch("limits", {}), capabilities: result.fetch("capabilities", {}), runner_handle: result["runner_handle"], last_activity_at: Time.current, expires_at: result["expires_at"] }
+      { ref: "WS-#{SecureRandom.hex(12)}", label: payload["label"], state: result.fetch("state", "ready"), environment: result.fetch("environment", payload["environment"] || "linux"), architecture: result.fetch("architecture", payload["architecture"] || "arm64"), os_name: result.dig("os", "name") || "Linux", os_version: result.dig("os", "version") || "unknown", shell: result.fetch("shell", "/bin/bash"), workspace_root: result.fetch("workspace_root", "/workspace"), limits: result.fetch("limits", {}), capabilities: result.fetch("capabilities", {}), runner_handle: result["runner_handle"] || result["ref"], last_activity_at: Time.current, expires_at: result["expires_at"] }
     end
 
     def execution_attributes(result)

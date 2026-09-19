@@ -96,6 +96,26 @@ test("Workspace input schemas are object-shaped in the actual MCP tools/list res
   await server.close();
 });
 
+test("read_workspace_file returns structured content through the real tools/call boundary", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const api = {
+    workspaceAction: async () => ({ workspace: "WS-1", path: "out.txt", content: "generated text\n", media_type: "text/plain", range: { kind: "lines", start: 1, end: 1, byte_start: 0, byte_end: 14, complete: true }, next_cursor: null })
+  } as unknown as LaterBenderApi;
+  registerWorkspaceTools(server, api);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "read_workspace_file", arguments: { workspace: "WS-1", path: "out.txt" } });
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(result.structuredContent, {
+    workspace: "WS-1", path: "out.txt", content: "generated text\n", media_type: "text/plain",
+    range: { kind: "lines", start: 1, end: 1, byte_start: 0, byte_end: 14, complete: true }, next_cursor: null
+  });
+  await client.close();
+  await server.close();
+});
+
 function registeredExecSchema() {
   return tools().exec_workspace.inputSchema;
 }

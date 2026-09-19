@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_19_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -312,6 +312,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_100000) do
     t.datetime "expires_at"
     t.string "label"
     t.datetime "last_activity_at", null: false
+    t.string "legacy_ref"
     t.jsonb "limits", default: {}, null: false
     t.string "os_name", null: false
     t.string "os_version", null: false
@@ -322,6 +323,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_100000) do
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
     t.string "workspace_root", default: "/workspace", null: false
+    t.index ["legacy_ref"], name: "index_workspaces_on_legacy_ref"
     t.index ["ref"], name: "index_workspaces_on_ref", unique: true
     t.index ["user_id", "state"], name: "index_workspaces_on_user_id_and_state"
     t.index ["user_id"], name: "index_workspaces_on_user_id"

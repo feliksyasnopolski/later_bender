@@ -7,6 +7,10 @@ class Workspace < ApplicationRecord
   validates :ref, :environment, :architecture, :os_name, :os_version, :shell, :workspace_root, :state, presence: true
   validates :state, inclusion: { in: STATES }
 
+  def self.find_by_public_ref(ref)
+    where(ref:).or(where(legacy_ref: ref)).first
+  end
+
   def os = { name: os_name, version: os_version }
 
   def next_sequence
