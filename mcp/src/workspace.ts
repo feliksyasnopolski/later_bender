@@ -6,19 +6,40 @@ const timestamp = z.string();
 const opaqueRef = z.string().min(1);
 const cursor = z.string().nullable();
 const workspaceState = z.enum(["starting", "ready", "stopping", "failed"]);
-const executionState = z.enum(["running", "exited", "timed_out", "cancelled", "failed_to_start"]);
+const executionState = z.enum([
+  "running",
+  "exited",
+  "timed_out",
+  "cancelled",
+  "failed_to_start",
+]);
 const bytes = z.number().int().nonnegative();
 const resourceRequirements = {
   min_cpus: z.number().positive().optional(),
   min_memory_bytes: bytes.optional(),
   min_disk_bytes: bytes.optional(),
-  min_pids: z.number().int().positive().optional()
+  min_pids: z.number().int().positive().optional(),
 };
-const resourceLimits = z.object({ cpus: z.number().positive(), memory_bytes: bytes, disk_bytes: bytes, pids: z.number().int().positive() });
+const resourceLimits = z.object({
+  cpus: z.number().positive(),
+  memory_bytes: bytes,
+  disk_bytes: bytes,
+  pids: z.number().int().positive(),
+});
 const capabilityFlags = z.record(z.string(), z.boolean());
 const os = z.object({ name: z.string(), version: z.string() });
-const architectureOffering = z.object({ architecture: z.string(), os, shell: z.string(), resources: z.object({ default: resourceLimits, max: resourceLimits }), capabilities: capabilityFlags });
-const environmentOffering = z.object({ environment: z.string(), description: z.string(), architectures: z.array(architectureOffering) });
+const architectureOffering = z.object({
+  architecture: z.string(),
+  os,
+  shell: z.string(),
+  resources: z.object({ default: resourceLimits, max: resourceLimits }),
+  capabilities: capabilityFlags,
+});
+const environmentOffering = z.object({
+  environment: z.string(),
+  description: z.string(),
+  architectures: z.array(architectureOffering),
+});
 
 const workspace = z.object({
   ref: opaqueRef,
@@ -33,7 +54,7 @@ const workspace = z.object({
   capabilities: capabilityFlags,
   created_at: timestamp,
   last_activity_at: timestamp,
-  expires_at: timestamp.nullable()
+  expires_at: timestamp.nullable(),
 });
 const workspaceSummary = z.object({
   ref: opaqueRef,
@@ -43,15 +64,30 @@ const workspaceSummary = z.object({
   architecture: z.string(),
   created_at: timestamp,
   last_activity_at: timestamp,
-  expires_at: timestamp.nullable()
+  expires_at: timestamp.nullable(),
 });
-const canonicalFileAcknowledgement = z.object({ ref: opaqueRef, filename: z.string(), media_type: z.string(), byte_size: bytes, sha256: z.string() });
-const lineLocator = z.object({ kind: z.literal("lines"), start: z.number().int().positive(), end: z.number().int().positive() });
+const canonicalFileAcknowledgement = z.object({
+  ref: opaqueRef,
+  filename: z.string(),
+  media_type: z.string(),
+  byte_size: bytes,
+  sha256: z.string(),
+});
+const lineLocator = z.object({
+  kind: z.literal("lines"),
+  start: z.number().int().positive(),
+  end: z.number().int().positive(),
+});
 const invocation = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("shell"), command: z.string() }),
-  z.object({ kind: z.literal("argv"), argv: z.array(z.string()).min(1) })
+  z.object({ kind: z.literal("argv"), argv: z.array(z.string()).min(1) }),
 ]);
-const streamProjection = z.object({ format: z.enum(["text", "base64"]), data: z.string(), total_byte_size: bytes, inline_complete: z.boolean() });
+const streamProjection = z.object({
+  format: z.enum(["text", "base64"]),
+  data: z.string(),
+  total_byte_size: bytes,
+  inline_complete: z.boolean(),
+});
 const execution = z.object({
   ref: opaqueRef,
   workspace: opaqueRef,
@@ -67,7 +103,7 @@ const execution = z.object({
   terminating_signal: z.string().nullable(),
   requested_timeout_seconds: z.number().positive().nullable(),
   stdout: streamProjection,
-  stderr: streamProjection
+  stderr: streamProjection,
 });
 const transcriptInvocation = invocation;
 const execCommonInput = {
@@ -76,122 +112,501 @@ const execCommonInput = {
   env: z.record(z.string(), z.string()).optional(),
   secret_env: z.record(z.string(), z.string()).optional(),
   stdin: z.string().optional(),
-  timeout_seconds: z.number().positive().optional()
+  timeout_seconds: z.number().positive().optional(),
 };
-const execInput = z.object({
-  ...execCommonInput,
-  command: z.string().optional(),
-  argv: z.array(z.string()).min(1).optional()
-}).strict().superRefine((input, context) => {
-  if (input.command === undefined && input.argv === undefined) {
-    context.addIssue({ code: "custom", message: "Exactly one of command or argv is required", path: ["command"] });
-  }
-  if (input.command !== undefined && input.argv !== undefined) {
-    context.addIssue({ code: "custom", message: "command and argv are mutually exclusive", path: ["argv"] });
-  }
-});
-const readWorkspaceFileInput = z.object({
-  workspace: opaqueRef,
-  path: z.string(),
-  locator: lineLocator.optional(),
-  cursor: z.string().optional()
-}).strict().superRefine((input, context) => {
-  if (input.locator !== undefined && input.cursor !== undefined) {
-    context.addIssue({ code: "custom", message: "locator and cursor are mutually exclusive", path: ["cursor"] });
-  }
-});
-const readWorkspaceTranscriptInput = z.object({
-  workspace: opaqueRef,
-  from_sequence: z.number().int().positive().optional(),
-  to_sequence: z.number().int().positive().optional(),
-  limit: z.number().int().positive().max(100).optional(),
-  cursor: z.string().optional()
-}).strict().superRefine((input, context) => {
-  if (input.cursor !== undefined && (input.from_sequence !== undefined || input.to_sequence !== undefined)) {
-    context.addIssue({ code: "custom", message: "cursor cannot be combined with sequence bounds", path: ["cursor"] });
-  }
-});
+const execInput = z
+  .object({
+    ...execCommonInput,
+    command: z.string().optional(),
+    argv: z.array(z.string()).min(1).optional(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.command === undefined && input.argv === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Exactly one of command or argv is required",
+        path: ["command"],
+      });
+    }
+    if (input.command !== undefined && input.argv !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "command and argv are mutually exclusive",
+        path: ["argv"],
+      });
+    }
+  });
+const readWorkspaceFileInput = z
+  .object({
+    workspace: opaqueRef,
+    path: z.string(),
+    locator: lineLocator.optional(),
+    cursor: z.string().optional(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (input.locator !== undefined && input.cursor !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "locator and cursor are mutually exclusive",
+        path: ["cursor"],
+      });
+    }
+  });
+const readWorkspaceTranscriptInput = z
+  .object({
+    workspace: opaqueRef,
+    from_sequence: z.number().int().positive().optional(),
+    to_sequence: z.number().int().positive().optional(),
+    limit: z.number().int().positive().max(100).optional(),
+    cursor: z.string().optional(),
+  })
+  .strict()
+  .superRefine((input, context) => {
+    if (
+      input.cursor !== undefined &&
+      (input.from_sequence !== undefined || input.to_sequence !== undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "cursor cannot be combined with sequence bounds",
+        path: ["cursor"],
+      });
+    }
+  });
 const transcriptEvent = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("workspace_created"), sequence: z.number().int().positive(), occurred_at: timestamp, workspace: opaqueRef }),
-  z.object({ kind: z.literal("file_imported"), sequence: z.number().int().positive(), occurred_at: timestamp, workspace: opaqueRef, file: opaqueRef, path: z.string(), byte_size: bytes, sha256: z.string() }),
   z.object({
-    kind: z.literal("execution"), sequence: z.number().int().positive(), occurred_at: timestamp, workspace: opaqueRef, execution: opaqueRef,
-    invocation: transcriptInvocation, cwd: z.string(), secret_env_names: z.array(z.string()), started_at: timestamp, finished_at: timestamp.nullable(),
-    requested_timeout_seconds: z.number().positive().nullable(), state: executionState, exit_code: z.number().int().nullable(), terminating_signal: z.string().nullable(), stdout_preview: streamProjection, stderr_preview: streamProjection
+    kind: z.literal("workspace_created"),
+    sequence: z.number().int().positive(),
+    occurred_at: timestamp,
+    workspace: opaqueRef,
   }),
-  z.object({ kind: z.literal("file_promoted"), sequence: z.number().int().positive(), occurred_at: timestamp, workspace: opaqueRef, path: z.string(), file: opaqueRef }),
-  z.object({ kind: z.literal("transcript_promoted"), sequence: z.number().int().positive(), occurred_at: timestamp, workspace: opaqueRef, file: opaqueRef })
+  z.object({
+    kind: z.literal("file_imported"),
+    sequence: z.number().int().positive(),
+    occurred_at: timestamp,
+    workspace: opaqueRef,
+    file: opaqueRef,
+    path: z.string(),
+    byte_size: bytes,
+    sha256: z.string(),
+  }),
+  z.object({
+    kind: z.literal("execution"),
+    sequence: z.number().int().positive(),
+    occurred_at: timestamp,
+    workspace: opaqueRef,
+    execution: opaqueRef,
+    invocation: transcriptInvocation,
+    cwd: z.string(),
+    secret_env_names: z.array(z.string()),
+    started_at: timestamp,
+    finished_at: timestamp.nullable(),
+    requested_timeout_seconds: z.number().positive().nullable(),
+    state: executionState,
+    exit_code: z.number().int().nullable(),
+    terminating_signal: z.string().nullable(),
+    stdout_preview: streamProjection,
+    stderr_preview: streamProjection,
+  }),
+  z.object({
+    kind: z.literal("file_promoted"),
+    sequence: z.number().int().positive(),
+    occurred_at: timestamp,
+    workspace: opaqueRef,
+    path: z.string(),
+    file: opaqueRef,
+  }),
+  z.object({
+    kind: z.literal("transcript_promoted"),
+    sequence: z.number().int().positive(),
+    occurred_at: timestamp,
+    workspace: opaqueRef,
+    file: opaqueRef,
+  }),
 ]);
 
-const noRuntime = () => Promise.resolve({
-  content: [{ type: "text" as const, text: JSON.stringify({ error: { code: "workspace_unavailable", message: "Workspace execution is not available yet" } }) }],
-  isError: true
-});
+const noRuntime = () =>
+  Promise.resolve({
+    content: [
+      {
+        type: "text" as const,
+        text: JSON.stringify({
+          error: {
+            code: "workspace_unavailable",
+            message: "Workspace execution is not available yet",
+          },
+        }),
+      },
+    ],
+    isError: true,
+  });
 const nestedResults: Record<string, string> = {
-  create_workspace: "workspace", get_workspace: "workspace", exec_workspace: "execution", get_workspace_execution: "execution", cancel_workspace_execution: "execution"
+  create_workspace: "workspace",
+  get_workspace: "workspace",
+  exec_workspace: "execution",
+  get_workspace_execution: "execution",
+  cancel_workspace_execution: "execution",
 };
-const runtime = (api: LaterBenderApi | undefined, name: string) => api ? (async (input: any) => {
-  const result = await workspaceOperation(api, name, input);
-  if (result && typeof result === "object" && (result.isError || Array.isArray(result.content))) return result;
-  const structuredContent = nestedResults[name] ? { [nestedResults[name]]: result } : result;
-  return { content: [{ type: "text" as const, text: JSON.stringify(structuredContent) }], structuredContent };
-}) : noRuntime;
-async function workspaceOperation(api: LaterBenderApi, name: string, input: any): Promise<any> {
+const runtime = (api: LaterBenderApi | undefined, name: string) =>
+  api
+    ? async (input: any) => {
+        const result = await workspaceOperation(api, name, input);
+        if (
+          result &&
+          typeof result === "object" &&
+          (result.isError || Array.isArray(result.content))
+        )
+          return result;
+        const structuredContent = nestedResults[name]
+          ? { [nestedResults[name]]: result }
+          : result;
+        return {
+          content: [
+            { type: "text" as const, text: JSON.stringify(structuredContent) },
+          ],
+          structuredContent,
+        };
+      }
+    : noRuntime;
+async function workspaceOperation(
+  api: LaterBenderApi,
+  name: string,
+  input: any,
+): Promise<any> {
   try {
     switch (name) {
-      case "get_workspace_capabilities": return api.getWorkspaceCapabilities();
-      case "create_workspace": return api.createWorkspace(input);
-      case "list_workspaces": return api.listWorkspaces(input);
-      case "get_workspace": return api.getWorkspace(input.ref);
-      case "destroy_workspace": return api.destroyWorkspace(input.ref);
-      case "put_file_in_workspace": return api.workspaceAction(input.workspace, "files", input);
-      case "read_workspace_file": return api.workspaceAction(input.workspace, "file-read", input);
-      case "promote_workspace_file": return api.workspaceAction(input.workspace, "file-promote", input);
-      case "exec_workspace": return api.executeWorkspace(input);
-      case "get_workspace_execution": return api.getWorkspaceExecutionByRef(input.ref);
-      case "read_workspace_execution_output": return api.workspaceExecutionActionByRef(input.ref, "output", input);
-      case "cancel_workspace_execution": return api.workspaceExecutionActionByRef(input.ref, "cancel");
-      case "read_workspace_transcript": return api.workspaceAction(input.workspace, "transcript", input);
-      case "promote_workspace_transcript": return api.workspaceAction(input.workspace, "transcript-promote", input);
-      default: throw new ApiError("backend_unavailable", 500, "Unknown Workspace operation");
+      case "get_workspace_capabilities":
+        return api.getWorkspaceCapabilities();
+      case "create_workspace":
+        return api.createWorkspace(input);
+      case "list_workspaces":
+        return api.listWorkspaces(input);
+      case "get_workspace":
+        return api.getWorkspace(input.ref);
+      case "destroy_workspace":
+        return api.destroyWorkspace(input.ref);
+      case "put_file_in_workspace":
+        return api.workspaceAction(input.workspace, "files", input);
+      case "read_workspace_file":
+        return api.workspaceAction(input.workspace, "file-read", input);
+      case "promote_workspace_file":
+        return api.workspaceAction(input.workspace, "file-promote", input);
+      case "exec_workspace":
+        return api.executeWorkspace(input);
+      case "get_workspace_execution":
+        return api.getWorkspaceExecutionByRef(input.ref);
+      case "read_workspace_execution_output":
+        return api.workspaceExecutionActionByRef(input.ref, "output", input);
+      case "cancel_workspace_execution":
+        return api.workspaceExecutionActionByRef(input.ref, "cancel");
+      case "read_workspace_transcript":
+        return api.workspaceAction(input.workspace, "transcript", input);
+      case "promote_workspace_transcript":
+        return api.workspaceAction(
+          input.workspace,
+          "transcript-promote",
+          input,
+        );
+      default:
+        throw new ApiError(
+          "backend_unavailable",
+          500,
+          "Unknown Workspace operation",
+        );
     }
   } catch (error) {
-    const e = error instanceof ApiError ? error : new ApiError("backend_unavailable", 503, error instanceof Error ? error.message : "Backend unavailable");
-    return { content: [{ type: "text" as const, text: JSON.stringify({ error: { code: e.code, message: e.message } }) }], isError: true };
+    const e =
+      error instanceof ApiError
+        ? error
+        : new ApiError(
+            "backend_unavailable",
+            503,
+            error instanceof Error ? error.message : "Backend unavailable",
+          );
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify({ error: { code: e.code, message: e.message } }),
+        },
+      ],
+      isError: true,
+    };
   }
 }
-const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
-const create = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
-const destroy = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
-const execute = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
-const overwrite = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
-const workspaceFailure = "Expected failures use stable error codes, including workspace_not_found, workspace_not_ready, workspace_unavailable, capability_unavailable, workspace_quota_exceeded, file_not_found, path_invalid, path_not_found, path_exists, path_not_file, not_text, execution_not_found, execution_not_running, invalid_range, invalid_cursor, and invalid_invocation.";
+const readOnly = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+const create = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+};
+const destroy = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+const execute = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
+};
+const overwrite = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: false,
+};
+const workspaceFailure =
+  "Expected failures use stable error codes, including workspace_not_found, workspace_not_ready, workspace_unavailable, capability_unavailable, workspace_quota_exceeded, file_not_found, path_invalid, path_not_found, path_exists, path_not_file, not_text, execution_not_found, execution_not_running, invalid_range, invalid_cursor, and invalid_invocation.";
 
 export const workspaceToolNames = [
-  "get_workspace_capabilities", "create_workspace", "list_workspaces", "get_workspace", "destroy_workspace",
-  "put_file_in_workspace", "read_workspace_file", "promote_workspace_file", "exec_workspace", "get_workspace_execution",
-  "read_workspace_execution_output", "cancel_workspace_execution", "read_workspace_transcript", "promote_workspace_transcript"
+  "get_workspace_capabilities",
+  "create_workspace",
+  "list_workspaces",
+  "get_workspace",
+  "destroy_workspace",
+  "put_file_in_workspace",
+  "read_workspace_file",
+  "promote_workspace_file",
+  "exec_workspace",
+  "get_workspace_execution",
+  "read_workspace_execution_output",
+  "cancel_workspace_execution",
+  "read_workspace_transcript",
+  "promote_workspace_transcript",
 ] as const;
 
-export function registerWorkspaceTools(server: McpServer, api?: LaterBenderApi): void {
-  server.registerTool("get_workspace_capabilities", { description: `Discover the environments, architectures, operating system, shell, resource limits, and useful execution capabilities available for a Workspace. Capability maps include current keys such as internet, gpu, and nested_virtualization while allowing new capability names; capability_definitions explains every advertised capability for model use. Identifiers are open strings and no infrastructure implementation details are exposed. ${workspaceFailure}`, inputSchema: {}, outputSchema: {
-    default_environment: z.string(), default_architecture: z.string(), environments: z.array(environmentOffering), capability_definitions: z.record(z.string(), z.string())
-  }, annotations: readOnly }, runtime(api, "get_workspace_capabilities"));
+export function registerWorkspaceTools(
+  server: McpServer,
+  api?: LaterBenderApi,
+): void {
+  server.registerTool(
+    "get_workspace_capabilities",
+    {
+      description: `Discover the environments, architectures, operating system, shell, resource limits, and useful execution capabilities available for a Workspace. Capability maps include current keys such as internet, gpu, and nested_virtualization while allowing new capability names; capability_definitions explains every advertised capability for model use. Identifiers are open strings and no infrastructure implementation details are exposed. ${workspaceFailure}`,
+      inputSchema: {},
+      outputSchema: {
+        default_environment: z.string(),
+        default_architecture: z.string(),
+        environments: z.array(environmentOffering),
+        capability_definitions: z.record(z.string(), z.string()),
+      },
+      annotations: readOnly,
+    },
+    runtime(api, "get_workspace_capabilities"),
+  );
 
-  server.registerTool("create_workspace", { description: `Create a transient Workspace using optional minimum resource requirements and capability requirements. Every required capability must resolve true for the selected offering; otherwise return capability_unavailable. An empty object requests the normal useful default; requirements are minimums, not exact operator configuration, and are never silently substituted. ${workspaceFailure}`, inputSchema: { label: z.string().optional(), environment: z.string().optional(), architecture: z.string().optional(), ttl_seconds: z.number().int().positive().max(604800).optional(), resources: z.object(resourceRequirements).optional(), required_capabilities: z.array(z.string()).optional() }, outputSchema: { workspace }, annotations: create }, runtime(api, "create_workspace"));
-  server.registerTool("list_workspaces", { description: `List the authenticated user's surviving transient Workspaces after a chat or connector refresh. Results are compact summaries and pagination uses an opaque cursor. ${workspaceFailure}`, inputSchema: { state: workspaceState.optional(), limit: z.number().int().positive().max(100).optional(), cursor: z.string().optional() }, outputSchema: { workspaces: z.array(workspaceSummary), next_cursor: cursor }, annotations: readOnly }, runtime(api, "list_workspaces"));
-  server.registerTool("get_workspace", { description: `Fetch the full resolved projection of one Workspace by its opaque WS- reference. Destroyed or expired Workspaces resolve as not found. ${workspaceFailure}`, inputSchema: { ref: opaqueRef }, outputSchema: { workspace }, annotations: readOnly }, runtime(api, "get_workspace"));
-  server.registerTool("destroy_workspace", { description: `Destroy the entire transient Workspace, including its executions, filesystem, and transcript. The operation itself expresses destructive intent; there is no force option. ${workspaceFailure}`, inputSchema: { ref: opaqueRef }, outputSchema: { ref: opaqueRef, destroyed: z.literal(true) }, annotations: destroy }, runtime(api, "destroy_workspace"));
+  server.registerTool(
+    "create_workspace",
+    {
+      description: `Create a transient Workspace using optional minimum resource requirements and capability requirements. Every required capability must resolve true for the selected offering; otherwise return capability_unavailable. An empty object requests the normal useful default; requirements are minimums, not exact operator configuration, and are never silently substituted. ${workspaceFailure}`,
+      inputSchema: {
+        label: z.string().optional(),
+        environment: z.string().optional(),
+        architecture: z.string().optional(),
+        ttl_seconds: z.number().int().positive().max(604800).optional(),
+        resources: z.object(resourceRequirements).optional(),
+        required_capabilities: z.array(z.string()).optional(),
+      },
+      outputSchema: { workspace },
+      annotations: create,
+    },
+    runtime(api, "create_workspace"),
+  );
+  server.registerTool(
+    "list_workspaces",
+    {
+      description: `List the authenticated user's surviving transient Workspaces after a chat or connector refresh. Results are compact summaries and pagination uses an opaque cursor. ${workspaceFailure}`,
+      inputSchema: {
+        state: workspaceState.optional(),
+        limit: z.number().int().positive().max(100).optional(),
+        cursor: z.string().optional(),
+      },
+      outputSchema: {
+        workspaces: z.array(workspaceSummary),
+        next_cursor: cursor,
+      },
+      annotations: readOnly,
+    },
+    runtime(api, "list_workspaces"),
+  );
+  server.registerTool(
+    "get_workspace",
+    {
+      description: `Fetch the full resolved projection of one Workspace by its opaque WS- reference. Destroyed or expired Workspaces resolve as not found. ${workspaceFailure}`,
+      inputSchema: { ref: opaqueRef },
+      outputSchema: { workspace },
+      annotations: readOnly,
+    },
+    runtime(api, "get_workspace"),
+  );
+  server.registerTool(
+    "destroy_workspace",
+    {
+      description: `Destroy the entire transient Workspace, including its executions, filesystem, and transcript. The operation itself expresses destructive intent; there is no force option. ${workspaceFailure}`,
+      inputSchema: { ref: opaqueRef },
+      outputSchema: { ref: opaqueRef, destroyed: z.literal(true) },
+      annotations: destroy,
+    },
+    runtime(api, "destroy_workspace"),
+  );
 
-  server.registerTool("put_file_in_workspace", { description: `Copy exact canonical Later Bender File bytes into a Workspace at a Workspace-relative path. If path is omitted, the canonical filename is used at /workspace root. Paths cannot escape /workspace and the import is recorded in the transcript. ${workspaceFailure}`, inputSchema: { workspace: opaqueRef, file: opaqueRef, path: z.string().optional(), overwrite: z.boolean().default(false) }, outputSchema: { workspace: opaqueRef, file: opaqueRef, path: z.string(), byte_size: bytes, sha256: z.string() }, annotations: overwrite }, runtime(api, "put_file_in_workspace"));
-  server.registerTool("read_workspace_file", { description: `Read a bounded text-ish generated file using Workspace-relative paths and an optional line locator or continuation cursor. Locator and cursor are mutually exclusive. Without either, return an initial chunk and continuation metadata. This is not a generic binary transport; non-text content returns not_text. ${workspaceFailure}`, inputSchema: readWorkspaceFileInput, outputSchema: { workspace: opaqueRef, path: z.string(), content: z.string(), media_type: z.string(), range: z.object({ kind: z.literal("lines"), start: z.number().int().positive(), end: z.number().int().positive(), byte_start: bytes, byte_end: bytes, complete: z.boolean() }), next_cursor: cursor }, annotations: readOnly }, runtime(api, "read_workspace_file"));
-  server.registerTool("promote_workspace_file", { description: `Promote one Workspace-relative artifact into a normal immutable canonical Later Bender File. Promotion is explicit and becomes a transcript event. ${workspaceFailure}`, inputSchema: { workspace: opaqueRef, path: z.string(), project: z.string(), filename: z.string().optional(), tags: z.array(z.string()).optional() }, outputSchema: canonicalFileAcknowledgement.shape, annotations: create }, runtime(api, "promote_workspace_file"));
+  server.registerTool(
+    "put_file_in_workspace",
+    {
+      description: `Copy exact canonical Later Bender File bytes into a Workspace at a Workspace-relative path. If path is omitted, the canonical filename is used at /workspace root. Paths cannot escape /workspace and the import is recorded in the transcript. ${workspaceFailure}`,
+      inputSchema: {
+        workspace: opaqueRef,
+        file: opaqueRef,
+        path: z.string().optional(),
+        overwrite: z.boolean().default(false),
+      },
+      outputSchema: {
+        workspace: opaqueRef,
+        file: opaqueRef,
+        path: z.string(),
+        byte_size: bytes,
+        sha256: z.string(),
+      },
+      annotations: overwrite,
+    },
+    runtime(api, "put_file_in_workspace"),
+  );
+  server.registerTool(
+    "read_workspace_file",
+    {
+      description: `Read a bounded text-ish generated file using Workspace-relative paths and an optional line locator or continuation cursor. Locator and cursor are mutually exclusive. Without either, return an initial chunk and continuation metadata. This is not a generic binary transport; non-text content returns not_text. ${workspaceFailure}`,
+      inputSchema: readWorkspaceFileInput,
+      outputSchema: {
+        workspace: opaqueRef,
+        path: z.string(),
+        content: z.string(),
+        media_type: z.string(),
+        range: z.object({
+          kind: z.literal("lines"),
+          start: z.number().int().positive(),
+          end: z.number().int().positive(),
+          byte_start: bytes,
+          byte_end: bytes,
+          complete: z.boolean(),
+        }),
+        next_cursor: cursor,
+      },
+      annotations: readOnly,
+    },
+    runtime(api, "read_workspace_file"),
+  );
+  server.registerTool(
+    "promote_workspace_file",
+    {
+      description: `Promote one Workspace-relative artifact into a normal immutable canonical Later Bender File. Promotion is explicit and becomes a transcript event. ${workspaceFailure}`,
+      inputSchema: {
+        workspace: opaqueRef,
+        path: z.string(),
+        project: z.string(),
+        filename: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+      },
+      outputSchema: canonicalFileAcknowledgement.shape,
+      annotations: create,
+    },
+    runtime(api, "promote_workspace_file"),
+  );
 
-  server.registerTool("exec_workspace", { description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is the general-purpose Linux execution surface for real engineering work, including normal tooling, filesystem work, package installation, and outbound network use when those capabilities are available. The server waits briefly and returns a terminal projection or a running execution ref. There is no persistent shell session. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`, inputSchema: execInput, outputSchema: { execution }, annotations: execute }, runtime(api, "exec_workspace"));
-  server.registerTool("get_workspace_execution", { description: `Fetch the current full projection of an execution by its opaque WSE- reference. The execution ref is unambiguous, and authorization remains authenticated-user scoped. ${workspaceFailure}`, inputSchema: { ref: opaqueRef }, outputSchema: { execution }, annotations: readOnly }, runtime(api, "get_workspace_execution"));
-  server.registerTool("read_workspace_execution_output", { description: `Continue reading retained stdout or stderr from an opaque cursor. Each call returns the next bounded stream chunk; a cursor at the current end of a running stream is resumable and returns later appended bytes. next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`, inputSchema: { ref: opaqueRef, stream: z.enum(["stdout", "stderr"]), format: z.enum(["auto", "text", "base64"]).optional(), cursor: z.string().optional() }, outputSchema: { execution: opaqueRef, stream: z.enum(["stdout", "stderr"]), format: z.enum(["text", "base64"]), data: z.string(), chunk_byte_size: bytes, next_cursor: cursor, stream_complete: z.boolean(), state: executionState }, annotations: readOnly }, runtime(api, "read_workspace_execution_output"));
-  server.registerTool("cancel_workspace_execution", { description: `Terminate the whole process group belonging to an execution. Cancellation is idempotent: an already-terminal execution returns its existing terminal projection. ${workspaceFailure}`, inputSchema: { ref: opaqueRef }, outputSchema: { execution }, annotations: destroy }, runtime(api, "cancel_workspace_execution"));
+  server.registerTool(
+    "exec_workspace",
+    {
+      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is the general-purpose Linux execution surface for real engineering work, including normal tooling, filesystem work, package installation, and outbound network use when those capabilities are available. The server waits briefly and returns a terminal projection or a running execution ref. There is no persistent shell session. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
+      inputSchema: execInput,
+      outputSchema: { execution },
+      annotations: execute,
+    },
+    runtime(api, "exec_workspace"),
+  );
+  server.registerTool(
+    "get_workspace_execution",
+    {
+      description: `Fetch the current full projection of an execution by its opaque WSE- reference. The execution ref is unambiguous, and authorization remains authenticated-user scoped. ${workspaceFailure}`,
+      inputSchema: { ref: opaqueRef },
+      outputSchema: { execution },
+      annotations: readOnly,
+    },
+    runtime(api, "get_workspace_execution"),
+  );
+  server.registerTool(
+    "read_workspace_execution_output",
+    {
+      description: `Continue reading retained stdout or stderr from an opaque cursor. Each call returns the next bounded stream chunk; a cursor at the current end of a running stream is resumable and returns later appended bytes. next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`,
+      inputSchema: {
+        ref: opaqueRef,
+        stream: z.enum(["stdout", "stderr"]),
+        format: z.enum(["auto", "text", "base64"]).optional(),
+        cursor: z.string().optional(),
+      },
+      outputSchema: {
+        execution: opaqueRef,
+        stream: z.enum(["stdout", "stderr"]),
+        format: z.enum(["text", "base64"]),
+        data: z.string(),
+        chunk_byte_size: bytes,
+        next_cursor: cursor,
+        stream_complete: z.boolean(),
+        state: executionState,
+      },
+      annotations: readOnly,
+    },
+    runtime(api, "read_workspace_execution_output"),
+  );
+  server.registerTool(
+    "cancel_workspace_execution",
+    {
+      description: `Terminate the whole process group belonging to an execution. Cancellation is idempotent: an already-terminal execution returns its existing terminal projection. ${workspaceFailure}`,
+      inputSchema: { ref: opaqueRef },
+      outputSchema: { execution },
+      annotations: destroy,
+    },
+    runtime(api, "cancel_workspace_execution"),
+  );
 
-  server.registerTool("read_workspace_transcript", { description: `Read the ordered transient Workspace activity ledger, including creation, File imports, executions, and promotions. Sequence numbers are monotonic per Workspace; use either sequence bounds or a continuation cursor, not both. The transcript also provides execution discovery after chat migration. ${workspaceFailure}`, inputSchema: readWorkspaceTranscriptInput, outputSchema: { workspace: opaqueRef, events: z.array(transcriptEvent), next_cursor: cursor }, annotations: readOnly }, runtime(api, "read_workspace_transcript"));
-  server.registerTool("promote_workspace_transcript", { description: `Promote a selected Workspace transcript range, or the transcript through the current point when no range is supplied, into a plain UTF-8 Markdown canonical Later Bender File. It includes complete retained stdout/stderr and never secret environment values. ${workspaceFailure}`, inputSchema: { workspace: opaqueRef, project: z.string(), from_sequence: z.number().int().positive().optional(), to_sequence: z.number().int().positive().optional(), filename: z.string().optional(), tags: z.array(z.string()).optional() }, outputSchema: canonicalFileAcknowledgement.shape, annotations: create }, runtime(api, "promote_workspace_transcript"));
+  server.registerTool(
+    "read_workspace_transcript",
+    {
+      description: `Read the ordered transient Workspace activity ledger, including creation, File imports, executions, and promotions. Sequence numbers are monotonic per Workspace; use either sequence bounds or a continuation cursor, not both. The transcript also provides execution discovery after chat migration. ${workspaceFailure}`,
+      inputSchema: readWorkspaceTranscriptInput,
+      outputSchema: {
+        workspace: opaqueRef,
+        events: z.array(transcriptEvent),
+        next_cursor: cursor,
+      },
+      annotations: readOnly,
+    },
+    runtime(api, "read_workspace_transcript"),
+  );
+  server.registerTool(
+    "promote_workspace_transcript",
+    {
+      description: `Promote a selected Workspace transcript range, or the transcript through the current point when no range is supplied, into a plain UTF-8 Markdown canonical Later Bender File. It includes complete retained stdout/stderr and never secret environment values. ${workspaceFailure}`,
+      inputSchema: {
+        workspace: opaqueRef,
+        project: z.string(),
+        from_sequence: z.number().int().positive().optional(),
+        to_sequence: z.number().int().positive().optional(),
+        filename: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+      },
+      outputSchema: canonicalFileAcknowledgement.shape,
+      annotations: create,
+    },
+    runtime(api, "promote_workspace_transcript"),
+  );
 }
