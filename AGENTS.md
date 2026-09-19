@@ -1,5 +1,47 @@
 # Later, Bender agent guide
 
+## Start here
+
+This repository contains the Rails API, the Vue frontend, and the TypeScript
+MCP adapter. Read [`OPERATIONS.md`](OPERATIONS.md) before deployment,
+production inspection, or model-facing acceptance. It is the authoritative
+repo-local description of validation, GitOps, MicroK8s, release, and live
+acceptance boundaries.
+
+## Repository layout and canonical checks
+
+- `backend/`: Rails application, JSON API, search, canonical Files, and RSpec/OpenAPI contracts.
+- `mcp/`: TypeScript Streamable HTTP adapter and MCP contract tests.
+- `frontend/`: Vue/Vite application and Playwright browser acceptance.
+- `.github/workflows/`: immutable backend and MCP GHCR image publication on `master`.
+
+Run commands from the component directory they belong to:
+
+```sh
+cd backend && bin/ci
+cd backend && bundle exec rspec
+cd backend && bundle exec rake openapi:check
+cd backend && bin/rubocop
+cd backend && bin/bundler-audit
+cd backend && bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error
+cd mcp && npm test && npm run build
+cd frontend && npm ci && npm run build
+cd frontend && PLAYWRIGHT_USERNAME=... PLAYWRIGHT_PASSWORD=... npm run test:e2e
+```
+
+`backend/bin/ci` is the repository's canonical continuous-integration runner
+and includes RSpec, OpenAPI drift, RuboCop, MCP tests/build, bundler-audit, and
+Brakeman. The `.github/workflows/` files currently publish images; they do not
+run the test gate. Frontend Playwright is not CI-gated by this repository and
+requires authenticated local credentials; use it for rendered frontend
+changes.
+
+Hard boundaries: keep Rails as the canonical state boundary; preserve
+user/project ownership and OAuth authentication; do not weaken strict MCP
+schemas to accept Rails internals; do not deploy with old Kamal, Caddy,
+host-global systemd, or standalone MCP service paths; and do not put secrets or
+transient credentials in source, documentation, or test output.
+
 Later, Bender is personal project and task management software. It supports multiple users, but every project has exactly one owner. Projects are not collaborative: there are no shared owners, memberships, invitations, or role matrices. Adding collaboration is a product decision, not a missing implementation detail.
 
 The human UI and JSON API are equal control surfaces over the same canonical backend state. External clients, including AI assistants, must be able to inspect, create, update, classify, search, and filter the same projects and tasks shown in the UI. AI is an important client, not the product definition; do not reduce Later, Bender to an "AI backlog."
