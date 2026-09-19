@@ -12,8 +12,9 @@ class WorkspaceReaper
       begin
         WorkspaceRunnerClient.new.request(:delete, "/workspaces/#{workspace.runner_handle}") if workspace.runner_handle.present?
         workspace.destroy!
-      rescue WorkspaceRunnerClient::Unavailable
-        next
+      rescue WorkspaceRunnerClient::Unavailable => error
+        raise unless error.message == "Workspace not found"
+        workspace.destroy!
       end
     end
   end
