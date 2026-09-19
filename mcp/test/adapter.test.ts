@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { ApiError, LaterBenderApi } from "../src/api.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerTools } from "../src/tools.js";
 import { workspaceToolNames } from "../src/workspace.js";
+
+async function railsSearchFixture() {
+  return JSON.parse(await readFile(fileURLToPath(new URL("../../test/fixtures/rails_search_response.json", import.meta.url)), "utf8"));
+}
 
 function apiFor(responses: Array<{ status: number; body: unknown }>, publicBaseUrl?: string) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
@@ -433,4 +439,28 @@ test("projects mixed search results to their strict compact contracts", async ()
   assert.deepEqual(first.highlights, [{ field: "title", fragments: ["Implement Workspace MCP contract"] }]);
   assert.doesNotMatch(first.snippet, /<em>|<\/em>|<mark>|<\/mark>/);
   assert.doesNotMatch(first.highlights[0].fragments[0], /<em>|<\/em>|<mark>|<\/mark>/);
+});
+
+test("projects the Rails-shaped mixed search fixture through the real MCP tools/call transport", async () => {
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const server = new McpServer({ name: "test", version: "1" });
+  const fixture = await railsSearchFixture();
+  const { api } = apiFor([{ status: 200, body: fixture }]);
+  registerTools(server, api);
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const result = await client.callTool({ name: "search_memory", arguments: { query: "contract" } });
+  const structured = result.structuredContent as { results: Array<Record<string, any>> };
+  assert.equal(structured.results.length, 3);
+  assert.deepEqual(structured.results.map((entry) => entry.kind), ["task", "note", "file"]);
+  assert.deepEqual(structured.results[2].project, { slug: "contract-project", shorthand: "CP", name: "Contract Project" });
+  assert.equal(structured.results[2].project.id, undefined);
+  assert.deepEqual(structured.results[2].match, { representation: "text", locator: { kind: "lines", start: 1, end: 2 } });
+  assert.equal(structured.results[0].id, undefined);
+  assert.equal(structured.results[1].ref, undefined);
+  assert.equal(structured.results[2].snippet, "contract evidence");
+  assert.equal(result.isError, undefined);
 });

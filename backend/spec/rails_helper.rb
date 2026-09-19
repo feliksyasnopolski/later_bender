@@ -1,6 +1,8 @@
 ENV["RAILS_ENV"] ||= "test"
 require File.expand_path("../../config/environment", __FILE__)
 require "rspec/rails"
+require "factory_bot_rails"
+require_relative "support/search_hit"
 
 abort("The Rails environment is running in production mode!") if Rails.env.production?
 
@@ -60,6 +62,7 @@ end
 
 RSpec.configure do |config|
   config.include AssertionCompatibility
+  config.include FactoryBot::Syntax::Methods
 end
 
 def json_headers(token = nil)

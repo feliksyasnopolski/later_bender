@@ -7,6 +7,8 @@ CI.run do
 
   step "Tests: RSpec", "bundle exec rspec"
   step "Contract: OpenAPI drift", "bundle exec rake openapi:check"
+  step "Tests: MCP", "npm --prefix ../mcp test"
+  step "Build: MCP", "npm --prefix ../mcp run build"
 
   step "Security: Gem audit", "bin/bundler-audit"
   step "Security: Brakeman code analysis", "bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error"

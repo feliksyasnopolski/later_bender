@@ -1,0 +1,46 @@
+{
+  "results": [
+    {
+      "kind": "task",
+      "id": 41,
+      "ref": "CP-7",
+      "number": 7,
+      "project": { "id": 12, "slug": "contract-project", "shorthand": "CP", "name": "Contract Project" },
+      "title": "Ship contract task",
+      "snippet": "Ship contract task",
+      "highlights": [{ "field": "title", "fragments": ["Ship contract task"] }],
+      "tags": ["contracts"],
+      "status": "ready",
+      "priority": "high",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "kind": "note",
+      "id": 52,
+      "project": null,
+      "title": "Contract note",
+      "snippet": "A global contract note",
+      "highlights": [{ "field": "body", "fragments": ["A global contract note"] }],
+      "tags": ["contracts"],
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "kind": "file",
+      "id": 63,
+      "ref": "CP-F3",
+      "number": 3,
+      "filename": "contract-evidence.txt",
+      "media_type": "text/plain",
+      "project": { "id": 12, "slug": "contract-project", "shorthand": "CP", "name": "Contract Project" },
+      "tags": ["contracts"],
+      "snippet": "contract evidence",
+      "highlights": [{ "field": "body", "fragments": ["contract evidence"] }],
+      "match": { "representation": "text", "locator": { "kind": "lines", "start": 1, "end": 2 } },
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  ],
+  "total": 3
+}
