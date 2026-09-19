@@ -10,6 +10,21 @@ Run locally:
 WORKSPACE_RUNNER_TOKEN=... python3 runner/server.py
 ```
 
+The production Workspace image is built from `workspace.Dockerfile` as an
+ordinary Ubuntu 24.04 ARM64 developer workstation. It contains the broad
+shell/repository, network, archive, build/debug, Python/Ruby/Node, database
+client, data/text, and document/media tool baseline used by normal engineering
+work. The image build runs `workspace-image-smoke.sh`, which checks command
+availability and basic representative invocations, including the `fd` alias
+for Ubuntu's `fdfind` package.
+
+Build and exercise it locally with:
+
+```sh
+docker build --platform linux/arm64 -f runner/workspace.Dockerfile -t later-bender-workspace:local runner
+docker run --rm --platform linux/arm64 later-bender-workspace:local bash -lc 'git --version && curl -fsSI https://example.com'
+```
+
 Required production settings are `WORKSPACE_STORAGE`, `WORKSPACE_IMAGE`,
 `WORKSPACE_RUNNER_TOKEN`, `WORKSPACE_RUNNER_HOST`, and
 `WORKSPACE_RUNNER_PORT`. The service persists its metadata in SQLite and its
