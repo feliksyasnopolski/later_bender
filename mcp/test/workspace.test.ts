@@ -46,12 +46,14 @@ test("execution input requires exactly shell or direct argv", () => {
 test("boundary operations expose stable result contracts and scaffold availability", async () => {
   const registered = tools();
   assert.equal(registered.put_file_in_workspace.inputSchema.shape.overwrite.safeParse(undefined).success, true);
+  assert.deepEqual(registered.put_file_in_workspace.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false });
   assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", locator: { kind: "lines", start: 1, end: 2 } }).success, true);
   assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", locator: { kind: "pages", start: 1, end: 2 } }).success, false);
   assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", locator: { kind: "lines", start: 1, end: 2 }, cursor: "next" }).success, false);
   assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", cursor: "next" }).success, true);
   assert.equal(registered.read_workspace_execution_output.inputSchema.shape.stream.safeParse("stdout").success, true);
   assert.equal(registered.read_workspace_execution_output.inputSchema.shape.stream.safeParse("stdin").success, false);
+  assert.match(registered.read_workspace_execution_output.description, /Continue reading.*opaque cursor/);
   assert.deepEqual(registered.exec_workspace.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
   assert.equal(registered.read_workspace_transcript.outputSchema.safeParse({ workspace: "WS-1", events: [{ kind: "file_imported", sequence: 1, occurred_at: "2026-01-01T00:00:00Z", workspace: "WS-1", file: "LB-F1", path: "input.txt", byte_size: 4, sha256: "a".repeat(64) }], next_cursor: null }).success, true);
   assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1", cursor: "next", from_sequence: 2 }).success, false);
