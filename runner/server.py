@@ -33,6 +33,7 @@ DEFAULT_TTL_SECONDS = int(os.environ.get("WORKSPACE_DEFAULT_TTL_SECONDS", "86400
 REAPER_INTERVAL_SECONDS = int(os.environ.get("WORKSPACE_REAPER_INTERVAL_SECONDS", "60"))
 MAX_CHUNK = 256 * 1024
 lock = threading.RLock()
+BASELINE_ENV_NAMES = {}
 
 
 def now():
@@ -46,8 +47,13 @@ def expiry(payload):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + requested))
 
 
-def docker(*args, check=True):
-    return subprocess.run(["docker", *args], check=check, text=True, capture_output=True)
+def docker(*args, check=True, env_values=None, stdin=None):
+    child_env = os.environ.copy()
+    child_env.update(env_values or {})
+    try:
+        return subprocess.run(["docker", *args], check=check, text=stdin is None, input=stdin, capture_output=True, env=child_env)
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError("Docker operation failed") from None
 
 
 def db():
@@ -75,15 +81,34 @@ def setup():
             terminating_signal TEXT, timeout_seconds REAL, output_dir TEXT NOT NULL
           );
         """)
+    reconcile_starting()
+
+
+def remove_workspace_runtime(row):
+    docker("rm", "-f", row["handle"], check=False)
+    try:
+        import shutil
+        shutil.rmtree(row["workspace_dir"], ignore_errors=False)
+    except FileNotFoundError:
+        pass
+    with db() as connection:
+        connection.execute("DELETE FROM executions WHERE workspace_handle=?", (row["handle"],))
+        connection.execute("DELETE FROM workspaces WHERE handle=?", (row["handle"],))
+    BASELINE_ENV_NAMES.pop(row["handle"], None)
+
+
+def reconcile_starting():
+    with db() as connection:
+        rows = connection.execute("SELECT * FROM workspaces WHERE state='starting'").fetchall()
+    for row in rows:
+        remove_workspace_runtime(row)
 
 
 def reap_expired():
     with db() as connection:
         rows = connection.execute("SELECT handle FROM workspaces WHERE expires_at IS NOT NULL AND expires_at <= ?", (now(),)).fetchall()
     for row in rows:
-        docker("rm", "-f", row["handle"], check=False)
-        with db() as connection:
-            connection.execute("DELETE FROM workspaces WHERE handle=?", (row["handle"],))
+        remove_workspace_runtime(row)
 
 
 def reaper_loop():
@@ -169,6 +194,23 @@ def safe_workspace_path(row, relative):
     return candidate
 
 
+def validate_credential_path(value):
+    path = str(value)
+    if not path.startswith("/root/") or "/workspace" in path or "/runner-output" in path or "//" in path:
+        raise ValueError("path_invalid")
+    parts = path.split("/")
+    if any(part in ("", ".", "..") for part in parts[1:]):
+        raise ValueError("path_invalid")
+    return path
+
+
+def materialize_file(container, path, mode, secret):
+    if int(mode) not in (400, 600):
+        raise ValueError("path_invalid")
+    script = "set -eu; target=$1; mode=$2; parent=$(dirname -- \"$target\"); mkdir -p -- \"$parent\"; chmod 700 -- \"$parent\"; if [ -e \"$target\" ] || [ -L \"$target\" ]; then exit 73; fi; umask 077; cat > \"$target\"; chown root:root -- \"$target\"; chmod \"$mode\" -- \"$target\""
+    docker("exec", "-i", container, "/bin/bash", "-lc", script, "--", path, str(mode), stdin=str(secret).encode("utf-8"))
+
+
 def media_type_for(filename, data):
     guessed, _ = mimetypes.guess_type(filename)
     try:
@@ -205,10 +247,10 @@ def start_execution(row, payload, container):
         invocation = ["/bin/bash", "-lc", command]
     else:
         invocation = argv
-    env = payload.get("env") or {}
+    env = dict(payload.get("env") or {})
     secret_env = payload.get("secret_env") or {}
     env.update(secret_env)
-    env_args = [item for key, value in env.items() for item in ("-e", f"{key}={value}")]
+    env_args = [item for key in env for item in ("--env", key)]
     quoted = " ".join(shlex.quote(item) for item in invocation)
     if payload.get("timeout_seconds"):
         quoted = f"timeout --foreground --signal=TERM --kill-after=2s {shlex.quote(str(payload['timeout_seconds']))} {quoted}"
@@ -218,7 +260,7 @@ def start_execution(row, payload, container):
     input_redirect = f" < /runner-output/{row['handle']}/stdin" if stdin is not None else ""
     wrapper = f"( {quoted}{input_redirect} > /runner-output/{row['handle']}/stdout 2> /runner-output/{row['handle']}/stderr; code=$?; state=exited; if [ $code -eq 124 ]; then state=timed_out; fi; printf '{{\"state\":\"%s\",\"exit_code\":%s}}' $state $code > /runner-output/{row['handle']}/exit.json )"
     args = ["exec", "-d", *env_args, "-w", payload.get("cwd", "/workspace"), container, "/bin/bash", "-lc", wrapper]
-    docker(*args)
+    docker(*args, env_values=env)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -283,8 +325,7 @@ class Handler(BaseHTTPRequestHandler):
         if len(path) != 2 or path[0] != "workspaces": self.send_json(404, {"error": {"code": "not_found", "message": "Not found"}}); return
         with db() as connection: row = connection.execute("SELECT * FROM workspaces WHERE handle=?", (path[1],)).fetchone()
         if not row: self.send_json(404, {"error": {"code": "workspace_not_found", "message": "Workspace not found"}}); return
-        docker("rm", "-f", path[1], check=False)
-        with db() as connection: connection.execute("DELETE FROM workspaces WHERE handle=?", (path[1],))
+        remove_workspace_runtime(row)
         self.send_json(200, {"ref": path[1], "destroyed": True})
 
     def authorized(self):
@@ -299,14 +340,42 @@ class Handler(BaseHTTPRequestHandler):
         unavailable = requested_capabilities - {name for name, enabled in capabilities.items() if enabled}
         if unavailable: raise ValueError("capability_unavailable")
         workspace_dir = ROOT / handle
-        (workspace_dir / "workspace").mkdir(mode=0o700, parents=True)
-        docker_args = ["run", "-d", "--name", handle, "--network", NETWORK, "--sysctl", "net.ipv6.conf.all.disable_ipv6=1", "--sysctl", "net.ipv6.conf.default.disable_ipv6=1", "--pids-limit", str(limits_value["pids"]), "--memory", str(limits_value["memory_bytes"]), "--cpus", str(limits_value["cpus"]), "-v", f"{workspace_dir / 'workspace'}:/workspace", "-v", f"{workspace_dir}:/runner-output", IMAGE, "sleep", "infinity"]
-        docker(*docker_args)
         timestamp = now()
-        values = (handle, payload.get("label"), "ready", payload.get("environment", "linux"), payload.get("architecture", "arm64"), timestamp, timestamp, expiry(payload), json.dumps(limits_value), json.dumps(capabilities), str(workspace_dir))
+        values = (handle, payload.get("label"), "starting", payload.get("environment", "linux"), payload.get("architecture", "arm64"), timestamp, timestamp, expiry(payload), json.dumps(limits_value), json.dumps(capabilities), str(workspace_dir))
         with db() as connection: connection.execute("INSERT INTO workspaces VALUES (?,?,?,?,?,?,?,?,?,?,?)", values)
-        with db() as connection: row = connection.execute("SELECT * FROM workspaces WHERE handle=?", (handle,)).fetchone()
-        self.send_json(201, workspace_json(row))
+        try:
+            (workspace_dir / "workspace").mkdir(mode=0o700, parents=True)
+            applied = []
+            baseline_env = {}
+            for injection in payload.get("credential_injections") or []:
+                if injection.get("kind") == "env":
+                    baseline_env[injection["env_name"]] = str(injection["secret"])
+            docker_args = ["run", "-d", "--name", handle, "--network", NETWORK, "--sysctl", "net.ipv6.conf.all.disable_ipv6=1", "--sysctl", "net.ipv6.conf.default.disable_ipv6=1", "--pids-limit", str(limits_value["pids"]), "--memory", str(limits_value["memory_bytes"]), "--cpus", str(limits_value["cpus"])]
+            docker_args += [item for key in baseline_env for item in ("--env", key)]
+            docker_args += ["-v", f"{workspace_dir / 'workspace'}:/workspace", "-v", f"{workspace_dir}:/runner-output", IMAGE, "sleep", "infinity"]
+            docker(*docker_args, env_values=baseline_env)
+            BASELINE_ENV_NAMES[handle] = set(baseline_env)
+            for injection in payload.get("credential_injections") or []:
+                if injection["kind"] == "env":
+                    applied.append({key: injection[key] for key in ("ref", "kind", "env_name")})
+                else:
+                    path = validate_credential_path(injection["file_path"])
+                    materialize_file(handle, path, injection["file_mode"], injection["secret"])
+                    applied.append({key: injection[key] for key in ("ref", "kind", "file_path", "file_mode")})
+            with db() as connection:
+                connection.execute("UPDATE workspaces SET state='ready' WHERE handle=?", (handle,))
+                row = connection.execute("SELECT * FROM workspaces WHERE handle=?", (handle,)).fetchone()
+            self.send_json(201, dict(workspace_json(row), credential_injections_applied=applied))
+        except Exception:
+            with db() as connection:
+                row = connection.execute("SELECT * FROM workspaces WHERE handle=?", (handle,)).fetchone()
+            if row:
+                remove_workspace_runtime(row)
+            BASELINE_ENV_NAMES.pop(handle, None)
+            raise ValueError("credential_injection_failed")
+
+    def _unused(self):
+        pass
 
     def create_execution(self, workspace, payload):
         with db() as connection: w = connection.execute("SELECT * FROM workspaces WHERE handle=?", (workspace,)).fetchone()

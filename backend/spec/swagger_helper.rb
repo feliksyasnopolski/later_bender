@@ -24,6 +24,9 @@ RSpec.configure do |config|
     return { "$ref" => "#/components/schemas/TotpList" } if route_path == "/api/account/totp" && verb == "get"
     return { "$ref" => "#/components/schemas/TotpCreate" } if route_path == "/api/account/totp" && verb == "post"
     return { "$ref" => "#/components/schemas/TotpConfirmation" } if route_path.include?("/account/totp/") && verb == "post"
+    return { "$ref" => "#/components/schemas/CredentialList" } if route_path == "/api/credentials" && verb == "get"
+    return { "$ref" => "#/components/schemas/Credential" } if route_path == "/api/credentials" && verb == "post" || route_path == "/api/credentials/{id}" && %w[get patch].include?(verb)
+    return { "$ref" => "#/components/schemas/CredentialDelete" } if route_path == "/api/credentials/{id}" && verb == "delete"
     return { "$ref" => "#/components/schemas/ProjectList" } if route_path == "/api/projects" && verb == "get"
     return { "$ref" => "#/components/schemas/Project" } if route_path.match?(%r{\A/api/projects(?:/\{slug\})?\z})
     return { "$ref" => "#/components/schemas/TaskList" } if route_path == "/api/tasks" && verb == "get" || route_path.end_with?("/tasks") && verb == "get"
@@ -46,6 +49,7 @@ RSpec.configure do |config|
     return { "$ref" => "#/components/schemas/SessionInput" } if route_path == "/api/auth/recover"
     return { "$ref" => "#/components/schemas/TokenCreateInput" } if route_path == "/api/tokens" && verb == "post"
     return { "$ref" => "#/components/schemas/TotpCreateInput" } if route_path == "/api/account/totp" && verb == "post"
+    return { "$ref" => "#/components/schemas/CredentialInput" } if route_path == "/api/credentials" || route_path == "/api/credentials/{id}"
     return { "$ref" => "#/components/schemas/TotpConfirmInput" } if route_path.include?("/account/totp/")
     return { "$ref" => "#/components/schemas/ProjectInput" } if route_path.match?(%r{\A/api/projects/\{slug\}\z})
     return { "$ref" => "#/components/schemas/TaskInput" } if route_path.include?("/tasks")
@@ -176,6 +180,13 @@ RSpec.configure do |config|
               }
             }
           },
+          Credential: {
+            type: "object", required: %w[ref name kind created_at updated_at],
+            properties: { ref: { type: "string" }, name: { type: "string" }, kind: { type: "string", enum: %w[env file] }, env_name: { type: "string" }, file_path: { type: "string" }, file_mode: { type: "integer" }, created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" } }
+          },
+          CredentialList: { type: "object", required: %w[credentials next_cursor], properties: { credentials: { type: "array", items: { "$ref" => "#/components/schemas/Credential" } }, next_cursor: { type: "string", nullable: true } } },
+          CredentialInput: { type: "object", required: %w[name kind secret], properties: { name: { type: "string" }, kind: { type: "string", enum: %w[env file] }, secret: { type: "string", writeOnly: true }, env_name: { type: "string" }, file_path: { type: "string" }, file_mode: { type: "integer" } } },
+          CredentialDelete: { type: "object", required: %w[ref destroyed], properties: { ref: { type: "string" }, destroyed: { type: "boolean" } } },
           User: {
             type: "object",
             required: [ "id", "username" ],

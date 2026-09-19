@@ -26,7 +26,10 @@ export type ApiErrorCode =
   | "fetch_timeout"
   | "upstream_http_failure"
   | "file_too_large"
-  | "empty_fetch";
+  | "empty_fetch"
+  | "credential_not_found"
+  | "credential_conflict"
+  | "credential_injection_failed";
 
 export class ApiError extends Error {
   constructor(
@@ -372,6 +375,14 @@ export class LaterBenderApi {
     return this.request<unknown>(
       `/api/workspaces${query({ state: input.state as string | undefined, limit: input.limit?.toString(), cursor: input.cursor as string | undefined })}`,
     );
+  }
+  listCredentials(input: Record<string, unknown> = {}) {
+    return this.request<{ credentials: unknown[]; next_cursor: string | null }>(
+      `/api/credentials${query({ kind: input.kind as string | undefined, limit: input.limit?.toString(), cursor: input.cursor as string | undefined })}`,
+    ).then((response) => ({
+      items: response.credentials,
+      next_cursor: response.next_cursor,
+    }));
   }
   getWorkspace(ref: string) {
     return this.request<unknown>(`/api/workspaces/${encodeURIComponent(ref)}`);

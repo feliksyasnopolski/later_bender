@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_19_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -60,6 +60,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
     t.index ["citing_type", "citing_id"], name: "index_citations_on_citing"
     t.index ["citing_type", "citing_id"], name: "index_citations_on_citing_type_and_citing_id"
     t.index ["stored_file_id"], name: "index_citations_on_stored_file_id"
+  end
+
+  create_table "credentials", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "env_name"
+    t.integer "file_mode"
+    t.string "file_path"
+    t.string "kind", null: false
+    t.string "name", null: false
+    t.integer "public_number", null: false
+    t.string "ref", null: false
+    t.text "secret", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index "user_id, lower((name)::text)", name: "index_credentials_on_user_and_lower_name", unique: true
+    t.index ["ref"], name: "index_credentials_on_ref", unique: true
+    t.index ["user_id"], name: "index_credentials_on_user_id"
   end
 
   create_table "file_notes", force: :cascade do |t|
@@ -308,6 +325,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
     t.string "architecture", null: false
     t.jsonb "capabilities", default: {}, null: false
     t.datetime "created_at", null: false
+    t.jsonb "credential_bindings", default: [], null: false
     t.string "environment", null: false
     t.datetime "expires_at"
     t.string "label"
@@ -325,8 +343,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
     t.bigint "user_id", null: false
     t.string "workspace_root", default: "/workspace", null: false
     t.index ["legacy_ref"], name: "index_workspaces_on_legacy_ref"
-    t.index ["user_id", "ref"], name: "index_workspaces_on_user_id_and_ref", unique: true
     t.index ["user_id", "public_number"], name: "index_workspaces_on_user_id_and_public_number", unique: true
+    t.index ["user_id", "ref"], name: "index_workspaces_on_user_id_and_ref", unique: true
     t.index ["user_id", "state"], name: "index_workspaces_on_user_id_and_state"
     t.index ["user_id"], name: "index_workspaces_on_user_id"
   end
@@ -334,6 +352,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "api_tokens", "users"
   add_foreign_key "citations", "stored_files"
+  add_foreign_key "credentials", "users"
   add_foreign_key "file_notes", "notes"
   add_foreign_key "file_notes", "stored_files"
   add_foreign_key "file_representations", "stored_files"

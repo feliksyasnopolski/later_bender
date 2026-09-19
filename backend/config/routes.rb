@@ -16,6 +16,7 @@ Rails.application.routes.draw do
     get "auth/current", to: "auth#current"
     get "search", to: "search#index"
     get "workspaces/capabilities", to: "workspaces#capabilities"
+    resources :credentials, only: %i[index create show update destroy]
     resources :workspaces, only: %i[index create]
     get "workspaces/:ref", to: "workspaces#show"
     delete "workspaces/:ref", to: "workspaces#destroy"

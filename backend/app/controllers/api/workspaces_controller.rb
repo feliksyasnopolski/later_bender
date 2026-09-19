@@ -18,10 +18,30 @@ module Api
 
     def create
       payload = request_payload
-      offering = runner.request(:post, "/workspaces", payload)
-      workspace = current_user.workspaces.create!(workspace_attributes(offering, payload))
-      workspace.append_event!("workspace_created", {})
+      refs = Array(payload["credentials"])
+      raise WorkspaceRunnerClient::Unavailable.new("Credential was not found", code: "credential_not_found") if refs.length > 32 || refs.uniq.length != refs.length
+      credentials = current_user.credentials.where(ref: refs).index_by(&:ref)
+      raise WorkspaceRunnerClient::Unavailable.new("Credential was not found", code: "credential_not_found") unless credentials.length == refs.length
+      bindings = credentials.values.map(&:metadata)
+      validate_binding_conflicts!(bindings)
+      injections = credentials.values.map { |credential| credential.metadata.merge("secret" => credential.secret) }
+      offering = runner.request(:post, "/workspaces", payload.except("credentials").merge("credential_injections" => injections))
+      result = offering.fetch("workspace", offering)
+      applied = Array(result["credential_injections_applied"] || offering["credential_injections_applied"])
+      expected = bindings.map { |binding| binding.except("name") }.sort_by { |binding| binding["ref"] }
+      unless refs.empty? || applied.map { |item| item.slice("ref", "kind", "env_name", "file_path", "file_mode") }.sort_by { |item| item["ref"] } == expected
+        runner.request(:delete, "/workspaces/#{result["runner_handle"] || result["ref"]}") rescue nil
+        raise WorkspaceRunnerClient::Unavailable.new("Credential injection acknowledgement was invalid", code: "credential_injection_failed")
+      end
+      workspace = nil
+      current_user.workspaces.transaction do
+        workspace = current_user.workspaces.create!(workspace_attributes(offering, payload).merge(credential_bindings: bindings))
+        workspace.append_event!("workspace_created", {})
+      end
       render json: full(workspace), status: :created
+    rescue ActiveRecord::RecordInvalid
+      runner.request(:delete, "/workspaces/#{offering.dig("workspace", "runner_handle") || offering.dig("workspace", "ref") || offering["runner_handle"] || offering["ref"]}") rescue nil
+      raise
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
     end
@@ -222,6 +242,15 @@ module Api
       { label: payload["label"], state: result.fetch("state", "ready"), environment: result.fetch("environment", payload["environment"] || "linux"), architecture: result.fetch("architecture", payload["architecture"] || "arm64"), os_name: result.dig("os", "name") || "Linux", os_version: result.dig("os", "version") || "unknown", shell: result.fetch("shell", "/bin/bash"), workspace_root: result.fetch("workspace_root", "/workspace"), limits: result.fetch("limits", {}), capabilities: result.fetch("capabilities", {}), runner_handle: result["runner_handle"] || result["ref"], last_activity_at: Time.current, expires_at: result["expires_at"] }
     end
 
+    def validate_binding_conflicts!(bindings)
+      raise WorkspaceRunnerClient::Unavailable.new("Credential conflict", code: "credential_conflict") if bindings.map { |b| b["ref"] }.uniq.length != bindings.length
+      env_names = bindings.filter_map { |b| b["env_name"] }
+      paths = bindings.filter_map { |b| b["file_path"] }
+      if env_names.length != env_names.uniq.length || paths.length != paths.uniq.length
+        raise WorkspaceRunnerClient::Unavailable.new("Credential conflict", code: "credential_conflict")
+      end
+    end
+
     def execution_attributes(result)
       result = result.fetch("execution", result)
       { ref: result.fetch("ref"), sequence: result.fetch("sequence", @workspace.workspace_executions.maximum(:sequence).to_i + 1), state: result.fetch("state", "running"), invocation: result.fetch("invocation", {}), cwd: result.fetch("cwd", "/workspace"), env: result.fetch("env", {}), secret_env_names: result.fetch("secret_env_names", []), started_at: result.fetch("started_at", Time.current), finished_at: result["finished_at"], exit_code: result["exit_code"], terminating_signal: result["terminating_signal"], requested_timeout_seconds: result["requested_timeout_seconds"], stdout_handle: result.fetch("stdout_handle", SecureRandom.hex(8)), stderr_handle: result.fetch("stderr_handle", SecureRandom.hex(8)) }
@@ -233,7 +262,7 @@ module Api
     end
 
     def summary(workspace) = full(workspace).slice(:ref, :label, :state, :environment, :architecture, :created_at, :last_activity_at, :expires_at)
-    def full(workspace) = { ref: workspace.ref, label: workspace.label, state: workspace.state, environment: workspace.environment, architecture: workspace.architecture, os: workspace.os, shell: workspace.shell, workspace_root: workspace.workspace_root, limits: workspace.limits, capabilities: workspace.capabilities, created_at: workspace.created_at, last_activity_at: workspace.last_activity_at, expires_at: workspace.expires_at }
+    def full(workspace) = { ref: workspace.ref, label: workspace.label, state: workspace.state, environment: workspace.environment, architecture: workspace.architecture, os: workspace.os, shell: workspace.shell, workspace_root: workspace.workspace_root, limits: workspace.limits, capabilities: workspace.capabilities, credential_bindings: workspace.credential_bindings, created_at: workspace.created_at, last_activity_at: workspace.last_activity_at, expires_at: workspace.expires_at }
     def execution_json(execution) = { ref: execution.ref, workspace: @workspace.ref, sequence: execution.sequence, state: execution.state, invocation: execution.invocation, cwd: execution.cwd, env: execution.env, secret_env_names: execution.secret_env_names, started_at: execution.started_at, finished_at: execution.finished_at, exit_code: execution.exit_code, terminating_signal: execution.terminating_signal, requested_timeout_seconds: timeout_seconds_value(execution.requested_timeout_seconds), stdout: stream_projection(execution, :stdout), stderr: stream_projection(execution, :stderr) }
     def timeout_seconds_value(value) = value.nil? ? nil : value.to_f
     def stream_projection(execution, stream)
@@ -244,7 +273,7 @@ module Api
     end
     def render_runner_error(error)
       code = error.respond_to?(:code) && error.code.present? ? error.code : "workspace_unavailable"
-      status = %w[invalid_range invalid_cursor not_text path_invalid path_not_found path_exists path_not_file].include?(code) ? :unprocessable_content : :service_unavailable
+      status = %w[invalid_range invalid_cursor not_text path_invalid path_not_found path_exists path_not_file credential_not_found credential_conflict credential_injection_failed].include?(code) ? :unprocessable_content : :service_unavailable
       render json: { error: { code:, message: error.message } }, status:
     end
   end

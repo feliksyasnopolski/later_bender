@@ -6,6 +6,7 @@ class User < ApplicationRecord
   has_many :api_tokens, dependent: :destroy, inverse_of: :user
   has_many :totp_credentials, dependent: :destroy, inverse_of: :user
   has_many :workspaces, dependent: :delete_all
+  has_many :credentials, dependent: :destroy, inverse_of: :user
 
   validates :username, presence: true, length: { in: 1..80 }, uniqueness: { case_sensitive: false }
   validates :password, confirmation: true, length: { minimum: 8 }, allow_nil: true

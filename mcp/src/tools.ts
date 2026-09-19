@@ -110,6 +110,16 @@ const projectUpdateOutput = {
 const taskMutationOutput = { task: taskMutationAcknowledgement };
 const noteMutationOutput = { note: mutationAcknowledgement };
 const noteDeletionOutput = { note: z.object({ id: z.number() }) };
+const credential = z.object({
+  ref: z.string(),
+  name: z.string(),
+  kind: z.enum(["env", "file"]),
+  env_name: z.string().optional(),
+  file_path: z.string().optional(),
+  file_mode: z.number().int().optional(),
+  created_at: timestamp,
+  updated_at: timestamp,
+});
 const fileProject = z.object({
   slug: z.string(),
   shorthand: z.string(),
@@ -580,6 +590,30 @@ function egressMetadata(file: FileEgress) {
 }
 
 export function registerTools(server: McpServer, api: LaterBenderApi): void {
+  server.registerTool(
+    "list_credentials",
+    {
+      description:
+        "List metadata for the authenticated user's durable Credentials. Secret values are never returned; use refs only when creating a Workspace.",
+      inputSchema: {
+        kind: z.enum(["env", "file"]).optional(),
+        limit: z.number().int().positive().max(100).optional(),
+        cursor: z.string().optional(),
+      },
+      outputSchema: {
+        credentials: z.array(credential),
+        next_cursor: cursorOutput,
+      },
+      annotations: readAnnotations,
+    },
+    (input) =>
+      safeObject(() =>
+        api.listCredentials(input).then((page) => ({
+          credentials: page.items,
+          next_cursor: page.next_cursor,
+        })),
+      ),
+  );
   server.registerTool(
     "list_projects",
     {

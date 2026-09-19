@@ -153,6 +153,191 @@ paths:
       security:
       - bearerAuth: []
       parameters: []
+  "/api/credentials":
+    get:
+      summary: api/credentials#index
+      tags:
+      - Credentials
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/CredentialList"
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    post:
+      summary: api/credentials#create
+      tags:
+      - Credentials
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Credential"
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CredentialInput"
+  "/api/credentials/{id}":
+    get:
+      summary: api/credentials#show
+      tags:
+      - Credentials
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Credential"
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+    patch:
+      summary: api/credentials#update
+      tags:
+      - Credentials
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Credential"
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CredentialInput"
+    put:
+      summary: api/credentials#update
+      tags:
+      - Credentials
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CredentialInput"
+    delete:
+      summary: api/credentials#destroy
+      tags:
+      - Credentials
+      responses:
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '204':
+          description: no content
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
   "/api/workspaces":
     get:
       summary: api/workspaces#index
@@ -2635,6 +2820,82 @@ components:
                   type: array
                   items:
                     type: string
+    Credential:
+      type: object
+      required:
+      - ref
+      - name
+      - kind
+      - created_at
+      - updated_at
+      properties:
+        ref:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum:
+          - env
+          - file
+        env_name:
+          type: string
+        file_path:
+          type: string
+        file_mode:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CredentialList:
+      type: object
+      required:
+      - credentials
+      - next_cursor
+      properties:
+        credentials:
+          type: array
+          items:
+            "$ref": "#/components/schemas/Credential"
+        next_cursor:
+          type: string
+          nullable: true
+    CredentialInput:
+      type: object
+      required:
+      - name
+      - kind
+      - secret
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+          enum:
+          - env
+          - file
+        secret:
+          type: string
+          writeOnly: true
+        env_name:
+          type: string
+        file_path:
+          type: string
+        file_mode:
+          type: integer
+    CredentialDelete:
+      type: object
+      required:
+      - ref
+      - destroyed
+      properties:
+        ref:
+          type: string
+        destroyed:
+          type: boolean
     User:
       type: object
       required:

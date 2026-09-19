@@ -40,6 +40,14 @@ const environmentOffering = z.object({
   description: z.string(),
   architectures: z.array(architectureOffering),
 });
+const credentialBinding = z.object({
+  ref: opaqueRef,
+  name: z.string(),
+  kind: z.enum(["env", "file"]),
+  env_name: z.string().optional(),
+  file_path: z.string().optional(),
+  file_mode: z.number().int().optional(),
+});
 
 const workspace = z.object({
   ref: opaqueRef,
@@ -52,6 +60,7 @@ const workspace = z.object({
   workspace_root: z.string(),
   limits: resourceLimits,
   capabilities: capabilityFlags,
+  credential_bindings: z.array(credentialBinding).default([]),
   created_at: timestamp,
   last_activity_at: timestamp,
   expires_at: timestamp.nullable(),
@@ -417,6 +426,10 @@ export function registerWorkspaceTools(
         ttl_seconds: z.number().int().positive().max(604800).optional(),
         resources: z.object(resourceRequirements).optional(),
         required_capabilities: z.array(z.string()).optional(),
+        credentials: z
+          .array(z.string().regex(/^CRED-/))
+          .max(32)
+          .optional(),
       },
       outputSchema: { workspace },
       annotations: create,
