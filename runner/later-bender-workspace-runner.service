@@ -1,0 +1,20 @@
+[Unit]
+Description=Later Bender Workspace runner
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=docker
+EnvironmentFile=/etc/later-bender/workspace-runner.env
+WorkingDirectory=/opt/later-bender/runner
+ExecStart=/usr/bin/python3 /opt/later-bender/runner/server.py
+Restart=always
+RestartSec=2
+NoNewPrivileges=false
+ProtectSystem=full
+ReadWritePaths=/var/lib/later-bender/workspaces
+
+[Install]
+WantedBy=multi-user.target

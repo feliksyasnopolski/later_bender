@@ -115,6 +115,14 @@ The runtime Secret `later-bender-runtime` and the private image pull Secret
 chart owns the backend, MCP adapter, Traefik ingress/certificates,
 Elasticsearch, and retained Active Storage volumes.
 
+LB-80 Workspace execution adds one host-owned service outside Kubernetes. The
+runner source is under `runner/`; it uses the host Docker daemon and stores
+transient state under `/var/lib/later-bender/workspaces`. Rails reaches it via
+`WORKSPACE_RUNNER_URL` with the out-of-band `workspace-runner-token` Secret
+key. Rails/MCP pods must not receive Docker or containerd sockets. Keep the
+runner on an isolated listener/network and complete the runner's network,
+resource, restart, and cleanup acceptance before advertising capabilities.
+
 ## Deployment verification
 
 Confirm the deployed images and health endpoints, not just Helm success:

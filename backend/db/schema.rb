@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_094500) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_19_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -271,6 +271,62 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_094500) do
     t.index "lower((username)::text)", name: "index_users_on_lower_username", unique: true
   end
 
+  create_table "workspace_events", force: :cascade do |t|
+    t.string "kind", null: false
+    t.datetime "occurred_at", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.integer "sequence", null: false
+    t.bigint "workspace_id", null: false
+    t.index ["workspace_id", "sequence"], name: "index_workspace_events_on_workspace_id_and_sequence", unique: true
+    t.index ["workspace_id"], name: "index_workspace_events_on_workspace_id"
+  end
+
+  create_table "workspace_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "cwd", default: "/workspace", null: false
+    t.jsonb "env", default: {}, null: false
+    t.integer "exit_code"
+    t.datetime "finished_at"
+    t.jsonb "invocation", default: {}, null: false
+    t.string "ref", null: false
+    t.decimal "requested_timeout_seconds"
+    t.jsonb "secret_env_names", default: [], null: false
+    t.integer "sequence", null: false
+    t.datetime "started_at", null: false
+    t.string "state", default: "running", null: false
+    t.string "stderr_handle", null: false
+    t.string "stdout_handle", null: false
+    t.string "terminating_signal"
+    t.datetime "updated_at", null: false
+    t.bigint "workspace_id", null: false
+    t.index ["ref"], name: "index_workspace_executions_on_ref", unique: true
+    t.index ["workspace_id", "sequence"], name: "index_workspace_executions_on_workspace_id_and_sequence", unique: true
+    t.index ["workspace_id"], name: "index_workspace_executions_on_workspace_id"
+  end
+
+  create_table "workspaces", force: :cascade do |t|
+    t.string "architecture", null: false
+    t.jsonb "capabilities", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.string "environment", null: false
+    t.datetime "expires_at"
+    t.string "label"
+    t.datetime "last_activity_at", null: false
+    t.jsonb "limits", default: {}, null: false
+    t.string "os_name", null: false
+    t.string "os_version", null: false
+    t.string "ref", null: false
+    t.string "runner_handle"
+    t.string "shell", null: false
+    t.string "state", default: "starting", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.string "workspace_root", default: "/workspace", null: false
+    t.index ["ref"], name: "index_workspaces_on_ref", unique: true
+    t.index ["user_id", "state"], name: "index_workspaces_on_user_id_and_state"
+    t.index ["user_id"], name: "index_workspaces_on_user_id"
+  end
+
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "api_tokens", "users"
   add_foreign_key "citations", "stored_files"
@@ -296,4 +352,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_094500) do
   add_foreign_key "task_tags", "tasks"
   add_foreign_key "tasks", "projects"
   add_foreign_key "totp_credentials", "users"
+  add_foreign_key "workspace_events", "workspaces"
+  add_foreign_key "workspace_executions", "workspaces"
+  add_foreign_key "workspaces", "users"
 end

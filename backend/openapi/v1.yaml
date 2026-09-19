@@ -131,6 +131,691 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/workspaces/capabilities":
+    get:
+      summary: api/workspaces#capabilities
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+  "/api/workspaces":
+    get:
+      summary: api/workspaces#index
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    post:
+      summary: api/workspaces#create
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  "/api/workspaces/{ref}":
+    get:
+      summary: api/workspaces#show
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+    delete:
+      summary: api/workspaces#destroy
+      tags:
+      - Workspaces
+      responses:
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '204':
+          description: no content
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+  "/api/workspaces/{ref}/files":
+    post:
+      summary: api/workspaces#put_file
+      tags:
+      - Workspaces
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/FileRefAck"
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/FileCreateInput"
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspaces/{ref}/file-read":
+    post:
+      summary: api/workspaces#read_file
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspaces/{ref}/file-promote":
+    post:
+      summary: api/workspaces#promote_file
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspaces/{ref}/executions":
+    post:
+      summary: api/workspaces#execute
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspaces/{ref}/executions/{execution_ref}":
+    get:
+      summary: api/workspaces#execution
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: execution_ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspaces/{ref}/executions/{execution_ref}/output":
+    post:
+      summary: api/workspaces#output
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: execution_ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspaces/{ref}/executions/{execution_ref}/cancel":
+    post:
+      summary: api/workspaces#cancel
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: execution_ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspaces/{ref}/transcript":
+    post:
+      summary: api/workspaces#transcript
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspaces/{ref}/transcript-promote":
+    post:
+      summary: api/workspaces#promote_transcript
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspace-executions/{ref}":
+    get:
+      summary: api/workspaces#execution_by_ref
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspace-executions/{ref}/output":
+    post:
+      summary: api/workspaces#output_by_ref
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/workspace-executions/{ref}/cancel":
+    post:
+      summary: api/workspaces#cancel_by_ref
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
   "/api/oauth/token_info":
     get:
       summary: api/oauth#token_info

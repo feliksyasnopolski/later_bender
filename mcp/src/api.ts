@@ -1,4 +1,4 @@
-export type ApiErrorCode = "unauthorized" | "not_found" | "validation_failed" | "backend_unavailable" | "source_required" | "source_conflict" | "unsupported_url_scheme" | "invalid_url" | "blocked_destination" | "redirect_blocked_destination" | "too_many_redirects" | "fetch_timeout" | "upstream_http_failure" | "file_too_large" | "empty_fetch";
+export type ApiErrorCode = "unauthorized" | "not_found" | "validation_failed" | "backend_unavailable" | "workspace_unavailable" | "capability_unavailable" | "workspace_not_found" | "workspace_not_ready" | "execution_not_found" | "execution_not_running" | "invalid_cursor" | "invalid_range" | "source_required" | "source_conflict" | "unsupported_url_scheme" | "invalid_url" | "blocked_destination" | "redirect_blocked_destination" | "too_many_redirects" | "fetch_timeout" | "upstream_http_failure" | "file_too_large" | "empty_fetch";
 
 export class ApiError extends Error {
   constructor(public readonly code: ApiErrorCode, public readonly status: number, message: string, public readonly details?: unknown) { super(message); this.name = "ApiError"; }
@@ -89,6 +89,17 @@ export class LaterBenderApi {
   readArchiveEntry(ref: string, path: string, representation = "auto", locator?: Record<string, unknown>) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}/archive/entry${query({ path, representation, locator: locator ? JSON.stringify(locator) : undefined })}`).then((response: any) => response.read); }
   extractArchiveEntry(ref: string, payload: Record<string, unknown>) { return this.request<unknown>(`/api/files/by-ref/${encodeURIComponent(ref)}/archive/extract`, json("POST", payload)); }
   searchMemory(input: Record<string, unknown>) { return this.request<{ results: unknown[] }>(`/api/search${query({ q: String(input.query), scope: String(input.scope || "all"), project: input.project as string | undefined, kinds: (input.kinds as string[] | undefined)?.join(","), tags: (input.tags as string[] | undefined)?.join(","), task_statuses: (input.task_statuses as string[] | undefined)?.join(","), task_priorities: (input.task_priorities as string[] | undefined)?.join(","), limit: String(input.limit || 8) })}`); }
+  getWorkspaceCapabilities() { return this.request<unknown>("/api/workspaces/capabilities"); }
+  createWorkspace(payload: Record<string, unknown>) { return this.request<unknown>("/api/workspaces", json("POST", payload)); }
+  listWorkspaces(input: Record<string, unknown>) { return this.request<unknown>(`/api/workspaces${query({ state: input.state as string | undefined, limit: input.limit?.toString(), cursor: input.cursor as string | undefined })}`); }
+  getWorkspace(ref: string) { return this.request<unknown>(`/api/workspaces/${encodeURIComponent(ref)}`); }
+  destroyWorkspace(ref: string) { return this.request<unknown>(`/api/workspaces/${encodeURIComponent(ref)}`, { method: "DELETE" }); }
+  workspaceAction(ref: string, action: string, payload: Record<string, unknown> = {}) { return this.request<unknown>(`/api/workspaces/${encodeURIComponent(ref)}/${action}`, json("POST", payload)); }
+  executeWorkspace(payload: Record<string, unknown>) { const { workspace, ...body } = payload; return this.workspaceAction(String(workspace), "executions", body); }
+  getWorkspaceExecution(ref: string, execution: string) { return this.request<unknown>(`/api/workspaces/${encodeURIComponent(ref)}/executions/${encodeURIComponent(execution)}`); }
+  workspaceExecutionAction(ref: string, execution: string, action: string, payload: Record<string, unknown> = {}) { return this.request<unknown>(`/api/workspaces/${encodeURIComponent(ref)}/executions/${encodeURIComponent(execution)}/${action}`, json("POST", payload)); }
+  getWorkspaceExecutionByRef(ref: string) { return this.request<unknown>(`/api/workspace-executions/${encodeURIComponent(ref)}`); }
+  workspaceExecutionActionByRef(ref: string, action: string, payload: Record<string, unknown> = {}) { return this.request<unknown>(`/api/workspace-executions/${encodeURIComponent(ref)}/${action}`, json("POST", payload)); }
 }
 
 function projectView(project: unknown): unknown {
