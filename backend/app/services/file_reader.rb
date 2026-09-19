@@ -80,13 +80,13 @@ class FileReader
   def derive(bytes, filename: @file&.filename, media_type: @file&.media_type)
     if media_type == "application/pdf"
       text, pages = extract_pdf(bytes)
-      ["pdf_text", text, { "coordinate" => "pages", "pages" => pages }, "text/plain"]
+      [ "pdf_text", text, { "coordinate" => "pages", "pages" => pages }, "text/plain" ]
     elsif media_type.start_with?("text/") || TEXT_TYPES.include?(media_type) || filename.match?(/\.(md|markdown|txt|csv|json|xml)\z/i)
-      [media_type.include?("markdown") || filename.match?(/\.(md|markdown)\z/i) ? "markdown" : "text", bytes.force_encoding("UTF-8").scrub.gsub("\r\n", "\n").gsub("\r", "\n"), { "coordinate" => "lines" }, "text/plain"]
+      [ media_type.include?("markdown") || filename.match?(/\.(md|markdown)\z/i) ? "markdown" : "text", bytes.force_encoding("UTF-8").scrub.gsub("\r\n", "\n").gsub("\r", "\n"), { "coordinate" => "lines" }, "text/plain" ]
     elsif media_type == "text/html" || filename.match?(/\.html?\z/i)
-      ["html_text", bytes.force_encoding("UTF-8").scrub.gsub(/<script.*?<\/script>|<style.*?<\/style>/mi, "").gsub(/<[^>]+>/, " ").gsub(/\s+/, " ").strip, { "coordinate" => "lines" }, "text/plain"]
+      [ "html_text", bytes.force_encoding("UTF-8").scrub.gsub(/<script.*?<\/script>|<style.*?<\/style>/mi, "").gsub(/<[^>]+>/, " ").gsub(/\s+/, " ").strip, { "coordinate" => "lines" }, "text/plain" ]
     else
-      ["metadata", nil, {}, media_type]
+      [ "metadata", nil, {}, media_type ]
     end
   end
 
@@ -139,8 +139,8 @@ class FileReader
         stream.force_encoding("ISO-8859-1").scan(/\(([^)]*)\)/).flatten.join(" ").encode("UTF-8", invalid: :replace, undef: :replace)
       end
     end
-    pages = [bytes.force_encoding("ISO-8859-1").scan(/\(([^)]*)\)/).flatten.join(" ")] if pages.empty?
+    pages = [ bytes.force_encoding("ISO-8859-1").scan(/\(([^)]*)\)/).flatten.join(" ") ] if pages.empty?
     pages = pages.map.with_index { |page, index| "[P#{index + 1}]\n#{page.strip}\n" }
-    [pages.join("\n"), pages.length]
+    [ pages.join("\n"), pages.length ]
   end
 end

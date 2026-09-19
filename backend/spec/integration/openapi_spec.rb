@@ -37,7 +37,7 @@ RSpec.describe "Browser API contract", type: :request do
     get "Get the current user" do
       tags "Authentication"
       produces "application/json"
-      security [bearerAuth: []]
+      security [ bearerAuth: [] ]
       response 200, "authenticated user" do
         schema "$ref" => "#/components/schemas/User"
         run_test!
@@ -54,7 +54,7 @@ RSpec.describe "Browser API contract", type: :request do
     get "List projects" do
       tags "Projects"
       produces "application/json"
-      security [bearerAuth: []]
+      security [ bearerAuth: [] ]
       response 200, "projects" do
         schema "$ref" => "#/components/schemas/ProjectList"
         run_test!
@@ -70,9 +70,9 @@ RSpec.describe "Browser API contract", type: :request do
       tags "Projects"
       consumes "application/json"
       produces "application/json"
-      security [bearerAuth: []]
+      security [ bearerAuth: [] ]
       parameter name: :project_input, in: :body, required: true, schema: {
-        type: :object, required: ["name"],
+        type: :object, required: [ "name" ],
         properties: { name: { type: :string }, slug: { type: :string }, shorthand: { type: :string }, description: { type: :string } }
       }
       let(:project_input) { nil }
@@ -100,9 +100,9 @@ RSpec.describe "Browser API contract", type: :request do
     get "List project tasks" do
       tags "Tasks"
       produces "application/json"
-      security [bearerAuth: []]
+      security [ bearerAuth: [] ]
       parameter name: :summary, in: :query, schema: { type: :boolean }
-      parameter name: :status, in: :query, schema: { type: :string, enum: ["backlog", "ready", "doing", "done", "dropped"] }
+      parameter name: :status, in: :query, schema: { type: :string, enum: [ "backlog", "ready", "doing", "done", "dropped" ] }
       parameter name: :limit, in: :query, schema: { type: :integer, minimum: 1, maximum: 100 }
       let(:project_slug) { project.slug }
       let(:summary) { nil }
@@ -127,9 +127,9 @@ RSpec.describe "Browser API contract", type: :request do
       tags "Tasks"
       consumes "application/json"
       produces "application/json"
-      security [bearerAuth: []]
+      security [ bearerAuth: [] ]
       parameter name: :task_input, in: :body, required: true, schema: {
-        type: :object, required: ["title"],
+        type: :object, required: [ "title" ],
         properties: {
           title: { type: :string }, status: { type: :string }, priority: { type: :string },
           context: { type: :string }, intended_direction: { type: :string }, tags: { type: :array, items: { type: :string } }
@@ -139,7 +139,7 @@ RSpec.describe "Browser API contract", type: :request do
       let(:task_input) { nil }
       response 201, "task created" do
         let(:project_slug) { project.slug }
-        let(:task_input) { { title: "Ship contract", status: "backlog", tags: ["api"] } }
+        let(:task_input) { { title: "Ship contract", status: "backlog", tags: [ "api" ] } }
         schema "$ref" => "#/components/schemas/Task"
         run_test!
       end
@@ -155,7 +155,7 @@ RSpec.describe "Browser API contract", type: :request do
     get "Search tasks and notes" do
       tags "Search"
       produces "application/json"
-      security [bearerAuth: []]
+      security [ bearerAuth: [] ]
       parameter name: :q, in: :query, required: true, schema: { type: :string }
       parameter name: :limit, in: :query, schema: { type: :integer, minimum: 1, maximum: 100 }
       parameter name: :project, in: :query, schema: { type: :string }
@@ -210,16 +210,16 @@ RSpec.describe "Browser API contract", type: :request do
       tags "Notes"
       consumes "application/json"
       produces "application/json"
-      security [bearerAuth: []]
+      security [ bearerAuth: [] ]
       parameter name: :edit_input, in: :body, required: true, schema: {
-        type: :object, required: ["operations"],
+        type: :object, required: [ "operations" ],
         properties: { operations: { type: :array, minItems: 1, items: { type: :object, additionalProperties: true } }, expected_updated_at: { type: :string, format: "date-time" } }
       }
       let(:id) { user.notes.create!(title: "Contract", body: "Old").id }
       let(:edit_input) { nil }
       response 200, "note edited" do
         let(:id) { user.notes.create!(title: "Contract", body: "Old").id }
-        let(:edit_input) { { operations: [{ operation: "append", text: " text" }] } }
+        let(:edit_input) { { operations: [ { operation: "append", text: " text" } ] } }
         schema "$ref" => "#/components/schemas/Note"
         run_test!
       end

@@ -24,7 +24,7 @@ class AddProjectShorthandsAndTaskNumbers < ActiveRecord::Migration[8.1]
   private
 
   def backfill_project_identity
-    used = execute("SELECT shorthand FROM projects WHERE shorthand IS NOT NULL").to_a.to_h { |row| [row["shorthand"], true] }
+    used = execute("SELECT shorthand FROM projects WHERE shorthand IS NOT NULL").to_a.to_h { |row| [ row["shorthand"], true ] }
     execute("SELECT id, name, slug FROM projects ORDER BY id").each do |row|
       base = row["slug"] == "later-bender" ? "LB" : shorthand_for(row["name"])
       shorthand = base

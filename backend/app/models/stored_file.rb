@@ -54,7 +54,7 @@ class StoredFile < ApplicationRecord
   end
 
   def index_search_content
-    SearchDocumentsIndex.import([self])
+    SearchDocumentsIndex.import([ self ])
     SemanticIndexer.call(self)
   rescue StandardError => e
     Rails.logger.warn("file indexing deferred for #{ref}: #{e.class}: #{e.message}")

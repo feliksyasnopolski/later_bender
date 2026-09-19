@@ -11,6 +11,6 @@ class CreateFileRepresentations < ActiveRecord::Migration[8.1]
       t.jsonb :metadata, null: false, default: {}
       t.timestamps
     end
-    add_index :file_representations, [:stored_file_id, :kind], unique: true
+    add_index :file_representations, [ :stored_file_id, :kind ], unique: true
   end
 end

@@ -40,12 +40,12 @@ RSpec.describe "Api API", type: :request do
   end
 
   it "task tag filters match all supplied tags" do
-    @project.tasks.create!(title: "Both tags", status: "backlog").tap { |task| TagReconciler.call(task, ["one", "two"]) }
-    @project.tasks.create!(title: "One tag", status: "backlog").tap { |task| TagReconciler.call(task, ["one"]) }
+    @project.tasks.create!(title: "Both tags", status: "backlog").tap { |task| TagReconciler.call(task, [ "one", "two" ]) }
+    @project.tasks.create!(title: "One tag", status: "backlog").tap { |task| TagReconciler.call(task, [ "one" ]) }
 
     get "/api/projects/writing/tasks", params: { tags: "one,two", summary: true }, headers: json_headers(@raw_token)
     assert_response :success
-    assert_equal ["Both tags"], json_body.map { |task| task["title"] }
+    assert_equal [ "Both tags" ], json_body.map { |task| task["title"] }
   end
 
   it "reuses an existing tag when creating a task" do
@@ -78,14 +78,14 @@ RSpec.describe "Api API", type: :request do
     first = @project.tasks.create!(title: "First", status: "backlog", position: 1000)
 
     get "/api/projects/writing/tasks", headers: json_headers(@raw_token)
-    assert_equal ["First", "Later"], json_body.map { |task| task["title"] }
-    assert_equal [1000, 2000], json_body.map { |task| task["position"] }
+    assert_equal [ "First", "Later" ], json_body.map { |task| task["title"] }
+    assert_equal [ 1000, 2000 ], json_body.map { |task| task["position"] }
 
     patch "/api/tasks/#{later.id}", params: { position: 500 }.to_json, headers: json_headers(@raw_token)
     assert_response :success
     assert_equal 500, json_body["position"]
     get "/api/projects/writing/tasks", headers: json_headers(@raw_token)
-    assert_equal ["Later", "First"], json_body.map { |task| task["title"] }
+    assert_equal [ "Later", "First" ], json_body.map { |task| task["title"] }
   end
 
   it "returns structured validation errors" do
@@ -387,14 +387,14 @@ RSpec.describe "Api API", type: :request do
     gamma.update_columns(created_at: Time.utc(2026, 1, 2), updated_at: Time.utc(2026, 1, 1))
 
     expectations = {
-      ["created_at", "asc"] => %w[alpha.txt beta.txt gamma.txt],
-      ["created_at", "desc"] => %w[gamma.txt beta.txt alpha.txt],
-      ["updated_at", "asc"] => %w[gamma.txt beta.txt alpha.txt],
-      ["updated_at", "desc"] => %w[alpha.txt beta.txt gamma.txt],
-      ["filename", "asc"] => %w[alpha.txt beta.txt gamma.txt],
-      ["filename", "desc"] => %w[gamma.txt beta.txt alpha.txt],
-      ["size", "asc"] => %w[alpha.txt gamma.txt beta.txt],
-      ["size", "desc"] => %w[beta.txt gamma.txt alpha.txt]
+      [ "created_at", "asc" ] => %w[alpha.txt beta.txt gamma.txt],
+      [ "created_at", "desc" ] => %w[gamma.txt beta.txt alpha.txt],
+      [ "updated_at", "asc" ] => %w[gamma.txt beta.txt alpha.txt],
+      [ "updated_at", "desc" ] => %w[alpha.txt beta.txt gamma.txt],
+      [ "filename", "asc" ] => %w[alpha.txt beta.txt gamma.txt],
+      [ "filename", "desc" ] => %w[gamma.txt beta.txt alpha.txt],
+      [ "size", "asc" ] => %w[alpha.txt gamma.txt beta.txt],
+      [ "size", "desc" ] => %w[beta.txt gamma.txt alpha.txt]
     }
     expectations.each do |(sort, order), filenames|
       get "/api/projects/writing/files", params: { paginated: true, sort: sort, order: order }, headers: json_headers(@raw_token)
@@ -412,21 +412,21 @@ RSpec.describe "Api API", type: :request do
   it "targeted note edits apply in order atomically and honor optimistic concurrency" do
     note = @user.notes.create!(title: "Durable", body: "alpha beta")
     expected = note.updated_at.as_json
-    patch "/api/notes/#{note.id}/edit", params: { operations: [{ operation: "replace", old_text: "alpha", new_text: "one" }, { operation: "append", text: "\nmore" }], expected_updated_at: expected }.to_json, headers: json_headers(@raw_token)
+    patch "/api/notes/#{note.id}/edit", params: { operations: [ { operation: "replace", old_text: "alpha", new_text: "one" }, { operation: "append", text: "\nmore" } ], expected_updated_at: expected }.to_json, headers: json_headers(@raw_token)
     assert_response :success
     assert_equal "one beta\nmore", note.reload.body
 
     unchanged = note.body
-    patch "/api/notes/#{note.id}/edit", params: { operations: [{ operation: "append", text: " temporary" }, { operation: "replace", old_text: "missing", new_text: "never" }] }.to_json, headers: json_headers(@raw_token)
+    patch "/api/notes/#{note.id}/edit", params: { operations: [ { operation: "append", text: " temporary" }, { operation: "replace", old_text: "missing", new_text: "never" } ] }.to_json, headers: json_headers(@raw_token)
     assert_response :unprocessable_content
     assert_equal unchanged, note.reload.body
 
     note.update!(body: "same same")
-    patch "/api/notes/#{note.id}/edit", params: { operations: [{ operation: "replace", old_text: "same", new_text: "once" }] }.to_json, headers: json_headers(@raw_token)
+    patch "/api/notes/#{note.id}/edit", params: { operations: [ { operation: "replace", old_text: "same", new_text: "once" } ] }.to_json, headers: json_headers(@raw_token)
     assert_response :unprocessable_content
     assert_equal "same same", note.reload.body
 
-    patch "/api/notes/#{note.id}/edit", params: { operations: [{ operation: "append", text: " stale" }], expected_updated_at: expected }.to_json, headers: json_headers(@raw_token)
+    patch "/api/notes/#{note.id}/edit", params: { operations: [ { operation: "append", text: " stale" } ], expected_updated_at: expected }.to_json, headers: json_headers(@raw_token)
     assert_response :unprocessable_content
     assert_equal "same same", note.reload.body
   end
@@ -465,7 +465,7 @@ RSpec.describe "Api API", type: :request do
       assert_equal %w[a.txt b.txt], json_body["entries"].map { |entry| entry["path"] }
       cursor = json_body["next_cursor"]
       get "/api/files/by-ref/#{archive.ref}/archive", params: { paginated: true, depth: 0, limit: 2, cursor: cursor }, headers: json_headers(@raw_token)
-      assert_equal ["c.txt"], json_body["entries"].map { |entry| entry["path"] }
+      assert_equal [ "c.txt" ], json_body["entries"].map { |entry| entry["path"] }
       assert_nil json_body["next_cursor"]
 
       get "/api/files/by-ref/#{archive.ref}/archive", params: { paginated: true, depth: 1, limit: 2, cursor: cursor }, headers: json_headers(@raw_token)

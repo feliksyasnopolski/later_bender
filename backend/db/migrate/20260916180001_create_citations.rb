@@ -7,6 +7,6 @@ class CreateCitations < ActiveRecord::Migration[8.1]
       t.jsonb :locator, null: false, default: {}
       t.timestamps
     end
-    add_index :citations, [:citing_type, :citing_id]
+    add_index :citations, [ :citing_type, :citing_id ]
   end
 end

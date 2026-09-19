@@ -16,8 +16,8 @@ class CreateActiveStorage < ActiveRecord::Migration[8.1]
       t.references :record, polymorphic: true, null: false, index: false
       t.references :blob, null: false, foreign_key: { to_table: :active_storage_blobs }
       t.datetime :created_at, null: false
-      t.index [:record_type, :record_id, :name, :blob_id], name: :index_active_storage_attachments_uniqueness, unique: true
-      t.index [:record_type, :record_id, :name], name: :index_active_storage_attachments_lookup
+      t.index [ :record_type, :record_id, :name, :blob_id ], name: :index_active_storage_attachments_uniqueness, unique: true
+      t.index [ :record_type, :record_id, :name ], name: :index_active_storage_attachments_lookup
     end
   end
 end

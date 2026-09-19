@@ -17,7 +17,7 @@ RSpec.configure do |config|
       return nil
     end
     return { "$ref" => "#/components/schemas/FileDownload" } if route_path.end_with?("/download")
-    return { "$ref" => "#/components/schemas/Session" } if ["/api/auth/login", "/api/auth/recover"].include?(route_path)
+    return { "$ref" => "#/components/schemas/Session" } if [ "/api/auth/login", "/api/auth/recover" ].include?(route_path)
     return { "$ref" => "#/components/schemas/TokenInfo" } if route_path == "/api/oauth/token_info"
     return { type: "array", items: { "$ref" => "#/components/schemas/ApiToken" } } if route_path == "/api/tokens" && verb == "get"
     return { "$ref" => "#/components/schemas/ApiTokenWithSecret" } if route_path == "/api/tokens" && verb == "post"
@@ -68,7 +68,7 @@ RSpec.configure do |config|
 
     route.verb.split("|").each do |verb|
       creates_resource = verb.downcase == "post" && (
-        ["/api/auth/login", "/api/auth/recover", "/api/tokens", "/api/account/totp", "/api/projects"].include?(route_path) ||
+        [ "/api/auth/login", "/api/auth/recover", "/api/tokens", "/api/account/totp", "/api/projects" ].include?(route_path) ||
         route_path.end_with?("/tasks", "/notes", "/files", "/archive/extract")
       )
       success_code = creates_resource ? "201" : "200"
@@ -92,10 +92,10 @@ RSpec.configure do |config|
       responses["422"] = { description: "validation failed", content: { "application/json" => { schema: { "$ref" => "#/components/schemas/Error" } } } } if %w[post patch put].include?(verb.downcase)
       operation = {
         summary: "#{route.defaults[:controller]}##{route.defaults[:action]}",
-        tags: [route.defaults[:controller].to_s.delete_prefix("api/").split("/").first.capitalize],
+        tags: [ route.defaults[:controller].to_s.delete_prefix("api/").split("/").first.capitalize ],
         responses: responses
       }
-      operation[:security] = [{ bearerAuth: [] }] unless ["/api/auth/login", "/api/auth/recover"].include?(route_path)
+      operation[:security] = [ { bearerAuth: [] } ] unless [ "/api/auth/login", "/api/auth/recover" ].include?(route_path)
       unless fully_specified_paths.include?(route_path)
         operation[:parameters] = case route_path
         when "/api/tasks"
@@ -158,14 +158,14 @@ RSpec.configure do |config|
         schemas: {
           Error: {
             type: "object",
-            required: ["error"],
+            required: [ "error" ],
             properties: {
               error: {
                 oneOf: [
                   { type: "string" },
                   {
                     type: "object",
-                    required: ["code", "message"],
+                    required: [ "code", "message" ],
                     properties: {
                       code: { type: "string" },
                       message: { type: "string" },
@@ -178,12 +178,12 @@ RSpec.configure do |config|
           },
           User: {
             type: "object",
-            required: ["id", "username"],
+            required: [ "id", "username" ],
             properties: { id: { type: "integer" }, username: { type: "string" } }
           },
           Session: {
             type: "object",
-            required: ["user", "token"],
+            required: [ "user", "token" ],
             properties: {
               user: { "$ref": "#/components/schemas/User" },
               token: { type: "string" }
@@ -191,7 +191,7 @@ RSpec.configure do |config|
           },
           Project: {
             type: "object",
-            required: ["id", "name", "slug", "shorthand"],
+            required: [ "id", "name", "slug", "shorthand" ],
             properties: {
               id: { type: "integer" }, name: { type: "string" }, slug: { type: "string" },
               shorthand: { type: "string" }, description: { type: "string", nullable: true },
@@ -201,11 +201,11 @@ RSpec.configure do |config|
           },
           Task: {
             type: "object",
-            required: ["id", "ref", "number", "title", "status", "position", "priority", "tags", "project"],
+            required: [ "id", "ref", "number", "title", "status", "position", "priority", "tags", "project" ],
             properties: {
               id: { type: "integer" }, ref: { type: "string" }, number: { type: "integer" }, title: { type: "string" },
-              status: { type: "string", enum: ["backlog", "ready", "doing", "done", "dropped"] },
-              position: { type: "integer" }, priority: { type: "string", enum: ["low", "normal", "high"] },
+              status: { type: "string", enum: [ "backlog", "ready", "doing", "done", "dropped" ] },
+              position: { type: "integer" }, priority: { type: "string", enum: [ "low", "normal", "high" ] },
               context: { type: "string", nullable: true }, intended_direction: { type: "string", nullable: true },
               tags: { type: "array", items: { type: "string" } }, related_note_ids: { type: "array", items: { type: "integer" } },
               project: { "$ref": "#/components/schemas/Project" },
@@ -214,7 +214,7 @@ RSpec.configure do |config|
           },
           Note: {
             type: "object",
-            required: ["id", "title", "body", "tags"],
+            required: [ "id", "title", "body", "tags" ],
             properties: {
               id: { type: "integer" }, title: { type: "string" }, body: { type: "string" },
               tags: { type: "array", items: { type: "string" } }, project: { "$ref": "#/components/schemas/Project", nullable: true },
@@ -224,41 +224,41 @@ RSpec.configure do |config|
           SessionInput: { type: "object", required: %w[username code password password_confirmation], properties: { username: { type: "string" }, code: { type: "string" }, password: { type: "string", format: "password" }, password_confirmation: { type: "string", format: "password" } } },
           TokenCreateInput: { type: "object", properties: { name: { type: "string" } } },
           ApiToken: { type: "object", required: %w[id name created_at], properties: { id: { type: "integer" }, name: { type: "string" }, last_used_at: { type: "string", nullable: true, format: "date-time" }, revoked_at: { type: "string", nullable: true, format: "date-time" }, created_at: { type: "string", format: "date-time" } } },
-          ApiTokenWithSecret: { allOf: [{ "$ref" => "#/components/schemas/ApiToken" }, { type: "object", required: ["token"], properties: { token: { type: "string" } } }] },
-          TotpCreateInput: { type: "object", required: ["password"], properties: { password: { type: "string", format: "password" }, label: { type: "string" } } },
+          ApiTokenWithSecret: { allOf: [ { "$ref" => "#/components/schemas/ApiToken" }, { type: "object", required: [ "token" ], properties: { token: { type: "string" } } } ] },
+          TotpCreateInput: { type: "object", required: [ "password" ], properties: { password: { type: "string", format: "password" }, label: { type: "string" } } },
           TotpConfirmInput: { type: "object", required: %w[password code], properties: { password: { type: "string", format: "password" }, code: { type: "string" } } },
           TotpCredential: { type: "object", required: %w[id label created_at], properties: { id: { type: "integer" }, label: { type: "string" }, created_at: { type: "string", format: "date-time" } } },
-          TotpList: { type: "object", required: ["credentials"], properties: { credentials: { type: "array", items: { "$ref" => "#/components/schemas/TotpCredential" } } } },
+          TotpList: { type: "object", required: [ "credentials" ], properties: { credentials: { type: "array", items: { "$ref" => "#/components/schemas/TotpCredential" } } } },
           TotpCreate: { type: "object", required: %w[credential secret provisioning_uri qr_svg_base64], properties: { credential: { type: "object", properties: { id: { type: "integer" }, label: { type: "string" } } }, secret: { type: "string" }, provisioning_uri: { type: "string" }, qr_svg_base64: { type: "string" } } },
-          TotpConfirmation: { type: "object", required: ["credential"], properties: { credential: { "$ref" => "#/components/schemas/TotpCredential" } } },
+          TotpConfirmation: { type: "object", required: [ "credential" ], properties: { credential: { "$ref" => "#/components/schemas/TotpCredential" } } },
           TokenInfo: { type: "object", required: %w[active user_id client_id scope exp], properties: { active: { type: "boolean" }, user_id: { type: "integer" }, client_id: { type: "string" }, scope: { type: "string" }, exp: { type: "integer" } } },
           ProjectInput: { type: "object", properties: { name: { type: "string" }, slug: { type: "string" }, shorthand: { type: "string" }, description: { type: "string" }, archived_at: { type: "string", nullable: true, format: "date-time" } } },
           TaskInput: { type: "object", properties: { title: { type: "string" }, status: { type: "string" }, position: { type: "integer" }, priority: { type: "string" }, context: { type: "string" }, intended_direction: { type: "string" }, tags: { type: "array", items: { type: "string" } }, related_note_ids: { type: "array", items: { type: "integer" } }, citations: { type: "array", items: { type: "object", additionalProperties: true } } } },
           NoteInput: { type: "object", properties: { title: { type: "string" }, body: { type: "string" }, project: { type: "string", nullable: true }, tags: { type: "array", items: { type: "string" } }, citations: { type: "array", items: { type: "object", additionalProperties: true } } } },
           FileCreateInput: { type: "object", properties: { file: { type: "object", additionalProperties: true }, url: { type: "string", format: "uri" }, filename: { type: "string" }, tags: { type: "array", items: { type: "string" } }, related_task_refs: { type: "array", items: { type: "string" } }, related_note_ids: { type: "array", items: { type: "integer" } }, citations: { type: "array", items: { type: "object", additionalProperties: true } } } },
           FileUpdateInput: { type: "object", properties: { filename: { type: "string" }, tags: { type: "array", items: { type: "string" } }, related_task_refs: { type: "array", items: { type: "string" } }, related_note_ids: { type: "array", items: { type: "integer" } }, citations: { type: "array", items: { type: "object", additionalProperties: true } } } },
-          ArchiveExtractInput: { type: "object", required: ["path"], properties: { path: { type: "string" }, filename: { type: "string" }, tags: { type: "array", items: { type: "string" } } } },
+          ArchiveExtractInput: { type: "object", required: [ "path" ], properties: { path: { type: "string" }, filename: { type: "string" }, tags: { type: "array", items: { type: "string" } } } },
           FileRefAck: { type: "object", required: %w[ref updated_at], properties: { ref: { type: "string" }, updated_at: { type: "string", format: "date-time" } } },
-          FileDeleteAck: { type: "object", required: ["ref"], properties: { ref: { type: "string" } } },
-          NoteDeleteAck: { type: "object", required: ["id"], properties: { id: { type: "integer" } } },
+          FileDeleteAck: { type: "object", required: [ "ref" ], properties: { ref: { type: "string" } } },
+          NoteDeleteAck: { type: "object", required: [ "id" ], properties: { id: { type: "integer" } } },
           SearchResult: { type: "object", required: %w[id kind title tags snippet], properties: { id: { type: "integer" }, ref: { type: "string", nullable: true }, number: { type: "integer", nullable: true }, kind: { type: "string", enum: %w[task note file] }, title: { type: "string" }, filename: { type: "string", nullable: true }, media_type: { type: "string", nullable: true }, project: { "$ref" => "#/components/schemas/Project", nullable: true }, tags: { type: "array", items: { type: "string" } }, status: { type: "string", nullable: true }, priority: { type: "string", nullable: true }, snippet: { type: "string" }, highlights: { type: "array", items: { type: "object", additionalProperties: true } }, created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" } } },
           SearchResponse: { type: "object", required: %w[results total], properties: { results: { type: "array", items: { "$ref" => "#/components/schemas/SearchResult" } }, total: { type: "integer" } } },
           FileSummary: { type: "object", required: %w[ref filename media_type byte_size sha256 tags project], properties: { ref: { type: "string" }, number: { type: "integer" }, filename: { type: "string" }, media_type: { type: "string" }, byte_size: { type: "integer" }, sha256: { type: "string" }, tags: { type: "array", items: { type: "string" } }, project: { type: "object", required: %w[slug shorthand name], properties: { slug: { type: "string" }, shorthand: { type: "string" }, name: { type: "string" } } }, created_at: { type: "string", format: "date-time" }, updated_at: { type: "string", format: "date-time" } } },
-          StoredFile: { allOf: [{ "$ref" => "#/components/schemas/FileSummary" }, { type: "object", properties: { related_task_refs: { type: "array", items: { type: "string" } }, related_note_ids: { type: "array", items: { type: "integer" } }, representations: { type: "array", items: { type: "object", additionalProperties: true } }, provenance: { type: "object", nullable: true, additionalProperties: true } } }] },
+          StoredFile: { allOf: [ { "$ref" => "#/components/schemas/FileSummary" }, { type: "object", properties: { related_task_refs: { type: "array", items: { type: "string" } }, related_note_ids: { type: "array", items: { type: "integer" } }, representations: { type: "array", items: { type: "object", additionalProperties: true } }, provenance: { type: "object", nullable: true, additionalProperties: true } } } ] },
           FileRead: { type: "object", required: %w[kind representation], properties: { kind: { type: "string" }, representation: { type: "string" }, coordinate: { type: "string", nullable: true }, locator: { type: "object", nullable: true, additionalProperties: true }, media_type: { type: "string", nullable: true }, content: { type: "string", nullable: true }, metadata: { type: "object", additionalProperties: true }, source: { type: "object", required: %w[kind ref], properties: { kind: { type: "string" }, ref: { type: "string" } } } } },
-          ArchiveEntryRead: { type: "object", required: ["read"], properties: { read: { "$ref" => "#/components/schemas/FileRead" } } },
-          FileReadBatch: { type: "object", required: ["results"], properties: { results: { type: "array", items: { type: "object", required: %w[ref read], additionalProperties: true } } } },
-          FileReadBatchInput: { type: "object", required: ["reads"], properties: { reads: { type: "array", items: { type: "object", required: ["ref"], properties: { ref: { type: "string" }, representation: { type: "string" }, locator: { type: "object", additionalProperties: true } } } } } },
-          FileEgress: { type: "object", required: ["file"], properties: { file: { type: "object", required: %w[ref filename media_type byte_size sha256 download_path], properties: { ref: { type: "string" }, filename: { type: "string" }, media_type: { type: "string" }, byte_size: { type: "integer" }, sha256: { type: "string" }, download_path: { type: "string" } } } } },
+          ArchiveEntryRead: { type: "object", required: [ "read" ], properties: { read: { "$ref" => "#/components/schemas/FileRead" } } },
+          FileReadBatch: { type: "object", required: [ "results" ], properties: { results: { type: "array", items: { type: "object", required: %w[ref read], additionalProperties: true } } } },
+          FileReadBatchInput: { type: "object", required: [ "reads" ], properties: { reads: { type: "array", items: { type: "object", required: [ "ref" ], properties: { ref: { type: "string" }, representation: { type: "string" }, locator: { type: "object", additionalProperties: true } } } } } },
+          FileEgress: { type: "object", required: [ "file" ], properties: { file: { type: "object", required: %w[ref filename media_type byte_size sha256 download_path], properties: { ref: { type: "string" }, filename: { type: "string" }, media_type: { type: "string" }, byte_size: { type: "integer" }, sha256: { type: "string" }, download_path: { type: "string" } } } } },
           FileDownload: { type: "string", format: "binary" },
-          ArchiveList: { oneOf: [{ type: "array", items: { type: "object", additionalProperties: true } }, { type: "object", required: %w[entries next_cursor], properties: { entries: { type: "array", items: { type: "object", additionalProperties: true } }, next_cursor: { type: "string", nullable: true } } }] },
-          ProjectList: { oneOf: [{ type: "array", items: { "$ref" => "#/components/schemas/Project" } }, { type: "object", required: %w[projects next_cursor], properties: { projects: { type: "array", items: { "$ref" => "#/components/schemas/Project" } }, next_cursor: { type: "string", nullable: true } } }] },
-          TaskList: { oneOf: [{ type: "array", items: { "$ref" => "#/components/schemas/Task" } }, { type: "object", required: %w[tasks next_cursor], properties: { tasks: { type: "array", items: { "$ref" => "#/components/schemas/Task" } }, next_cursor: { type: "string", nullable: true } } }] },
-          NoteList: { oneOf: [{ type: "array", items: { "$ref" => "#/components/schemas/Note" } }, { type: "object", required: %w[notes next_cursor], properties: { notes: { type: "array", items: { "$ref" => "#/components/schemas/Note" } }, next_cursor: { type: "string", nullable: true } } }] },
-          FileList: { oneOf: [{ type: "array", items: { "$ref" => "#/components/schemas/FileSummary" } }, { type: "object", required: %w[files next_cursor], properties: { files: { type: "array", items: { "$ref" => "#/components/schemas/FileSummary" } }, next_cursor: { type: "string", nullable: true } } }] },
+          ArchiveList: { oneOf: [ { type: "array", items: { type: "object", additionalProperties: true } }, { type: "object", required: %w[entries next_cursor], properties: { entries: { type: "array", items: { type: "object", additionalProperties: true } }, next_cursor: { type: "string", nullable: true } } } ] },
+          ProjectList: { oneOf: [ { type: "array", items: { "$ref" => "#/components/schemas/Project" } }, { type: "object", required: %w[projects next_cursor], properties: { projects: { type: "array", items: { "$ref" => "#/components/schemas/Project" } }, next_cursor: { type: "string", nullable: true } } } ] },
+          TaskList: { oneOf: [ { type: "array", items: { "$ref" => "#/components/schemas/Task" } }, { type: "object", required: %w[tasks next_cursor], properties: { tasks: { type: "array", items: { "$ref" => "#/components/schemas/Task" } }, next_cursor: { type: "string", nullable: true } } } ] },
+          NoteList: { oneOf: [ { type: "array", items: { "$ref" => "#/components/schemas/Note" } }, { type: "object", required: %w[notes next_cursor], properties: { notes: { type: "array", items: { "$ref" => "#/components/schemas/Note" } }, next_cursor: { type: "string", nullable: true } } } ] },
+          FileList: { oneOf: [ { type: "array", items: { "$ref" => "#/components/schemas/FileSummary" } }, { type: "object", required: %w[files next_cursor], properties: { files: { type: "array", items: { "$ref" => "#/components/schemas/FileSummary" } }, next_cursor: { type: "string", nullable: true } } } ] },
           CursorPage: {
             type: "object",
-            required: ["next_cursor"],
+            required: [ "next_cursor" ],
             properties: { next_cursor: { type: "string", nullable: true } },
             additionalProperties: true
           }

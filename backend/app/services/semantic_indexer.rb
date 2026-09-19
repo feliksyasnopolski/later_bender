@@ -57,7 +57,7 @@ class SemanticIndexer
         data[:representation] = representation&.kind
         content = representation&.content.to_s
         start_line = content[0, content.index(text).to_i].to_s.lines.length + 1
-        data[:locator] = { "kind" => representation&.metadata&.fetch("coordinate", "lines"), "start" => start_line, "end" => [start_line + text.lines.length - 1, content.lines.length].min }
+        data[:locator] = { "kind" => representation&.metadata&.fetch("coordinate", "lines"), "start" => start_line, "end" => [ start_line + text.lines.length - 1, content.lines.length ].min }
         data[:filename] = @record.filename
         data[:media_type] = @record.media_type
       end

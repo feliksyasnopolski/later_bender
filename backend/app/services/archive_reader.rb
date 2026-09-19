@@ -28,7 +28,7 @@ class ArchiveReader
   def self.list(file, path: nil, depth: nil, limit: nil)
     result = entries(file, path:, depth:)
     requested_limit = limit.nil? ? 50 : Integer(limit)
-    result.first([[requested_limit, 1].max, MAX_LIST_LIMIT].min)
+    result.first([ [ requested_limit, 1 ].max, MAX_LIST_LIMIT ].min)
   end
 
   def self.entries(file, path: nil, depth: nil)
@@ -103,7 +103,7 @@ class ArchiveReader
       Open3.popen3("bsdtar", "-xOf", path, "--", entry_path) do |stdin, stdout, stderr, wait|
         stdin.close
         until stdout.eof?
-          output << stdout.read([64 * 1024, MAX_ENTRY_BYTES + 1 - output.bytesize].min)
+          output << stdout.read([ 64 * 1024, MAX_ENTRY_BYTES + 1 - output.bytesize ].min)
           raise LimitExceeded, "archive entry exceeds read limit" if output.bytesize > MAX_ENTRY_BYTES
         end
         error = stderr.read
@@ -116,7 +116,7 @@ class ArchiveReader
   private
 
   def with_archive
-    Tempfile.create(["later-bender-archive", File.extname(@file.filename)]) do |tempfile|
+    Tempfile.create([ "later-bender-archive", File.extname(@file.filename) ]) do |tempfile|
       tempfile.binmode
       tempfile.write(@file.original.download)
       tempfile.flush

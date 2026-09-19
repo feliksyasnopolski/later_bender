@@ -26,7 +26,7 @@ module CursorPagination
       last = records.last
       encode_cursor(context, "primary" => serialize_cursor_value(last.public_send(primary)), "id" => last.id)
     end
-    [records, next_cursor]
+    [ records, next_cursor ]
   rescue ArgumentError, KeyError, TypeError
     raise InvalidCursor, "Invalid cursor"
   end
@@ -39,7 +39,7 @@ module CursorPagination
     has_more = page.length > page_size
     page = page.first(page_size)
     next_cursor = has_more ? encode_cursor(context, "primary" => page.last.fetch(primary)) : nil
-    [page, next_cursor]
+    [ page, next_cursor ]
   rescue ArgumentError, KeyError, TypeError
     raise InvalidCursor, "Invalid cursor"
   end
@@ -68,5 +68,4 @@ module CursorPagination
   def serialize_cursor_value(value)
     value.respond_to?(:iso8601) ? value.iso8601(6) : value
   end
-
 end

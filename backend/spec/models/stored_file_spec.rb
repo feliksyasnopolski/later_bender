@@ -99,7 +99,7 @@ RSpec.describe "StoredFile model" do
     FileUtils.mkdir_p(File.join(source, "docs"))
     File.binwrite(File.join(source, "docs", "readme.md"), "alpha\nbeta\ngamma\n")
     File.binwrite(File.join(source, "image.bin"), "\x00\x01binary".b)
-    archive_path = Tempfile.new(["archive", ".zip"])
+    archive_path = Tempfile.new([ "archive", ".zip" ])
     archive_filename = archive_path.path
     archive_path.close
     archive_path.unlink
@@ -111,7 +111,7 @@ RSpec.describe "StoredFile model" do
     FileReader.generate(archive)
 
     assert_equal %w[docs image.bin], ArchiveReader.list(archive, depth: 0).map { |entry| entry["path"] }
-    assert_equal ["docs/readme.md"], ArchiveReader.list(archive, path: "docs", depth: 0).map { |entry| entry["path"] }
+    assert_equal [ "docs/readme.md" ], ArchiveReader.list(archive, path: "docs", depth: 0).map { |entry| entry["path"] }
     read = ArchiveReader.read_entry(archive, "docs/readme.md", locator: { "kind" => "lines", "start" => 2, "end" => 2 })
     assert_equal "[L2] beta\n", read[:content]
     assert_raises(ArchiveReader::UnsafePath) { ArchiveReader.read_entry(archive, "../secret") }
