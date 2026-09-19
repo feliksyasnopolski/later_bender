@@ -141,7 +141,7 @@ def stream(row, name, cursor, format_name):
     output_format = "text" if format_name == "text" or (format_name in (None, "auto") and b"\x00" not in chunk) else "base64"
     encoded = chunk.decode("utf-8", errors="replace") if output_format == "text" else base64.b64encode(chunk).decode("ascii")
     return {"execution": row["handle"], "stream": name, "format": output_format, "data": encoded,
-            "chunk_byte_size": len(chunk), "next_cursor": None if complete else str(next_offset),
+            "chunk_byte_size": len(chunk), "total_byte_size": len(data), "next_cursor": None if complete else str(next_offset),
             "stream_complete": complete, "state": execution_state(row)["state"]}
 
 

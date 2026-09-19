@@ -1,6 +1,7 @@
 module Api
   class WorkspacesController < BaseController
     require "base64"
+    EXECUTION_OBSERVATION_WINDOW_SECONDS = 5.0
     before_action :set_workspace, only: %i[show destroy put_file read_file promote_file execute execution output cancel transcript promote_transcript]
 
     def capabilities
@@ -63,6 +64,7 @@ module Api
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/executions", request_payload)
       execution = @workspace.workspace_executions.create!(execution_attributes(result))
       @workspace.append_event!("execution", transcript_execution_payload(result, execution))
+      observe_execution!(execution)
       render json: execution_json(execution), status: :created
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
@@ -183,6 +185,20 @@ module Api
     rescue WorkspaceRunnerClient::Unavailable
       execution
     end
+    def observe_execution!(execution)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + EXECUTION_OBSERVATION_WINDOW_SECONDS
+      loop do
+        result = runner.request(:get, "/executions/#{execution.ref}")
+        previous_state = execution.state
+        execution.update!(execution_attributes(result))
+        @workspace.append_event!("execution", transcript_execution_payload(result, execution)) if previous_state != execution.state
+        break unless execution.state == "running"
+        break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        sleep 0.1
+      end
+      execution
+    end
     def refresh_workspace_executions!
       @workspace.workspace_executions.where(state: "running").find_each { |execution| refresh_execution!(execution) }
     end
@@ -206,7 +222,12 @@ module Api
     def summary(workspace) = full(workspace).slice(:ref, :label, :state, :environment, :architecture, :created_at, :last_activity_at, :expires_at)
     def full(workspace) = { ref: workspace.ref, label: workspace.label, state: workspace.state, environment: workspace.environment, architecture: workspace.architecture, os: workspace.os, shell: workspace.shell, workspace_root: workspace.workspace_root, limits: workspace.limits, capabilities: workspace.capabilities, created_at: workspace.created_at, last_activity_at: workspace.last_activity_at, expires_at: workspace.expires_at }
     def execution_json(execution) = { ref: execution.ref, workspace: @workspace.ref, sequence: execution.sequence, state: execution.state, invocation: execution.invocation, cwd: execution.cwd, env: execution.env, secret_env_names: execution.secret_env_names, started_at: execution.started_at, finished_at: execution.finished_at, exit_code: execution.exit_code, terminating_signal: execution.terminating_signal, requested_timeout_seconds: execution.requested_timeout_seconds, stdout: stream_projection(execution, :stdout), stderr: stream_projection(execution, :stderr) }
-    def stream_projection(execution, stream) = { format: "base64", data: "", total_byte_size: 0, inline_complete: false }
+    def stream_projection(execution, stream)
+      result = runner.request(:post, "/executions/#{execution.ref}/output", "stream" => stream.to_s, "format" => "auto")
+      { format: result.fetch("format"), data: result.fetch("data"), total_byte_size: result.fetch("total_byte_size", result.fetch("chunk_byte_size", 0)), inline_complete: result.fetch("stream_complete", false) }
+    rescue WorkspaceRunnerClient::Unavailable
+      { format: "base64", data: "", total_byte_size: 0, inline_complete: false }
+    end
     def render_runner_error(error) = render json: { error: { code: "workspace_unavailable", message: error.message } }, status: :service_unavailable
   end
 end

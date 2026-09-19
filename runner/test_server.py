@@ -30,6 +30,7 @@ class RunnerUnitTest(unittest.TestCase):
             result = server.stream(row, "stdout", None, "auto")
             self.assertEqual("base64", result["format"])
             self.assertEqual(b"a\x00b", base64.b64decode(result["data"]))
+            self.assertEqual(3, result["total_byte_size"])
             self.assertTrue(result["stream_complete"])
 
 
