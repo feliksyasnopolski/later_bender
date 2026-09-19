@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerWorkspaceTools, workspaceToolNames } from "../src/workspace.js";
 
@@ -46,12 +48,14 @@ test("execution input requires exactly shell or direct argv", () => {
   assert.equal(schema.safeParse({ workspace: "WS-1", argv: ["printf", "hi"] }).success, true);
   assert.equal(schema.safeParse({ workspace: "WS-1" }).success, false);
   assert.equal(schema.safeParse({ workspace: "WS-1", command: "echo hi", argv: ["echo", "hi"] }).success, false);
+  assert.equal(schema.safeParse({ workspace: "WS-1", argv: [] }).success, false);
 });
 
 test("boundary operations expose stable result contracts and scaffold availability", async () => {
   const registered = tools();
   assert.equal(registered.put_file_in_workspace.inputSchema.shape.overwrite.safeParse(undefined).success, true);
   assert.deepEqual(registered.put_file_in_workspace.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false });
+  assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt" }).success, true);
   assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", locator: { kind: "lines", start: 1, end: 2 } }).success, true);
   assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", locator: { kind: "pages", start: 1, end: 2 } }).success, false);
   assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", locator: { kind: "lines", start: 1, end: 2 }, cursor: "next" }).success, false);
@@ -62,11 +66,34 @@ test("boundary operations expose stable result contracts and scaffold availabili
   assert.deepEqual(registered.exec_workspace.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
   assert.match(registered.exec_workspace.description, /general-purpose Linux execution surface.*package installation.*outbound network/i);
   assert.equal(registered.read_workspace_transcript.outputSchema.safeParse({ workspace: "WS-1", events: [{ kind: "file_imported", sequence: 1, occurred_at: "2026-01-01T00:00:00Z", workspace: "WS-1", file: "LB-F1", path: "input.txt", byte_size: 4, sha256: "a".repeat(64) }], next_cursor: null }).success, true);
+  assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1" }).success, true);
+  assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1", from_sequence: 2, to_sequence: 4, limit: 10 }).success, true);
   assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1", cursor: "next", from_sequence: 2 }).success, false);
   assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1", cursor: "next" }).success, true);
   const result = await registered.exec_workspace.handler({ workspace: "WS-1", command: "true" });
   assert.equal(result.isError, true);
   assert.deepEqual(JSON.parse(result.content[0].text), { error: { code: "workspace_unavailable", message: "Workspace execution is not available yet" } });
+});
+
+test("Workspace input schemas are object-shaped in the actual MCP tools/list response", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  registerWorkspaceTools(server);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const listed = await client.listTools();
+  const byName = Object.fromEntries(listed.tools.map((tool) => [tool.name, tool]));
+
+  for (const name of ["exec_workspace", "read_workspace_file", "read_workspace_transcript"]) {
+    assert.equal(byName[name].inputSchema.type, "object");
+    assert.ok(byName[name].inputSchema.properties);
+  }
+  assert.deepEqual(Object.keys(byName.exec_workspace.inputSchema.properties ?? {}).sort(), ["argv", "command", "cwd", "env", "secret_env", "stdin", "timeout_seconds", "workspace"].sort());
+  assert.deepEqual(Object.keys(byName.read_workspace_file.inputSchema.properties ?? {}).sort(), ["cursor", "locator", "path", "workspace"].sort());
+  assert.deepEqual(Object.keys(byName.read_workspace_transcript.inputSchema.properties ?? {}).sort(), ["cursor", "from_sequence", "limit", "to_sequence", "workspace"].sort());
+  await client.close();
+  await server.close();
 });
 
 function registeredExecSchema() {

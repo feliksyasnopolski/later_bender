@@ -77,19 +77,39 @@ const execCommonInput = {
   stdin: z.string().optional(),
   timeout_seconds: z.number().positive().optional()
 };
-const execInput = z.union([
-  z.object({ ...execCommonInput, command: z.string() }).strict(),
-  z.object({ ...execCommonInput, argv: z.array(z.string()).min(1) }).strict()
-]);
-const readWorkspaceFileInput = z.union([
-  z.object({ workspace: opaqueRef, path: z.string() }).strict(),
-  z.object({ workspace: opaqueRef, path: z.string(), locator: lineLocator }).strict(),
-  z.object({ workspace: opaqueRef, path: z.string(), cursor: z.string() }).strict()
-]);
-const readWorkspaceTranscriptInput = z.union([
-  z.object({ workspace: opaqueRef, from_sequence: z.number().int().positive().optional(), to_sequence: z.number().int().positive().optional(), limit: z.number().int().positive().max(100).optional() }).strict(),
-  z.object({ workspace: opaqueRef, limit: z.number().int().positive().max(100).optional(), cursor: z.string() }).strict()
-]);
+const execInput = z.object({
+  ...execCommonInput,
+  command: z.string().optional(),
+  argv: z.array(z.string()).min(1).optional()
+}).strict().superRefine((input, context) => {
+  if (input.command === undefined && input.argv === undefined) {
+    context.addIssue({ code: "custom", message: "Exactly one of command or argv is required", path: ["command"] });
+  }
+  if (input.command !== undefined && input.argv !== undefined) {
+    context.addIssue({ code: "custom", message: "command and argv are mutually exclusive", path: ["argv"] });
+  }
+});
+const readWorkspaceFileInput = z.object({
+  workspace: opaqueRef,
+  path: z.string(),
+  locator: lineLocator.optional(),
+  cursor: z.string().optional()
+}).strict().superRefine((input, context) => {
+  if (input.locator !== undefined && input.cursor !== undefined) {
+    context.addIssue({ code: "custom", message: "locator and cursor are mutually exclusive", path: ["cursor"] });
+  }
+});
+const readWorkspaceTranscriptInput = z.object({
+  workspace: opaqueRef,
+  from_sequence: z.number().int().positive().optional(),
+  to_sequence: z.number().int().positive().optional(),
+  limit: z.number().int().positive().max(100).optional(),
+  cursor: z.string().optional()
+}).strict().superRefine((input, context) => {
+  if (input.cursor !== undefined && (input.from_sequence !== undefined || input.to_sequence !== undefined)) {
+    context.addIssue({ code: "custom", message: "cursor cannot be combined with sequence bounds", path: ["cursor"] });
+  }
+});
 const transcriptEvent = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("workspace_created"), sequence: z.number().int().positive(), occurred_at: timestamp, workspace: opaqueRef }),
   z.object({ kind: z.literal("file_imported"), sequence: z.number().int().positive(), occurred_at: timestamp, workspace: opaqueRef, file: opaqueRef, path: z.string(), byte_size: bytes, sha256: z.string() }),
