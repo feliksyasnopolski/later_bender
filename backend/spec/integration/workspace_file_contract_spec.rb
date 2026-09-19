@@ -33,8 +33,9 @@ RSpec.describe "Workspace file and transcript contracts", type: :request do
     assert_response :ok
     file = @project.stored_files.find_by(filename: "transcript.md")
     body = file.original.download
-    assert_equal 1, body.scan("stdout-data").length
-    assert_equal 1, body.scan("stderr-data").length
+    assert_equal 1, body.scan("### stdout").length
+    assert_equal 1, body.scan("### stderr").length
+    assert_not_includes body.lines.grep(/stdout_preview|stderr_preview/), "earlier lifecycle events must remain metadata-only"
     assert_equal 1, body.scan('"state": "running"').length
     assert_equal 1, body.scan('"state": "exited"').length
   end
