@@ -69,7 +69,7 @@ class SearchService
   end
 
   def highlight_options
-    { fields: %w[title context intended_direction body].to_h { |field| [ field, { fragment_size: 240, number_of_fragments: 1 } ] }, pre_tags: [ "<em>" ], post_tags: [ "</em>" ] }
+    { fields: %w[title context intended_direction body].to_h { |field| [ field, { fragment_size: 240, number_of_fragments: 1 } ] }, pre_tags: [ "" ], post_tags: [ "" ] }
   end
 
   def semantic_results(hits)

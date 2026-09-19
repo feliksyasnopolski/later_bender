@@ -408,7 +408,7 @@ test("projects mixed search results to their strict compact contracts", async ()
   const server = new McpServer({ name: "test", version: "1" });
   const project = { id: 2, slug: "writing", shorthand: "WR", name: "Writing" };
   const { api } = apiFor([{ status: 200, body: { results: [
-    { kind: "task", id: 7, ref: "WR-7", number: 7, project, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "ready", priority: "high", related_tasks: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+    { kind: "task", id: 7, ref: "WR-7", number: 7, project, title: "Ship", snippet: "Implement Workspace MCP contract", highlights: [{ field: "title", fragments: ["Implement Workspace MCP contract"] }], tags: [], status: "ready", priority: "high", related_tasks: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
     { kind: "note", id: 8, project: null, title: "Decision", snippet: "Keep it boring", highlights: [], tags: [], status: null, priority: null, ref: null, number: null, related_tasks: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
     { kind: "note", id: 9, project, title: "Project note", snippet: "A project detail", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }
   ] } }]);
@@ -418,7 +418,7 @@ test("projects mixed search results to their strict compact contracts", async ()
   const result = await tools.search_memory.handler({ query: "ship" });
   const publicProject = { slug: "writing", shorthand: "WR", name: "Writing" };
   assert.deepEqual(result.structuredContent.results, [
-    { kind: "task", ref: "WR-7", number: 7, project: publicProject, title: "Ship", snippet: "Ship", highlights: [], tags: [], status: "ready", priority: "high", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
+    { kind: "task", ref: "WR-7", number: 7, project: publicProject, title: "Ship", snippet: "Implement Workspace MCP contract", highlights: [{ field: "title", fragments: ["Implement Workspace MCP contract"] }], tags: [], status: "ready", priority: "high", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
     { kind: "note", id: 8, project: null, title: "Decision", snippet: "Keep it boring", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" },
     { kind: "note", id: 9, project: publicProject, title: "Project note", snippet: "A project detail", highlights: [], tags: [], created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" }
   ]);
@@ -428,4 +428,9 @@ test("projects mixed search results to their strict compact contracts", async ()
   assert.equal(result.structuredContent.results[1].ref, undefined);
   assert.equal(result.structuredContent.results[1].number, undefined);
   assert.equal(result.structuredContent.results[1].related_tasks, undefined);
+  const first = result.structuredContent.results[0];
+  assert.equal(first.snippet, "Implement Workspace MCP contract");
+  assert.deepEqual(first.highlights, [{ field: "title", fragments: ["Implement Workspace MCP contract"] }]);
+  assert.doesNotMatch(first.snippet, /<em>|<\/em>|<mark>|<\/mark>/);
+  assert.doesNotMatch(first.highlights[0].fragments[0], /<em>|<\/em>|<mark>|<\/mark>/);
 });

@@ -64,6 +64,16 @@ RSpec.describe "Semantic search services" do
     assert_equal %w[task-1 task-2 task-3], RrfFuser.call(%w[task-1 task-2], %w[task-1 task-3], limit: 3)
     assert_equal %w[task-2 task-1], RrfFuser.call(%w[task-1 task-2], %w[task-2], limit: 2)
   end
+
+  it "requests plain text lexical highlight fragments" do
+    service = SearchService.new(user: User.new, q: "workspace")
+    options = service.send(:highlight_options)
+
+    assert_equal [ "" ], options[:pre_tags]
+    assert_equal [ "" ], options[:post_tags]
+    refute_includes options[:pre_tags], "<em>"
+    refute_includes options[:post_tags], "</em>"
+  end
 end
 
 class RecordingSemanticClient
