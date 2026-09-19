@@ -80,12 +80,15 @@ const execInput = z.union([
   z.object({ ...execCommonInput, command: z.string() }).strict(),
   z.object({ ...execCommonInput, argv: z.array(z.string()).min(1) }).strict()
 ]);
-const readWorkspaceFileInput = z.object({ workspace: opaqueRef, path: z.string(), locator: lineLocator.optional(), cursor: z.string().optional() }).superRefine((value, context) => {
-  if (value.locator !== undefined && value.cursor !== undefined) context.addIssue({ code: z.ZodIssueCode.custom, path: ["cursor"], message: "locator and cursor are mutually exclusive" });
-});
-const readWorkspaceTranscriptInput = z.object({ workspace: opaqueRef, from_sequence: z.number().int().positive().optional(), to_sequence: z.number().int().positive().optional(), limit: z.number().int().positive().max(100).optional(), cursor: z.string().optional() }).superRefine((value, context) => {
-  if (value.cursor !== undefined && (value.from_sequence !== undefined || value.to_sequence !== undefined)) context.addIssue({ code: z.ZodIssueCode.custom, path: ["cursor"], message: "cursor is mutually exclusive with sequence bounds" });
-});
+const readWorkspaceFileInput = z.union([
+  z.object({ workspace: opaqueRef, path: z.string() }).strict(),
+  z.object({ workspace: opaqueRef, path: z.string(), locator: lineLocator }).strict(),
+  z.object({ workspace: opaqueRef, path: z.string(), cursor: z.string() }).strict()
+]);
+const readWorkspaceTranscriptInput = z.union([
+  z.object({ workspace: opaqueRef, from_sequence: z.number().int().positive().optional(), to_sequence: z.number().int().positive().optional(), limit: z.number().int().positive().max(100).optional() }).strict(),
+  z.object({ workspace: opaqueRef, limit: z.number().int().positive().max(100).optional(), cursor: z.string() }).strict()
+]);
 const transcriptEvent = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("workspace_created"), sequence: z.number().int().positive(), occurred_at: timestamp, workspace: opaqueRef }),
   z.object({ kind: z.literal("file_imported"), sequence: z.number().int().positive(), occurred_at: timestamp, workspace: opaqueRef, file: opaqueRef, path: z.string(), byte_size: bytes, sha256: z.string() }),

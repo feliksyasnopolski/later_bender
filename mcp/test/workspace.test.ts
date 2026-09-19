@@ -46,8 +46,8 @@ test("execution input requires exactly shell or direct argv", () => {
 test("boundary operations expose stable result contracts and scaffold availability", async () => {
   const registered = tools();
   assert.equal(registered.put_file_in_workspace.inputSchema.shape.overwrite.safeParse(undefined).success, true);
-  assert.equal(registered.read_workspace_file.inputSchema.shape.locator.safeParse({ kind: "lines", start: 1, end: 2 }).success, true);
-  assert.equal(registered.read_workspace_file.inputSchema.shape.locator.safeParse({ kind: "pages", start: 1, end: 2 }).success, false);
+  assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", locator: { kind: "lines", start: 1, end: 2 } }).success, true);
+  assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", locator: { kind: "pages", start: 1, end: 2 } }).success, false);
   assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", locator: { kind: "lines", start: 1, end: 2 }, cursor: "next" }).success, false);
   assert.equal(registered.read_workspace_file.inputSchema.safeParse({ workspace: "WS-1", path: "out.txt", cursor: "next" }).success, true);
   assert.equal(registered.read_workspace_execution_output.inputSchema.shape.stream.safeParse("stdout").success, true);
