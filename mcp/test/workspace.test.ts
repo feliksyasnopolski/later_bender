@@ -118,8 +118,8 @@ test("read_workspace_file returns structured content through the real tools/call
 
 test("exec_workspace publishes terminal and running projections through tools/call", async () => {
   const server = new McpServer({ name: "test", version: "1" });
-  const execution = (state: string) => ({ ref: "WSE-1", workspace: "WS-1", sequence: 1, state, invocation: { kind: "shell", command: "printf out; printf err >&2" }, cwd: "/workspace", env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: state === "running" ? null : "2026-01-01T00:00:01Z", exit_code: state === "exited" ? 0 : null, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "text", data: state === "running" ? "" : "out", total_byte_size: state === "running" ? 0 : 3, inline_complete: state !== "running" }, stderr: { format: "text", data: state === "running" ? "" : "err", total_byte_size: state === "running" ? 0 : 3, inline_complete: state !== "running" } });
-  const api = { executeWorkspace: async (input: Record<string, unknown>) => execution(input.command === "long" ? "running" : "exited") } as unknown as LaterBenderApi;
+  const execution = (state: string) => ({ ref: "WSE-1", workspace: "WS-1", sequence: 1, state, invocation: { kind: "shell", command: "printf out; printf err >&2" }, cwd: "/workspace", env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: state === "running" ? null : "2026-01-01T00:00:01Z", exit_code: state === "exited" ? 0 : null, terminating_signal: null, requested_timeout_seconds: state === "timed_out" ? 1 : null, stdout: { format: "text", data: state === "running" ? "" : "out", total_byte_size: state === "running" ? 0 : 3, inline_complete: state !== "running" }, stderr: { format: "text", data: state === "running" ? "" : "err", total_byte_size: state === "running" ? 0 : 3, inline_complete: state !== "running" } });
+  const api = { executeWorkspace: async (input: Record<string, unknown>) => execution(input.timeout_seconds ? "timed_out" : input.command === "long" ? "running" : "exited") } as unknown as LaterBenderApi;
   registerWorkspaceTools(server, api);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test-client", version: "1" });
@@ -131,6 +131,9 @@ test("exec_workspace publishes terminal and running projections through tools/ca
   assert.equal((terminal.structuredContent as any).execution.stdout.data, "out");
   assert.equal((terminal.structuredContent as any).execution.stderr.data, "err");
   assert.equal((running.structuredContent as any).execution.state, "running");
+  const timeout = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "sleep 2", timeout_seconds: 1 } });
+  assert.equal((timeout.structuredContent as any).execution.state, "timed_out");
+  assert.equal((timeout.structuredContent as any).execution.requested_timeout_seconds, 1);
   await client.close();
   await server.close();
 });
