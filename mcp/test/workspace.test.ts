@@ -28,9 +28,10 @@ test("Workspace schemas keep capability and resource identifiers open", () => {
     default_environment: "linux", default_architecture: "arm64", environments: [{ environment: "linux", architectures: [{
       architecture: "arm64", os: { name: "Linux", version: "1" }, shell: "/bin/bash",
       resources: { default: { cpus: 1.5, memory_bytes: 1024, disk_bytes: 2048, pids: 128 }, max: { cpus: 4, memory_bytes: 4096, disk_bytes: 8192, pids: 512 } },
-      capabilities: { internet: true, gpu: false, nested_virtualization: false }
+      capabilities: { internet: true, gpu: false, nested_virtualization: false, future_accelerator: true }
     }] }]
   }).success, true);
+  assert.equal(registered.create_workspace.inputSchema.shape.required_capabilities.safeParse(["internet", "future_accelerator"]).success, true);
   assert.equal(registered.list_workspaces.outputSchema.safeParse({ workspaces: [{ ref: "WS-1", label: null, state: "ready", environment: "linux", architecture: "arm64", created_at: "2026-01-01T00:00:00Z", last_activity_at: "2026-01-01T00:00:00Z", expires_at: null }], next_cursor: null }).success, true);
 });
 
@@ -53,6 +54,8 @@ test("boundary operations expose stable result contracts and scaffold availabili
   assert.equal(registered.read_workspace_execution_output.inputSchema.shape.stream.safeParse("stdin").success, false);
   assert.deepEqual(registered.exec_workspace.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
   assert.equal(registered.read_workspace_transcript.outputSchema.safeParse({ workspace: "WS-1", events: [{ kind: "file_imported", sequence: 1, occurred_at: "2026-01-01T00:00:00Z", workspace: "WS-1", file: "LB-F1", path: "input.txt", byte_size: 4, sha256: "a".repeat(64) }], next_cursor: null }).success, true);
+  assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1", cursor: "next", from_sequence: 2 }).success, false);
+  assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1", cursor: "next" }).success, true);
   const result = await registered.exec_workspace.handler({ workspace: "WS-1", command: "true" });
   assert.equal(result.isError, true);
   assert.deepEqual(JSON.parse(result.content[0].text), { error: { code: "workspace_unavailable", message: "Workspace execution is not available yet" } });
