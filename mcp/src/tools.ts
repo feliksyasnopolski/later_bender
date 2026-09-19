@@ -464,6 +464,7 @@ const taskFields = {
   intended_direction: z.string().optional(),
   tags: z.array(z.string()).optional(),
   related_note_ids: z.array(z.number().int().positive()).optional(),
+  related_file_refs: z.array(z.string()).optional(),
   citations: z.array(citationInput).optional(),
 };
 const providedFile = z
@@ -761,7 +762,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "create_task",
     {
       description:
-        "Create an actionable Task in a project. Omitted status and priority use Later Bender defaults (backlog and normal). position controls canonical board order; omitted position appends. Unknown tags are created automatically. related_note_ids links Notes that materially contributed to or contextualize the Task. citations are exact evidence pointers into canonical Files, distinct from broader related_files relationships.",
+        "Create an actionable Task in a project. Omitted status and priority use Later Bender defaults (backlog and normal). position controls canonical board order; omitted position appends. Unknown tags are created automatically. related_note_ids links Notes that materially contributed to or contextualize the Task. related_file_refs replaces the Task's generic File relationships when supplied. citations are exact evidence pointers into canonical Files, distinct from broader related_files relationships.",
       inputSchema: {
         project: z.string(),
         title: z.string(),
@@ -772,6 +773,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
         intended_direction: z.string().optional(),
         tags: z.array(z.string()).optional(),
         related_note_ids: z.array(z.number().int().positive()).optional(),
+        related_file_refs: z.array(z.string()).optional(),
         citations: z.array(citationInput).optional(),
       },
       outputSchema: taskMutationOutput,
@@ -784,7 +786,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "update_task",
     {
       description:
-        "Partially update a Task by external ref. Omitted tags, related_note_ids, or citations preserve existing values; [] clears them; a non-empty array replaces them exactly. citations are exact evidence pointers into canonical Files, distinct from broader related_files relationships. Unknown tags are created automatically.",
+        "Partially update a Task by external ref. Omitted tags, related_note_ids, related_file_refs, or citations preserve existing values; [] clears them; a non-empty array replaces them exactly. related_file_refs mutates the same generic File relationship exposed by update_file_metadata. citations are exact evidence pointers into canonical Files, distinct from broader related_files relationships. Unknown tags are created automatically.",
       inputSchema: { ref: z.string(), ...taskFields },
       outputSchema: taskMutationOutput,
       annotations: updateAnnotations,

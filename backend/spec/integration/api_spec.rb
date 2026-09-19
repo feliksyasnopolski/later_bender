@@ -335,6 +335,49 @@ RSpec.describe "Api API", type: :request do
     assert_equal [], json_body["related_note_ids"]
   end
 
+  it "task file relationships replace, clear, preserve, and round-trip through the file side" do
+    first = create(:stored_file, project: @project, filename: "first.txt")
+    second = create(:stored_file, project: @project, filename: "second.txt")
+
+    post "/api/projects/writing/tasks", params: { title: "Relate files", related_file_refs: [ first.ref ] }.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    task_id = json_body["id"]
+    task_ref = json_body["ref"]
+    assert_equal [ first.ref ], json_body["related_files"].map { |file| file["ref"] }
+    assert_equal [ task_id ], first.reload.tasks.pluck(:id)
+
+    patch "/api/projects/writing/tasks/#{task_id}", params: { related_file_refs: [ second.ref ] }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal [ second.ref ], json_body["related_files"].map { |file| file["ref"] }
+    assert_empty first.reload.tasks
+    assert_equal [ task_id ], second.reload.tasks.pluck(:id)
+
+    patch "/api/projects/writing/tasks/#{task_id}", params: { title: "Preserve files" }.to_json, headers: json_headers(@raw_token)
+    assert_equal [ second.ref ], json_body["related_files"].map { |file| file["ref"] }
+
+    patch "/api/projects/writing/tasks/#{task_id}", params: { related_file_refs: [] }.to_json, headers: json_headers(@raw_token)
+    assert_equal [], json_body["related_files"]
+    assert_empty second.reload.tasks
+
+    patch "/api/files/by-ref/#{first.ref}", params: { related_task_refs: [ task_ref ] }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal [ task_ref ], first.reload.tasks.map(&:ref)
+    get "/api/tasks/by-ref/#{task_ref}", headers: json_headers(@raw_token)
+    assert_equal [ first.ref ], json_body["related_files"].map { |file| file["ref"] }
+  end
+
+  it "rejects inaccessible task file relationship refs" do
+    other = User.create!(username: "file-owner-for-task", password: "password123")
+    other_project = other.projects.create!(name: "Private files", slug: "private-task-files", shorthand: "PF")
+    private_file = create(:stored_file, project: other_project, filename: "private.txt")
+
+    post "/api/projects/writing/tasks", params: { title: "No private file", related_file_refs: [ private_file.ref ] }.to_json, headers: json_headers(@raw_token)
+    assert_response :not_found
+
+    post "/api/projects/writing/tasks", params: { title: "No missing file", related_file_refs: [ "WR-F999999" ] }.to_json, headers: json_headers(@raw_token)
+    assert_response :not_found
+  end
+
   it "task pagination traverses filtered board order without duplicates and rejects mismatched cursors" do
     first = @project.tasks.create!(title: "First", status: "ready", position: 1000)
     second = @project.tasks.create!(title: "Second", status: "ready", position: 1000)

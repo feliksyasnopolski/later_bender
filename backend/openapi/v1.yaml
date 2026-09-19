@@ -2998,6 +2998,10 @@ components:
           type: array
           items:
             type: integer
+        related_file_refs:
+          type: array
+          items:
+            type: string
         project:
           "$ref": "#/components/schemas/Project"
         created_at:
@@ -3216,6 +3220,10 @@ components:
           type: array
           items:
             type: integer
+        related_file_refs:
+          type: array
+          items:
+            type: string
         citations:
           type: array
           items:

@@ -34,9 +34,9 @@ test("sends bearer auth and maps project and task endpoints", async () => {
 
 test("create_task uses the project-scoped task endpoint and task payload", async () => {
   const { api, calls } = apiFor([{ status: 201, body: {} }, { status: 200, body: {} }]);
-  await api.createTask("writing", { title: "Ship", status: "backlog", priority: "normal", context: "A task", tags: ["release"] });
+  await api.createTask("writing", { title: "Ship", status: "backlog", priority: "normal", context: "A task", tags: ["release"], related_file_refs: ["LB-F7"] });
   assert.equal(calls[0].url, "https://example.test/laterbender/api/projects/writing/tasks");
-  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { title: "Ship", status: "backlog", priority: "normal", context: "A task", tags: ["release"] });
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { title: "Ship", status: "backlog", priority: "normal", context: "A task", tags: ["release"], related_file_refs: ["LB-F7"] });
   assert.equal(calls[0].init.method, "POST");
 });
 
@@ -53,6 +53,17 @@ test("update_task sends only supplied fields", async () => {
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { status: "done", tags: [] });
   assert.equal(calls[0].url, "https://example.test/laterbender/api/tasks/by-ref/LB-7");
   assert.equal(calls[0].init.method, "PATCH");
+});
+
+test("task tools expose generic file relationship mutation", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api } = apiFor([{ status: 200, body: {} }, { status: 200, body: {} }]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  assert.equal(tools.create_task.inputSchema.shape.related_file_refs.safeParse(["LB-F7"]).success, true);
+  assert.equal(tools.update_task.inputSchema.shape.related_file_refs.safeParse([]).success, true);
+  assert.match(tools.update_task.description, /same generic File relationship/);
 });
 
 test("get_tasks preserves order and returns per-ref not_found entries", async () => {
@@ -463,4 +474,25 @@ test("projects the Rails-shaped mixed search fixture through the real MCP tools/
   assert.equal(structured.results[1].ref, undefined);
   assert.equal(structured.results[2].snippet, "contract evidence");
   assert.equal(result.isError, undefined);
+});
+
+test("tools/list and tools/call expose and forward task file relationships", async () => {
+  const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api, calls } = apiFor([{ status: 201, body: { ref: "LB-88", updated_at: "2026-09-19T00:00:00Z" } }]);
+  registerTools(server, api);
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+  const listed = await client.listTools();
+  const createTask = listed.tools.find((tool) => tool.name === "create_task");
+  const updateTask = listed.tools.find((tool) => tool.name === "update_task");
+  assert.equal((createTask?.inputSchema as any).properties.related_file_refs.type, "array");
+  assert.equal((updateTask?.inputSchema as any).properties.related_file_refs.type, "array");
+
+  const result = await client.callTool({ name: "create_task", arguments: { project: "later-bender", title: "Attach file", related_file_refs: ["LB-F42"] } });
+  assert.deepEqual(result.structuredContent, { task: { ref: "LB-88", updated_at: "2026-09-19T00:00:00Z" } });
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { title: "Attach file", related_file_refs: ["LB-F42"] });
 });

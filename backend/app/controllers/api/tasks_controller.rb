@@ -33,6 +33,7 @@ module Api
         task.save!
         TagReconciler.call(task, payload["tags"]) if payload.key?("tags")
         replace_related_notes(task, payload["related_note_ids"]) if payload.key?("related_note_ids")
+        replace_related_files(task, payload["related_file_refs"]) if payload.key?("related_file_refs")
         replace_citations(task, payload["citations"]) if payload.key?("citations")
       end
       render json: task_json(task), status: :created
@@ -44,6 +45,7 @@ module Api
         @task.update!(task_params(payload))
         TagReconciler.call(@task, payload["tags"]) if payload.key?("tags")
         replace_related_notes(@task, payload["related_note_ids"]) if payload.key?("related_note_ids")
+        replace_related_files(@task, payload["related_file_refs"]) if payload.key?("related_file_refs")
         replace_citations(@task, payload["citations"]) if payload.key?("citations")
       end
       render json: task_json(@task)
@@ -88,6 +90,16 @@ module Api
       raise ActiveRecord::RecordNotFound if notes.size != ids.size
 
       task.notes = notes
+    end
+
+    def replace_related_files(task, refs)
+      files = Array(refs).map do |ref|
+        shorthand, number = ref.to_s.split("-F", 2)
+        raise ActiveRecord::RecordNotFound unless shorthand.to_s.casecmp?(task.project.shorthand)
+
+        task.project.stored_files.find_by!(number: number)
+      end.uniq
+      task.stored_files = files
     end
   end
 end
