@@ -25,13 +25,18 @@ test("Workspace schemas keep capability and resource identifiers open", () => {
     created_at: "2026-01-01T00:00:00Z", last_activity_at: "2026-01-01T00:00:00Z", expires_at: null
   } }).success, true);
   assert.equal(registered.get_workspace_capabilities.outputSchema.safeParse({
-    default_environment: "linux", default_architecture: "arm64", environments: [{ environment: "linux", architectures: [{
+    default_environment: "linux", default_architecture: "arm64", environments: [{ environment: "linux", description: "General-purpose Linux engineering environment", architectures: [{
       architecture: "arm64", os: { name: "Linux", version: "1" }, shell: "/bin/bash",
       resources: { default: { cpus: 1.5, memory_bytes: 1024, disk_bytes: 2048, pids: 128 }, max: { cpus: 4, memory_bytes: 4096, disk_bytes: 8192, pids: 512 } },
       capabilities: { internet: true, gpu: false, nested_virtualization: false, future_accelerator: true }
-    }] }]
+    }] }], capability_definitions: { internet: "Outbound network access", gpu: "GPU acceleration" }
   }).success, true);
   assert.equal(registered.create_workspace.inputSchema.shape.required_capabilities.safeParse(["internet", "future_accelerator"]).success, true);
+  assert.equal(registered.create_workspace.inputSchema.shape.resources.safeParse({ min_pids: 128 }).success, true);
+  assert.equal(registered.create_workspace.inputSchema.shape.resources.safeParse({ min_pids: 1.5 }).success, false);
+  assert.equal(registered.get_workspace_capabilities.outputSchema.safeParse({
+    default_environment: "linux", default_architecture: "arm64", environments: [{ environment: "linux", description: "General-purpose Linux engineering environment", architectures: [] }], capability_definitions: { internet: "Outbound network access" }
+  }).success, true);
   assert.equal(registered.list_workspaces.outputSchema.safeParse({ workspaces: [{ ref: "WS-1", label: null, state: "ready", environment: "linux", architecture: "arm64", created_at: "2026-01-01T00:00:00Z", last_activity_at: "2026-01-01T00:00:00Z", expires_at: null }], next_cursor: null }).success, true);
 });
 
@@ -55,6 +60,7 @@ test("boundary operations expose stable result contracts and scaffold availabili
   assert.equal(registered.read_workspace_execution_output.inputSchema.shape.stream.safeParse("stdin").success, false);
   assert.match(registered.read_workspace_execution_output.description, /Continue reading.*opaque cursor/);
   assert.deepEqual(registered.exec_workspace.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
+  assert.match(registered.exec_workspace.description, /general-purpose Linux execution surface.*package installation.*outbound network/i);
   assert.equal(registered.read_workspace_transcript.outputSchema.safeParse({ workspace: "WS-1", events: [{ kind: "file_imported", sequence: 1, occurred_at: "2026-01-01T00:00:00Z", workspace: "WS-1", file: "LB-F1", path: "input.txt", byte_size: 4, sha256: "a".repeat(64) }], next_cursor: null }).success, true);
   assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1", cursor: "next", from_sequence: 2 }).success, false);
   assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1", cursor: "next" }).success, true);
