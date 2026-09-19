@@ -35,3 +35,30 @@ body { overflow: hidden; }
 
 /* A native drag keeps the source under the pointer; moving hovered cards changes the hit target mid-drag. */
 .task-card:hover { transform: none; }
+
+
+.search-page { max-width: 900px; }
+.search-heading h1 { margin-bottom: .4rem; }
+.search-intro { max-width: 68ch; margin: 0 0 1.5rem; }
+.search-form { padding: 1rem; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; }
+.search-query { margin: 0; font-size: .85rem; }
+.search-query input { font-size: 1.05rem; }
+.search-submit { margin-top: .75rem; }
+.search-filters { display: grid; grid-template-columns: 1.25fr 1fr 1fr 1.5fr; gap: .75rem; margin-top: .9rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+.search-filters label { margin: 0; font-size: .78rem; }
+.search-filters select, .search-filters input { width: 100%; min-width: 0; margin-top: .2rem; padding: .5rem .55rem; border: 1px solid #b7bec8; border-radius: 5px; background: var(--panel); color: var(--ink); }
+.search-results { margin-top: 1.5rem; }
+.search-results-heading { display: flex; align-items: baseline; gap: .75rem; border-bottom: 1px solid var(--line); }
+.search-results-heading h2 { margin: 0 0 .55rem; font-size: 1rem; }
+.search-result { width: 100%; display: flex; flex-direction: column; gap: .3rem; padding: .9rem .15rem; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+.search-result:hover { background: var(--accent-soft); }
+.search-result-meta { display: flex; flex-wrap: wrap; gap: .45rem; align-items: center; color: var(--muted); font-size: .75rem; }
+.kind-pill { color: var(--accent); font-size: .68rem; text-transform: uppercase; letter-spacing: .06em; }
+.search-result-title { color: var(--ink); font-size: .98rem; }
+.search-snippet { color: #404650; line-height: 1.45; }
+.search-match { color: var(--muted); font-size: .75rem; }
+.search-detail-meta { color: var(--muted); margin-top: -.65rem; font-size: .85rem; }
+.search-detail-prose { white-space: pre-wrap; line-height: 1.6; }
+.file-read { overflow: auto; padding: .8rem; border: 1px solid var(--line); border-radius: 5px; background: #f6f7f9; white-space: pre-wrap; overflow-wrap: anywhere; font: .82rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+@media (max-width: 760px) { .search-filters { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 520px) { .search-filters { grid-template-columns: 1fr; } }
