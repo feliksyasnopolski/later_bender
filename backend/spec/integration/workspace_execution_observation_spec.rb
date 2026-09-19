@@ -2,8 +2,8 @@ require "rails_helper"
 
 RSpec.describe "Workspace execution observation", type: :request do
   before do
-    user = User.create!(username: "workspace-observer", password: "password123")
-    _token, @raw_token = ApiToken.issue!(user:, name: "workspace test")
+    @user = User.create!(username: "workspace-observer", password: "password123")
+    _token, @raw_token = ApiToken.issue!(user: @user, name: "workspace test")
     @runner_workspace = {
       "ref" => "WSR-test", "runner_handle" => "WSR-test", "state" => "ready", "environment" => "linux",
       "architecture" => "arm64", "os" => { "name" => "Linux", "version" => "test" }, "shell" => "/bin/bash",
@@ -39,6 +39,24 @@ RSpec.describe "Workspace execution observation", type: :request do
     assert_response :created
     assert_equal "exited", json_body.fetch("state")
     assert_equal "out", json_body.dig("stdout", "data")
+    assert_equal Workspace.last.ref, json_body.fetch("workspace")
+    assert_match(/\AWS-\d+\z/, Workspace.last.ref)
+  end
+
+  it "allocates compact public refs per user while keeping runner handles internal" do
+    stub_runner
+    post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
+    first = json_body.fetch("ref")
+    post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
+    second = json_body.fetch("ref")
+    assert_equal "WS-1", first
+    assert_equal "WS-2", second
+    assert_not_includes [ first, second ], "WSR-test"
+
+    other = User.create!(username: "workspace-observer-other", password: "password123")
+    _other_token, raw_other_token = ApiToken.issue!(user: other, name: "workspace test")
+    post "/api/workspaces", params: {}.to_json, headers: json_headers(raw_other_token)
+    assert_equal "WS-1", json_body.fetch("ref")
   end
 
   it "returns timeout directly when it occurs inside the observation window" do

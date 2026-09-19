@@ -47,7 +47,11 @@ module Api
       render_runner_error(e)
     end
 
-    def read_file = render json: runner.request(:post, "/workspaces/#{@workspace.runner_handle}/file-read", request_payload).merge("workspace" => @workspace.ref)
+    def read_file
+      render json: runner.request(:post, "/workspaces/#{@workspace.runner_handle}/file-read", request_payload).merge("workspace" => @workspace.ref)
+    rescue WorkspaceRunnerClient::Unavailable => e
+      render_runner_error(e)
+    end
     def promote_file
       payload = request_payload
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/file-promote", payload)
@@ -106,9 +110,18 @@ module Api
       from = payload["from_sequence"].to_i if payload["from_sequence"]
       to = payload["to_sequence"].to_i if payload["to_sequence"]
       events = @workspace.workspace_events.order(:sequence).select { |event| (!from || event.sequence >= from) && (!to || event.sequence <= to) }
+      last_execution_events = events.each_with_object({}) do |event, last|
+        next unless event.kind == "execution"
+
+        execution_ref = event.payload["execution"] || event.payload["ref"]
+        last[execution_ref] = event.sequence if execution_ref
+      end
       body = events.map do |event|
-        lines = [ "## #{event.kind} (#{event.sequence})", "", JSON.pretty_generate(event.payload) ]
-        if event.kind == "execution"
+        event_payload = event.payload.deep_dup
+        event_payload.delete("stdout_preview")
+        event_payload.delete("stderr_preview")
+        lines = [ "## #{event.kind} (#{event.sequence})", "", JSON.pretty_generate(event_payload) ]
+        if event.kind == "execution" && last_execution_events[event.payload["execution"] || event.payload["ref"]] == event.sequence
           execution_ref = event.payload["execution"] || event.payload["ref"]
           %w[stdout stderr].each do |stream|
             bytes = read_all_runner_output(execution_ref, stream)
@@ -206,7 +219,7 @@ module Api
 
     def workspace_attributes(result, payload)
       result = result.fetch("workspace", result)
-      { ref: "WS-#{SecureRandom.hex(12)}", label: payload["label"], state: result.fetch("state", "ready"), environment: result.fetch("environment", payload["environment"] || "linux"), architecture: result.fetch("architecture", payload["architecture"] || "arm64"), os_name: result.dig("os", "name") || "Linux", os_version: result.dig("os", "version") || "unknown", shell: result.fetch("shell", "/bin/bash"), workspace_root: result.fetch("workspace_root", "/workspace"), limits: result.fetch("limits", {}), capabilities: result.fetch("capabilities", {}), runner_handle: result["runner_handle"] || result["ref"], last_activity_at: Time.current, expires_at: result["expires_at"] }
+      { label: payload["label"], state: result.fetch("state", "ready"), environment: result.fetch("environment", payload["environment"] || "linux"), architecture: result.fetch("architecture", payload["architecture"] || "arm64"), os_name: result.dig("os", "name") || "Linux", os_version: result.dig("os", "version") || "unknown", shell: result.fetch("shell", "/bin/bash"), workspace_root: result.fetch("workspace_root", "/workspace"), limits: result.fetch("limits", {}), capabilities: result.fetch("capabilities", {}), runner_handle: result["runner_handle"] || result["ref"], last_activity_at: Time.current, expires_at: result["expires_at"] }
     end
 
     def execution_attributes(result)
@@ -229,6 +242,10 @@ module Api
     rescue WorkspaceRunnerClient::Unavailable
       { format: "base64", data: "", total_byte_size: 0, inline_complete: false }
     end
-    def render_runner_error(error) = render json: { error: { code: "workspace_unavailable", message: error.message } }, status: :service_unavailable
+    def render_runner_error(error)
+      code = error.respond_to?(:code) && error.code.present? ? error.code : "workspace_unavailable"
+      status = %w[invalid_range invalid_cursor not_text path_invalid path_not_found path_exists path_not_file].include?(code) ? :unprocessable_content : :service_unavailable
+      render json: { error: { code:, message: error.message } }, status:
+    end
   end
 end

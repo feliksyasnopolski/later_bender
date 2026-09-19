@@ -33,6 +33,30 @@ class RunnerUnitTest(unittest.TestCase):
             self.assertEqual(3, result["total_byte_size"])
             self.assertTrue(result["stream_complete"])
 
+    def test_auto_uses_base64_for_invalid_utf8_without_nul(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            data = b"\xffABC"
+            (output / "stdout").write_bytes(data)
+            row = {"handle": "WSE-test", "output_dir": directory, "state": "exited"}
+            result = server.stream(row, "stdout", None, "auto")
+            self.assertEqual("base64", result["format"])
+            self.assertEqual("/0FCQw==", result["data"])
+            self.assertEqual(len(data), result["chunk_byte_size"])
+
+    def test_auto_keeps_valid_utf8_as_text(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            (output / "stdout").write_bytes("héllo".encode())
+            row = {"handle": "WSE-test", "output_dir": directory, "state": "exited"}
+            result = server.stream(row, "stdout", None, "auto")
+            self.assertEqual("text", result["format"])
+            self.assertEqual("héllo", result["data"])
+
+    def test_binary_promotion_uses_octet_stream_for_unknown_bytes(self):
+        self.assertEqual("application/octet-stream", server.media_type_for("artifact.bin", b"\x00\x01\xffABC"))
+        self.assertEqual("text/plain", server.media_type_for("artifact.txt", b"plain text"))
+
 
 if __name__ == "__main__":
     unittest.main()

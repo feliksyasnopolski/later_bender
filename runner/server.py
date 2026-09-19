@@ -8,6 +8,7 @@ opaque handles and execution state through this HTTP API.
 import base64
 import hashlib
 import json
+import mimetypes
 import os
 import platform
 import secrets
@@ -138,8 +139,16 @@ def stream(row, name, cursor, format_name):
     next_offset = offset + len(chunk)
     terminal = execution_state(row)["state"] != "running"
     complete = terminal and next_offset >= len(data)
-    output_format = "text" if format_name == "text" or (format_name in (None, "auto") and b"\x00" not in chunk) else "base64"
-    encoded = chunk.decode("utf-8", errors="replace") if output_format == "text" else base64.b64encode(chunk).decode("ascii")
+    output_format = "text" if format_name == "text" else "base64"
+    if format_name in (None, "auto"):
+        try:
+            if b"\x00" in chunk:
+                raise UnicodeDecodeError("utf-8", chunk, chunk.index(b"\x00"), chunk.index(b"\x00") + 1, "NUL is not text")
+            chunk.decode("utf-8")
+            output_format = "text"
+        except UnicodeDecodeError:
+            output_format = "base64"
+    encoded = chunk.decode("utf-8") if output_format == "text" else base64.b64encode(chunk).decode("ascii")
     return {"execution": row["handle"], "stream": name, "format": output_format, "data": encoded,
             "chunk_byte_size": len(chunk), "total_byte_size": len(data), "next_cursor": None if complete else str(next_offset),
             "stream_complete": complete, "state": execution_state(row)["state"]}
@@ -158,6 +167,15 @@ def safe_workspace_path(row, relative):
     except ValueError:
         raise ValueError("path_invalid")
     return candidate
+
+
+def media_type_for(filename, data):
+    guessed, _ = mimetypes.guess_type(filename)
+    try:
+        data.decode("utf-8")
+        return guessed or "text/plain"
+    except UnicodeDecodeError:
+        return guessed if guessed and not guessed.startswith("text/") else "application/octet-stream"
 
 
 def execution_json(row):
@@ -322,12 +340,15 @@ class Handler(BaseHTTPRequestHandler):
         if not path.exists(): raise ValueError("path_not_found")
         if not path.is_file(): raise ValueError("path_not_file")
         data = path.read_bytes()
-        if b"\x00" in data: raise ValueError("not_text")
-        lines = data.decode("utf-8", errors="strict").splitlines(keepends=True)
+        try:
+            lines = data.decode("utf-8").splitlines(keepends=True)
+        except UnicodeDecodeError as error:
+            raise ValueError("not_text") from error
         start = int(payload.get("cursor", "0") or 0)
         if payload.get("locator"):
             start = max(0, int(payload["locator"].get("start", 1)) - 1)
             end = int(payload["locator"].get("end", len(lines)))
+            if start < 0 or end < start + 1 or start >= len(lines) or end > len(lines): raise ValueError("invalid_range")
             selected = lines[start:end]
             next_cursor = None
         else:
@@ -342,7 +363,8 @@ class Handler(BaseHTTPRequestHandler):
         path = safe_workspace_path(row, payload.get("path", ""))
         if not path.is_file(): raise ValueError("path_not_file")
         data = path.read_bytes()
-        self.send_json(200, {"filename": payload.get("filename") or path.name, "media_type": "text/plain", "bytes_base64": base64.b64encode(data).decode(), "byte_size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+        filename = payload.get("filename") or path.name
+        self.send_json(200, {"filename": filename, "media_type": media_type_for(filename, data), "bytes_base64": base64.b64encode(data).decode(), "byte_size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
 
     def execution_action(self, handle, action, payload):
         with db() as connection: row = connection.execute("SELECT * FROM executions WHERE handle=?", (handle,)).fetchone()

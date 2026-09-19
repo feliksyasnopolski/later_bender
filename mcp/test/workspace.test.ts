@@ -138,6 +138,22 @@ test("exec_workspace publishes terminal and running projections through tools/ca
   await server.close();
 });
 
+test("exec_workspace preserves invalid UTF-8 output as base64 through tools/call", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const api = { executeWorkspace: async () => ({ ref: "WSE-binary", workspace: "WS-1", sequence: 1, state: "exited", invocation: { kind: "shell", command: "printf binary" }, cwd: "/workspace", env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: "2026-01-01T00:00:01Z", exit_code: 0, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "base64", data: "/0FCQw==", total_byte_size: 4, inline_complete: true }, stderr: { format: "base64", data: "", total_byte_size: 0, inline_complete: true } }) } as unknown as LaterBenderApi;
+  registerWorkspaceTools(server, api);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "binary" } });
+  assert.equal((result.structuredContent as any).execution.stdout.format, "base64");
+  assert.equal((result.structuredContent as any).execution.stdout.data, "/0FCQw==");
+  assert.equal((result.structuredContent as any).execution.stdout.total_byte_size, 4);
+  await client.close();
+  await server.close();
+});
+
 function registeredExecSchema() {
   return tools().exec_workspace.inputSchema;
 }

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_19_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -316,6 +316,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_110000) do
     t.jsonb "limits", default: {}, null: false
     t.string "os_name", null: false
     t.string "os_version", null: false
+    t.integer "public_number"
     t.string "ref", null: false
     t.string "runner_handle"
     t.string "shell", null: false
@@ -324,7 +325,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_110000) do
     t.bigint "user_id", null: false
     t.string "workspace_root", default: "/workspace", null: false
     t.index ["legacy_ref"], name: "index_workspaces_on_legacy_ref"
-    t.index ["ref"], name: "index_workspaces_on_ref", unique: true
+    t.index ["user_id", "ref"], name: "index_workspaces_on_user_id_and_ref", unique: true
+    t.index ["user_id", "public_number"], name: "index_workspaces_on_user_id_and_public_number", unique: true
     t.index ["user_id", "state"], name: "index_workspaces_on_user_id_and_state"
     t.index ["user_id"], name: "index_workspaces_on_user_id"
   end

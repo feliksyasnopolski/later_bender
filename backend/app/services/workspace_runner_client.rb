@@ -2,7 +2,14 @@ require "net/http"
 require "json"
 
 class WorkspaceRunnerClient
-  class Unavailable < StandardError; end
+  class Unavailable < StandardError
+    attr_reader :code
+
+    def initialize(message, code: nil)
+      @code = code
+      super(message)
+    end
+  end
 
   def initialize(base_url: ENV["WORKSPACE_RUNNER_URL"])
     @base_url = base_url.to_s.sub(%r{/\z}, "")
@@ -23,9 +30,12 @@ class WorkspaceRunnerClient
     end
     response = http.request(request)
     body = JSON.parse(response.body.presence || "{}")
-    raise Unavailable, body.dig("error", "message") || "Workspace runner request failed" unless response.is_a?(Net::HTTPSuccess)
+    unless response.is_a?(Net::HTTPSuccess)
+      error = body["error"] || {}
+      raise Unavailable.new(error["message"] || "Workspace runner request failed", code: error["code"])
+    end
     body
   rescue SocketError, SystemCallError, Timeout::Error => e
-    raise Unavailable, e.message
+    raise Unavailable.new(e.message)
   end
 end
