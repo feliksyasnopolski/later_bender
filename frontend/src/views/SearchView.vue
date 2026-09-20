@@ -72,10 +72,10 @@ function resultTitle(result) {
   return result.kind === 'file' ? result.filename || result.title : result.title
 }
 
-function fileReadPath(result) {
+function fileReadPath(result, readOptions = {}) {
   const params = new URLSearchParams()
-  if (result.match?.representation) params.set('representation', result.match.representation)
-  if (result.match?.locator) params.set('locator', JSON.stringify(result.match.locator))
+  if (readOptions.representation) params.set('representation', readOptions.representation)
+  if (readOptions.locator) params.set('locator', JSON.stringify(readOptions.locator))
   const suffix = params.toString() ? `?${params}` : ''
   return `/files/by-ref/${encodeURIComponent(result.ref)}/read${suffix}`
 }
@@ -93,11 +93,31 @@ async function openResult(result) {
   try {
     detail.value = result.kind === 'note'
       ? await request(`/notes/${result.id}`, {}, auth.token)
-      : await request(fileReadPath(result), {}, auth.token)
+      : await openFileResult(result)
   } catch (e) {
     detailError.value = e.message
   } finally {
     detailLoading.value = false
+  }
+}
+
+async function openFileResult(result) {
+  const file = await request(`/files/by-ref/${encodeURIComponent(result.ref)}`, {}, auth.token)
+  const readable = file.representations?.find((representation) => ['text', 'markdown', 'html_text', 'pdf_text'].includes(representation.kind))
+  if (!readable) return file
+
+  const requestedRepresentation = result.match?.representation
+  const representation = file.representations.some((item) => item.kind === requestedRepresentation)
+    ? requestedRepresentation
+    : readable.kind
+  const locator = representation === requestedRepresentation ? result.match?.locator : null
+  try {
+    const read = await request(fileReadPath(result, { representation, locator }), {}, auth.token)
+    return { ...file, read }
+  } catch (e) {
+    if (representation === readable.kind && !locator) throw e
+    const read = await request(fileReadPath(result, { representation: readable.kind }), {}, auth.token)
+    return { ...file, read }
   }
 }
 
@@ -129,10 +149,12 @@ onMounted(async () => {
     </div>
 
     <form class="search-form" @submit.prevent="search()">
-      <label class="search-query">Search
-        <input v-model="query" type="search" placeholder="What do you remember?" autocomplete="off" autofocus required />
-      </label>
-      <button class="primary search-submit" :disabled="loading || !hasQuery">{{ loading ? 'Searching…' : 'Search' }}</button>
+      <div class="search-query-row">
+        <label class="search-query">Search
+          <input v-model="query" type="search" placeholder="What do you remember?" autocomplete="off" autofocus required />
+        </label>
+        <button class="primary search-submit" :disabled="loading || !hasQuery">{{ loading ? 'Searching…' : 'Search' }}</button>
+      </div>
 
       <div class="search-filters" aria-label="Search filters">
         <label>Project
@@ -201,7 +223,8 @@ onMounted(async () => {
       </template>
       <template v-else-if="selected.kind === 'file' && detail">
         <p class="muted">{{ detail.representation || selected.match?.representation || 'readable representation' }}<span v-if="detail.locator"> · {{ formatLocator(detail.locator) }}</span></p>
-        <pre class="file-read">{{ detail.content || 'No readable content returned.' }}</pre>
+        <pre v-if="detail.read?.content" class="file-read">{{ detail.read.content }}</pre>
+        <dl v-else class="file-metadata"><dt>Media type</dt><dd>{{ detail.media_type }}</dd><dt>Size</dt><dd>{{ detail.byte_size }} bytes</dd><dt>SHA-256</dt><dd>{{ detail.sha256 }}</dd></dl>
       </template>
     </aside>
   </section>
