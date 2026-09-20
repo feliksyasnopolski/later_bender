@@ -74,11 +74,12 @@ module Api
     end
     def promote_file
       payload = request_payload
-      result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/file-promote", payload)
+      promotion_payload = payload.merge("path" => workspace_relative_path(payload.fetch("path")))
+      result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/file-promote", promotion_payload)
       project = current_user.projects.find_by!(slug: payload.fetch("project"))
       bytes = Base64.strict_decode64(result.fetch("bytes_base64"))
       file = StoredFileBytesCreator.call(project:, bytes:, filename: result["filename"] || payload["filename"] || File.basename(payload.fetch("path")), media_type: result["media_type"], tags: payload["tags"])
-      @workspace.append_event!("file_promoted", payload.merge("file" => file.ref, "path" => payload.fetch("path")))
+      @workspace.append_event!("file_promoted", promotion_payload.merge("file" => file.ref))
       render json: { ref: file.ref, filename: file.filename, media_type: file.media_type, byte_size: file.byte_size, sha256: file.sha256 }
     rescue ArgumentError
       render json: { error: { code: "validation_failed", message: "Invalid file bytes" } }, status: :unprocessable_content
@@ -236,6 +237,10 @@ module Api
       @workspace.workspace_executions.where(state: "running").find_each { |execution| refresh_execution!(execution) }
     end
     def set_workspace = @workspace = current_user.workspaces.find_by_public_ref(params[:ref] || params[:workspace_ref]) || raise(ActiveRecord::RecordNotFound)
+
+    def workspace_relative_path(path)
+      path.to_s.delete_prefix("/workspace/")
+    end
 
     def workspace_attributes(result, payload)
       result = result.fetch("workspace", result)

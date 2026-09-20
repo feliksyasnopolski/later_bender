@@ -5,6 +5,7 @@ RSpec.describe "Workspace file and transcript contracts", type: :request do
     user = User.create!(username: "workspace-contract", password: "password123")
     _token, @raw_token = ApiToken.issue!(user:, name: "workspace contract")
     @project = user.projects.create!(name: "Workspace contract", slug: "workspace-contract", shorthand: "WC")
+    @promotion_payload = nil
     allow_any_instance_of(WorkspaceRunnerClient).to receive(:request) do |_, method, path, payload = nil|
       case [ method, path ]
       when [ :post, "/workspaces" ]
@@ -16,6 +17,7 @@ RSpec.describe "Workspace file and transcript contracts", type: :request do
       when [ :post, "/executions/WSE-contract/output" ]
         output_result(payload.fetch("stream"))
       when [ :post, "/workspaces/WSR-contract/file-promote" ]
+        @promotion_payload = payload
         { "filename" => "artifact.bin", "media_type" => "application/octet-stream", "bytes_base64" => Base64.strict_encode64("\x00\x01\xffABC".b), "byte_size" => 6, "sha256" => Digest::SHA256.hexdigest("\x00\x01\xffABC".b) }
       when [ :post, "/workspaces/WSR-contract/file-read" ]
         file_read_result(payload)
@@ -43,8 +45,9 @@ RSpec.describe "Workspace file and transcript contracts", type: :request do
   it "returns binary Workspace promotions with their exact non-text media type and sha" do
     post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
     workspace_ref = json_body.fetch("ref")
-    post "/api/workspaces/#{workspace_ref}/file-promote", params: { project: @project.slug, path: "artifact.bin" }.to_json, headers: json_headers(@raw_token)
+    post "/api/workspaces/#{workspace_ref}/file-promote", params: { project: @project.slug, path: "/workspace/artifact.bin" }.to_json, headers: json_headers(@raw_token)
     assert_response :ok
+    assert_equal "artifact.bin", @promotion_payload.fetch("path")
     assert_equal "application/octet-stream", json_body.fetch("media_type")
     assert_equal Digest::SHA256.hexdigest("\x00\x01\xffABC".b), json_body.fetch("sha256")
   end
