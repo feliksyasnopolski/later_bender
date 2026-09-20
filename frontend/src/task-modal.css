@@ -1,0 +1,12 @@
+.create-modal-backdrop{position:fixed;inset:0;z-index:3;display:grid;place-items:center;padding:24px;background:#111a2b80;overflow:auto}
+.create-dialog{width:min(700px,100%);max-height:calc(100vh - 48px);overflow:auto;background:#fff;border:1px solid #d9deea;border-radius:14px;box-shadow:0 18px 50px #16233d33}
+.create-dialog-header{display:flex;justify-content:space-between;gap:24px;padding:26px 30px 20px;border-bottom:1px solid #edf0f3}
+.create-dialog-header h2{margin:.15rem 0 .3rem;font-size:23px;letter-spacing:-.03em}
+.create-dialog-header .eyebrow{margin:0}.create-dialog-header .muted{margin:0}
+.create-dialog-header .close{position:static;align-self:start;font-size:24px;padding:.1rem .45rem}
+.create-form{display:grid;grid-template-columns:1.45fr 1fr 1fr;gap:0 14px;padding:24px 30px 26px}
+.create-form label{margin:0 0 18px}.create-form textarea{resize:vertical;min-height:104px}
+.create-field-title,.create-field-wide{grid-column:1 / -1}.create-form-error{grid-column:1 / -1;margin:0 0 18px}
+.create-dialog-footer{grid-column:1 / -1;display:flex;justify-content:flex-end;gap:10px;padding-top:6px;border-top:1px solid #edf0f3}.create-dialog-footer button{min-width:92px}
+@media(max-width:800px){.create-modal-backdrop{padding:16px}.create-dialog{max-height:calc(100vh - 32px)}.create-dialog-header,.create-form{padding-left:22px;padding-right:22px}.create-form{grid-template-columns:1fr 1fr}}
+@media(max-width:520px){.create-form{display:block}.create-form label{margin-bottom:16px}.create-dialog-header{padding-top:21px}.create-dialog-footer{margin-top:2px;padding-top:18px}.create-dialog-footer button{flex:1}}

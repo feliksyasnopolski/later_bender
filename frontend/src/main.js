@@ -7,6 +7,7 @@ import { useAuthStore } from './stores/auth'
 import './style.css'
 import './polish.css'
 import './legacy.css'
+import './task-modal.css'
 
 const pinia = createPinia()
 setActivePinia(pinia)
