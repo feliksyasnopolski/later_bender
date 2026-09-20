@@ -1,39 +1,24 @@
 <script setup>
-import { useAuthStore } from './stores/auth'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { watch } from 'vue'
-
-const auth = useAuthStore()
-const router = useRouter()
-const route = useRoute()
-
-watch(() => auth.token, (token) => {
-  if (!token && route.meta.auth) router.replace({ path: '/login', query: { redirect: route.fullPath } })
-})
-
-async function logout() {
-  await auth.logout()
-  router.push('/login')
-}
+import { useAuthStore } from './stores/auth'
+import { request } from './api'
+const auth = useAuthStore(); const route = useRoute(); const router = useRouter()
+const projects = ref([]); const projectSlug = ref('')
+const nav = [{ label: 'Tasks', to: '/tasks' }, { label: 'Search', to: '/search' }, { label: 'Notes', to: '/notes' }, { label: 'Files', to: '/files' }, { label: 'Workspaces', to: '/workspaces' }, { label: 'Credentials', to: '/credentials' }]
+const isAuthed = computed(() => auth.isAuthenticated)
+const active = (to) => route.path === to || route.path.startsWith(`${to}/`)
+async function loadProjects() { try { projects.value = await request('/projects', {}, auth.token) } catch { projects.value = [] } }
+function chooseProject() { router.push(projectSlug.value ? `/projects/${projectSlug.value}/tasks` : '/tasks') }
+async function logout() { await auth.logout(); router.push('/login') }
+watch(() => auth.isAuthenticated, (value) => { if (value) loadProjects() }, { immediate: true })
+watch(() => route.params.project, (value) => { projectSlug.value = value || '' }, { immediate: true })
+onMounted(() => { if (isAuthed.value) loadProjects() })
 </script>
-
 <template>
-  <div v-if="auth.token && auth.checking" class="session-loading" role="status">Checking your session…</div>
-  <div v-else-if="auth.isAuthenticated" class="app-shell">
-    <header class="site-header">
-      <router-link to="/projects" class="brand">Later, Bender</router-link>
-      <nav class="primary-nav" aria-label="Primary navigation">
-        <router-link to="/tasks" :class="{ active: route.path === '/tasks' || route.path.includes('/tasks') }">Tasks</router-link>
-        <router-link to="/notes" active-class="active">Notes</router-link>
-        <router-link to="/projects" :class="{ active: route.path === '/projects' }">Projects</router-link>
-        <router-link to="/search" active-class="active">Search</router-link>
-      </nav>
-      <div class="account-menu">
-        <span class="username">{{ auth.user.username }}</span>
-        <button class="link-button" @click="logout">Log out</button>
-      </div>
-    </header>
-    <main class="page app-content"><router-view /></main>
-  </div>
-  <main v-else class="page"><router-view /></main>
+  <div v-if="auth.token && auth.checking" class="session-loading">Checking your session…</div>
+  <div v-else-if="isAuthed" class="app-shell">
+    <aside class="sidebar"><router-link class="brand" to="/tasks">Later Bender</router-link><select v-model="projectSlug" class="project-scope" aria-label="Project scope" @change="chooseProject"><option value="">later-bender</option><option v-for="project in projects" :key="project.slug" :value="project.slug">{{ project.name }}</option></select><nav class="primary-nav" aria-label="Primary navigation"><router-link v-for="item in nav" :key="item.to" :to="item.to" :class="{ active: active(item.to) }">{{ item.label }}</router-link></nav><div class="sidebar-footer"><span>{{ auth.user?.username }}</span><button @click="logout">Log out</button></div></aside>
+    <main class="app-content"><router-view /></main>
+  </div><main v-else class="guest-content"><router-view /></main>
 </template>

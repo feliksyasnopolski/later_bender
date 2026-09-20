@@ -5,6 +5,7 @@ import router from './router'
 import { setUnauthorizedHandler } from './api'
 import { useAuthStore } from './stores/auth'
 import './style.css'
+import './legacy.css'
 
 const pinia = createPinia()
 setActivePinia(pinia)
