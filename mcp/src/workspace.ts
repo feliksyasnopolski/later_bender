@@ -21,10 +21,10 @@ const resourceRequirements = {
   min_pids: z.number().int().positive().optional(),
 };
 const resourceLimits = z.object({
-  cpus: z.number().positive(),
-  memory_bytes: bytes,
-  disk_bytes: bytes,
-  pids: z.number().int().positive(),
+  cpus: z.number().positive().nullable(),
+  memory_bytes: bytes.nullable(),
+  disk_bytes: bytes.nullable(),
+  pids: z.number().int().positive().nullable(),
 });
 const capabilityFlags = z.record(
   z.string(),
@@ -582,7 +582,7 @@ export function registerWorkspaceTools(
   server.registerTool(
     "exec_workspace",
     {
-      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is the general-purpose Linux execution surface for real engineering work, including normal tooling, filesystem work, package installation, and outbound network use when those capabilities are available. The server waits briefly and returns a terminal projection or a running execution ref. There is no persistent shell session. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
+      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is a general-purpose execution surface for real engineering work, including normal tooling, filesystem work, package installation, and outbound network use when those capabilities are available. The selected Workspace target and environment are authoritative; the server waits briefly and returns a terminal projection or a running execution ref. There is no persistent shell session. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
       inputSchema: execInput,
       outputSchema: { execution },
       annotations: execute,

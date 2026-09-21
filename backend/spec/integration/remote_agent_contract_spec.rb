@@ -94,6 +94,7 @@ RSpec.describe "Remote Agent contract", type: :request do
   end
 
   it "allocates the canonical Workspace before exposing an idempotent prepare operation" do
+    stub_const("Api::WorkspacesController::REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS", 0)
     agent = enroll_agent
     session_token = authenticate_agent(agent)
 
@@ -130,6 +131,7 @@ RSpec.describe "Remote Agent contract", type: :request do
   end
 
   it "allocates WSE identity before dispatch and projects native output" do
+    stub_const("Api::WorkspacesController::REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS", 0)
     agent = enroll_agent
     session_token = authenticate_agent(agent)
     post "/api/workspaces", params: { target: agent.ref, executor: "native" }.to_json, headers: json_headers(@raw_token)
@@ -156,6 +158,51 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(json_body).to include("state" => "exited", "exit_code" => 0)
     post "/api/workspace-executions/#{execution.ref}/output", params: { stream: "stdout", format: "text" }.to_json, headers: json_headers(@raw_token)
     expect(json_body).to include("data" => "remote", "stream_complete" => true)
+  end
+
+  it "collapses remote create and execution fast paths within the bounded wait" do
+    agent = enroll_agent
+    session_token = authenticate_agent(agent)
+    allow_any_instance_of(Api::WorkspacesController).to receive(:remote_observation_sleep) do
+      workspace = Workspace.last
+      if workspace.state == "starting"
+        workspace.remote_workspace_placement.update!(state: "ready", prepared_at: Time.current)
+        workspace.update!(state: "ready")
+      elsif workspace.remote_workspace_placement&.operation_kind == "destroy"
+        workspace.destroy!
+      elsif (execution = workspace.workspace_executions.last)&.state == "running"
+        execution.update!(state: "exited", finished_at: Time.current, exit_code: 0, stdout_data: "remote fast")
+      end
+    end
+
+    post "/api/workspaces", params: { target: agent.ref, executor: "native" }.to_json, headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:created)
+    workspace = Workspace.find_by!(ref: json_body.fetch("ref"))
+    expect(json_body).to include("state" => "ready", "limits" => { "cpus" => nil, "memory_bytes" => nil, "disk_bytes" => nil, "pids" => nil })
+
+    post "/api/workspaces/#{workspace.ref}/executions", params: { command: "printf remote fast" }.to_json, headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:created)
+    expect(json_body).to include("state" => "exited", "exit_code" => 0)
+    expect(json_body.dig("stdout", "data")).to eq("remote fast")
+    expect(session_token).to be_present
+
+    delete "/api/workspaces/#{workspace.ref}", headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:ok)
+    expect(json_body).to include("ref" => workspace.ref, "destroyed" => true)
+  end
+
+  it "keeps remote create and destroy asynchronous when the bounded wait expires" do
+    stub_const("Api::WorkspacesController::REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS", 0)
+    agent = enroll_agent
+    authenticate_agent(agent)
+
+    post "/api/workspaces", params: { target: agent.ref, executor: "native" }.to_json, headers: json_headers(@raw_token)
+    expect(json_body).to include("state" => "starting")
+    workspace = Workspace.find_by!(ref: json_body.fetch("ref"))
+
+    delete "/api/workspaces/#{workspace.ref}", headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:accepted)
+    expect(json_body).to include("ref" => workspace.ref, "destroyed" => false, "state" => "stopping")
   end
 
   private

@@ -37,7 +37,7 @@ test("Workspace schemas keep capability and resource identifiers open", () => {
   assert.equal(registered.create_workspace.outputSchema.safeParse({ workspace: {
     ref: "WS-1", label: null, state: "starting", environment: "macos", architecture: "arm64",
     os: { name: "macOS", version: "unknown" }, shell: "/bin/bash", workspace_root: "/workspace",
-    limits: { cpus: 1, memory_bytes: 1, disk_bytes: 1, pids: 1 }, capabilities: {}, created_at: "2026-01-01T00:00:00Z", last_activity_at: "2026-01-01T00:00:00Z", expires_at: null,
+    limits: { cpus: null, memory_bytes: null, disk_bytes: null, pids: null }, capabilities: {}, created_at: "2026-01-01T00:00:00Z", last_activity_at: "2026-01-01T00:00:00Z", expires_at: null,
     target: "RA-1", executor: "native", availability: "online"
   }}).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({ environment: "future-linux", architecture: "riscv64", resources: { min_cpus: 1.5, min_memory_bytes: 1024 } }).success, true);
@@ -85,7 +85,8 @@ test("boundary operations expose stable result contracts and scaffold availabili
   assert.equal(registered.read_workspace_execution_output.inputSchema.shape.stream.safeParse("stdin").success, false);
   assert.match(registered.read_workspace_execution_output.description, /Continue reading.*opaque cursor/);
   assert.deepEqual(registered.exec_workspace.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true });
-  assert.match(registered.exec_workspace.description, /general-purpose Linux execution surface.*package installation.*outbound network/i);
+  assert.match(registered.exec_workspace.description, /general-purpose execution surface.*package installation.*outbound network.*selected Workspace target and environment/i);
+  assert.doesNotMatch(registered.exec_workspace.description, /Linux execution surface/i);
   assert.equal(registered.read_workspace_transcript.outputSchema.safeParse({ workspace: "WS-1", events: [{ kind: "file_imported", sequence: 1, occurred_at: "2026-01-01T00:00:00Z", workspace: "WS-1", file: "LB-F1", path: "input.txt", byte_size: 4, sha256: "a".repeat(64) }], next_cursor: null }).success, true);
   assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1" }).success, true);
   assert.equal(registered.read_workspace_transcript.inputSchema.safeParse({ workspace: "WS-1", from_sequence: 2, to_sequence: 4, limit: 10 }).success, true);

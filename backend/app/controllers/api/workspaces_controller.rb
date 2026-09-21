@@ -2,6 +2,8 @@ module Api
   class WorkspacesController < BaseController
     require "base64"
     EXECUTION_OBSERVATION_WINDOW_SECONDS = 5.0
+    REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS = 2.5
+    REMOTE_OBSERVATION_INTERVAL_SECONDS = 0.1
     before_action :set_workspace, only: %i[show destroy put_file read_file promote_file execute execution output cancel transcript promote_transcript]
 
     def capabilities
@@ -62,10 +64,14 @@ module Api
       if (placement = @workspace.remote_workspace_placement)
         raise WorkspaceRunnerClient::Unavailable.new("Remote Workspace target is offline", code: "workspace_unavailable") unless placement.remote_agent.online?
 
+        workspace_ref = @workspace.ref
         placement.replace_operation!(kind: "destroy")
         @workspace.update!(state: "stopping")
         @workspace.append_event!("workspace_destroy_requested", { "operation_id" => placement.operation_id })
-        return render json: { ref: @workspace.ref, destroyed: false, state: "stopping" }, status: :accepted
+        wait_for_remote_destruction!(workspace_ref)
+        return render json: { ref: workspace_ref, destroyed: true } if Workspace.find_by(ref: workspace_ref).nil?
+
+        return render json: { ref: workspace_ref, destroyed: false, state: "stopping" }, status: :accepted
       end
       runner.request(:delete, "/workspaces/#{@workspace.runner_handle}") if @workspace.runner_handle.present?
       @workspace.update!(state: "stopping")
@@ -233,6 +239,7 @@ module Api
         execution = @workspace.workspace_executions.create!(ref:, sequence:, state: "running", invocation:, cwd:, env:, secret_env_names: [], started_at: Time.current, requested_timeout_seconds: payload["timeout_seconds"], stdout_handle: "#{ref}:stdout", stderr_handle: "#{ref}:stderr", remote_operation_id: operation_id, spec_hash:, remote_spec: spec)
         @workspace.append_event!("execution", transcript_execution_payload(execution.attributes, execution))
       end
+      observe_remote_execution!(execution)
       render json: execution_json(execution), status: :created
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
@@ -313,6 +320,37 @@ module Api
       end
       execution
     end
+    def observe_remote_execution!(execution)
+      observe_remote_operation do
+        execution.reload
+        break if execution.state != "running"
+      end
+      execution
+    end
+    def wait_for_remote_workspace!(workspace)
+      observe_remote_operation do
+        workspace.reload
+        placement = workspace.remote_workspace_placement
+        break if placement&.state == "ready" || placement&.state == "failed" || workspace.state == "failed"
+      end
+      workspace.reload
+    end
+    def wait_for_remote_destruction!(workspace_ref)
+      observe_remote_operation do
+        workspace = Workspace.find_by(ref: workspace_ref)
+        break if workspace.nil? || workspace.remote_workspace_placement&.state == "destroyed"
+      end
+    end
+    def observe_remote_operation
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS
+      loop do
+        yield
+        break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        remote_observation_sleep
+      end
+    end
+    def remote_observation_sleep = sleep(REMOTE_OBSERVATION_INTERVAL_SECONDS)
     def refresh_workspace_executions!
       @workspace.workspace_executions.where(state: "running").find_each { |execution| refresh_execution!(execution) }
     end
@@ -357,11 +395,12 @@ module Api
         workspace = current_user.workspaces.create!(
           label: payload["label"], state: "starting", environment: spec["environment"], architecture: agent.architecture,
           os_name: agent.platform, os_version: "unknown", shell: "/bin/bash", workspace_root: "/workspace",
-          limits: { "cpus" => 1, "memory_bytes" => 1, "disk_bytes" => 1, "pids" => 1 }, capabilities: agent.capabilities, last_activity_at: Time.current, expires_at: payload["ttl_seconds"].present? ? payload["ttl_seconds"].to_i.seconds.from_now : nil
+          limits: { "cpus" => nil, "memory_bytes" => nil, "disk_bytes" => nil, "pids" => nil }, capabilities: agent.capabilities, last_activity_at: Time.current, expires_at: payload["ttl_seconds"].present? ? payload["ttl_seconds"].to_i.seconds.from_now : nil
         )
         placement = workspace.create_remote_workspace_placement!(remote_agent: agent, executor:, operation_id: "WSOP-#{SecureRandom.hex(16)}", spec_hash: digest, spec:)
         workspace.append_event!("workspace_created", { "target" => agent.ref, "executor" => executor, "operation_id" => placement.operation_id })
       end
+      wait_for_remote_workspace!(workspace)
       render json: full(workspace), status: :created
     rescue ActiveRecord::RecordInvalid
       raise
