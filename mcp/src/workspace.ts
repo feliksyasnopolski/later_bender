@@ -507,7 +507,11 @@ export function registerWorkspaceTools(
     {
       description: `Destroy the entire transient Workspace, including its executions, filesystem, and transcript. The operation itself expresses destructive intent; there is no force option. ${workspaceFailure}`,
       inputSchema: { ref: opaqueRef },
-      outputSchema: { ref: opaqueRef, destroyed: z.literal(true) },
+      outputSchema: {
+        ref: opaqueRef,
+        destroyed: z.boolean(),
+        state: workspaceState.optional(),
+      },
       annotations: destroy,
     },
     runtime(api, "destroy_workspace"),
