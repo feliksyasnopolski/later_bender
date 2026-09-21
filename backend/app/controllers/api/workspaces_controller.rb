@@ -69,8 +69,7 @@ module Api
         placement.replace_operation!(kind: "destroy")
         @workspace.update!(state: "stopping")
         @workspace.append_event!("workspace_destroy_requested", { "operation_id" => placement.operation_id })
-        wait_for_remote_destruction!(workspace_ref)
-        return render json: { ref: workspace_ref, destroyed: true } if Workspace.find_by(ref: workspace_ref).nil?
+        return render json: { ref: workspace_ref, destroyed: true } if wait_for_remote_destruction!(workspace_ref)
 
         return render json: { ref: workspace_ref, destroyed: false, state: "stopping" }, status: :accepted
       end
@@ -324,7 +323,7 @@ module Api
     def observe_remote_execution!(execution)
       observe_remote_operation(window: REMOTE_EXECUTION_OBSERVATION_WINDOW_SECONDS) do
         execution.reload
-        break if execution.state != "running"
+        execution.state != "running"
       end
       execution
     end
@@ -332,21 +331,21 @@ module Api
       observe_remote_operation do
         workspace.reload
         placement = workspace.remote_workspace_placement
-        break if placement&.state == "ready" || placement&.state == "failed" || workspace.state == "failed"
+        placement&.state == "ready" || placement&.state == "failed" || workspace.state == "failed"
       end
       workspace.reload
     end
     def wait_for_remote_destruction!(workspace_ref)
       observe_remote_operation do
         workspace = Workspace.find_by(ref: workspace_ref)
-        break if workspace.nil? || workspace.remote_workspace_placement&.state == "destroyed"
+        workspace.nil? || workspace.remote_workspace_placement&.state == "destroyed"
       end
     end
     def observe_remote_operation(window: REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + window
       loop do
-        yield
-        break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+        return true if yield
+        return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
 
         remote_observation_sleep
       end
