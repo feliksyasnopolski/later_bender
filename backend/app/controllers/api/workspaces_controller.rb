@@ -337,7 +337,7 @@ module Api
     end
     def wait_for_remote_destruction!(workspace_ref)
       observe_remote_operation do
-        workspace = Workspace.find_by(ref: workspace_ref)
+        workspace = Workspace.uncached { Workspace.find_by(ref: workspace_ref) }
         workspace.nil? || workspace.remote_workspace_placement&.state == "destroyed"
       end
     end

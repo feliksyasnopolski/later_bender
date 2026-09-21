@@ -186,7 +186,9 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(json_body.dig("stdout", "data")).to eq("remote fast")
     expect(session_token).to be_present
 
-    delete "/api/workspaces/#{workspace.ref}", headers: json_headers(@raw_token)
+    ActiveRecord::Base.cache do
+      delete "/api/workspaces/#{workspace.ref}", headers: json_headers(@raw_token)
+    end
     expect(response).to have_http_status(:ok)
     expect(json_body).to include("ref" => workspace.ref, "destroyed" => true)
   end
