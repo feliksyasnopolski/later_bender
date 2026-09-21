@@ -7,7 +7,49 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestNativeExecutionCapturesOutputAndUsesStableIdentity(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.prepare("WS-8", "native", "WSOP-prepare", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{Type: "start_execution", Workspace: "WS-8", Execution: "WSE-8", OperationID: "WSOP-exec", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/sh", "-c", "printf native-output"}},
+		"cwd":        "/workspace", "env": map[string]any{},
+	}}
+	e, err := startNative(s, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		e.mu.Lock()
+		state := e.State
+		e.mu.Unlock()
+		if state != "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	e.mu.Lock()
+	state := e.State
+	e.mu.Unlock()
+	if state != "exited" {
+		t.Fatalf("state = %s", state)
+	}
+	output, err := os.ReadFile(e.Stdout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != "native-output" {
+		t.Fatalf("output = %q", output)
+	}
+	if again, ok := localExecution(op); !ok || again != e {
+		t.Fatal("execution identity was not reused")
+	}
+}
 
 func TestStorePrepareIsIdempotentAndRejectsChangedSpec(t *testing.T) {
 	s := Store{Dir: t.TempDir()}

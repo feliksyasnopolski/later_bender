@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_21_131000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_21_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -375,6 +375,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_131000) do
   end
 
   create_table "workspace_executions", force: :cascade do |t|
+    t.string "cancel_operation_id"
     t.datetime "created_at", null: false
     t.string "cwd", default: "/workspace", null: false
     t.jsonb "env", default: {}, null: false
@@ -382,17 +383,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_21_131000) do
     t.datetime "finished_at"
     t.jsonb "invocation", default: {}, null: false
     t.string "ref", null: false
+    t.string "remote_operation_id"
+    t.jsonb "remote_spec", default: {}, null: false
     t.decimal "requested_timeout_seconds"
     t.jsonb "secret_env_names", default: [], null: false
     t.integer "sequence", null: false
+    t.string "spec_hash"
     t.datetime "started_at", null: false
     t.string "state", default: "running", null: false
+    t.binary "stderr_data"
     t.string "stderr_handle", null: false
+    t.binary "stdout_data"
     t.string "stdout_handle", null: false
     t.string "terminating_signal"
     t.datetime "updated_at", null: false
     t.bigint "workspace_id", null: false
+    t.index ["cancel_operation_id"], name: "index_workspace_executions_on_cancel_operation_id", unique: true
     t.index ["ref"], name: "index_workspace_executions_on_ref", unique: true
+    t.index ["remote_operation_id"], name: "index_workspace_executions_on_remote_operation_id", unique: true
     t.index ["workspace_id", "sequence"], name: "index_workspace_executions_on_workspace_id_and_sequence", unique: true
     t.index ["workspace_id"], name: "index_workspace_executions_on_workspace_id"
   end

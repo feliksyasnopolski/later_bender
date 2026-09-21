@@ -104,9 +104,7 @@ module Api
     end
 
     def execute
-      if @workspace.remote_workspace_placement.present?
-        raise WorkspaceRunnerClient::Unavailable.new("Remote Workspace execution is not available yet", code: "executor_unsupported")
-      end
+      return execute_remote if @workspace.remote_workspace_placement.present?
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/executions", request_payload)
       execution = @workspace.workspace_executions.create!(execution_attributes(result))
       @workspace.append_event!("execution", transcript_execution_payload(result, execution))
@@ -124,6 +122,7 @@ module Api
 
     def output
       execution = @workspace.workspace_executions.find_by!(ref: params[:execution_ref])
+      return render json: remote_output(execution, request_payload) if @workspace.remote_workspace_placement.present?
       render json: runner.request(:post, "/executions/#{execution.ref}/output", request_payload)
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
@@ -131,6 +130,7 @@ module Api
 
     def cancel
       execution = @workspace.workspace_executions.find_by!(ref: params[:execution_ref])
+      return cancel_remote(execution) if @workspace.remote_workspace_placement.present?
       previous_state = execution.state
       result = runner.request(:post, "/executions/#{execution.ref}/cancel")
       execution.update!(execution_attributes(result))
@@ -189,6 +189,7 @@ module Api
 
     def output_by_ref
       execution = find_execution_by_ref
+      return render json: remote_output(execution, request_payload) if execution.workspace.remote_workspace_placement.present?
       render json: runner.request(:post, "/executions/#{execution.ref}/output", request_payload)
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
@@ -197,6 +198,7 @@ module Api
     def cancel_by_ref
       execution = find_execution_by_ref
       @workspace = execution.workspace
+      return cancel_remote(execution) if @workspace.remote_workspace_placement.present?
       previous_state = execution.state
       result = runner.request(:post, "/executions/#{execution.ref}/cancel")
       execution.update!(execution_attributes(result))
@@ -207,6 +209,63 @@ module Api
     end
 
     private
+
+    def execute_remote
+      payload = request_payload
+      if payload["secret_env"].present?
+        raise WorkspaceRunnerClient::Unavailable.new("Remote secret_env is not supported yet", code: "executor_unsupported")
+      end
+      placement = @workspace.remote_workspace_placement
+      raise WorkspaceRunnerClient::Unavailable.new("Workspace is not ready", code: "workspace_not_ready") unless @workspace.state == "ready" && placement&.state == "ready"
+      raise WorkspaceRunnerClient::Unavailable.new("Remote Workspace target is offline", code: "workspace_unavailable") unless placement.remote_agent.online?
+      raise WorkspaceRunnerClient::Unavailable.new("Exactly one of command or argv is required", code: "invalid_invocation") unless payload.key?("command") ^ payload.key?("argv")
+
+      invocation = payload.key?("command") ? { "kind" => "shell", "command" => payload.fetch("command") } : { "kind" => "argv", "argv" => Array(payload.fetch("argv")) }
+      env = payload["env"] || {}
+      cwd = payload["cwd"] || "/workspace"
+      spec = { "invocation" => invocation, "cwd" => cwd, "env" => env, "stdin" => payload["stdin"], "timeout_seconds" => payload["timeout_seconds"] }
+      execution = nil
+      @workspace.with_lock do
+        sequence = @workspace.workspace_executions.maximum(:sequence).to_i + 1
+        ref = "WSE-#{SecureRandom.hex(12)}"
+        operation_id = "WSOP-#{SecureRandom.hex(16)}"
+        spec_hash = Digest::SHA256.hexdigest(JSON.generate(spec))
+        execution = @workspace.workspace_executions.create!(ref:, sequence:, state: "running", invocation:, cwd:, env:, secret_env_names: [], started_at: Time.current, requested_timeout_seconds: payload["timeout_seconds"], stdout_handle: "#{ref}:stdout", stderr_handle: "#{ref}:stderr", remote_operation_id: operation_id, spec_hash:, remote_spec: spec)
+        @workspace.append_event!("execution", transcript_execution_payload(execution.attributes, execution))
+      end
+      render json: execution_json(execution), status: :created
+    rescue WorkspaceRunnerClient::Unavailable => e
+      render_runner_error(e)
+    end
+
+    def cancel_remote(execution)
+      unless execution.state == "running"
+        return render json: execution_json(execution)
+      end
+      execution.update!(cancel_operation_id: "WSOP-#{SecureRandom.hex(16)}") unless execution.cancel_operation_id.present?
+      render json: execution_json(execution)
+    end
+
+    def remote_output(execution, payload)
+      stream = payload["stream"].to_s
+      raise WorkspaceRunnerClient::Unavailable.new("Invalid output stream", code: "invalid_range") unless %w[stdout stderr].include?(stream)
+      bytes = execution.public_send("#{stream}_data").to_s.b
+      offset = Integer(payload["cursor"].presence || 0)
+      raise WorkspaceRunnerClient::Unavailable.new("Invalid output cursor", code: "invalid_cursor") if offset.negative? || offset > bytes.bytesize
+      chunk = bytes.byteslice(offset, 64 * 1024) || "".b
+      format = payload["format"].to_s
+      format = "text" if format == "auto" && utf8_text?(chunk)
+      format = "base64" unless %w[text base64].include?(format)
+      encoded = format == "text" ? chunk.force_encoding(Encoding::UTF_8).scrub : Base64.strict_encode64(chunk)
+      terminal = execution.state != "running"
+      { "execution" => execution.ref, "stream" => stream, "format" => format, "data" => encoded, "chunk_byte_size" => chunk.bytesize, "total_byte_size" => bytes.bytesize, "next_cursor" => terminal && offset + chunk.bytesize >= bytes.bytesize ? nil : (offset + chunk.bytesize).to_s, "stream_complete" => terminal && offset + chunk.bytesize >= bytes.bytesize, "state" => execution.state }
+    rescue ArgumentError
+      raise WorkspaceRunnerClient::Unavailable.new("Invalid output cursor", code: "invalid_cursor")
+    end
+
+    def utf8_text?(bytes)
+      bytes.force_encoding(Encoding::UTF_8).valid_encoding? && !bytes.include?("\x00")
+    end
 
     def runner = (@runner ||= WorkspaceRunnerClient.new)
     def find_execution_by_ref = current_user.workspaces.joins(:workspace_executions).merge(WorkspaceExecution.where(ref: params[:ref])).first!.workspace_executions.find_by!(ref: params[:ref])
@@ -353,7 +412,7 @@ module Api
           ref: agent.ref,
           kind: "remote_agent",
           name: agent.name,
-          availability: agent.online? ? "online" : "offline",
+          availability: agent.online? ? "available" : "unavailable",
           last_seen_at: agent.last_seen_at,
           platform: { environment: agent.platform, os: { name: agent.platform, version: "unknown" }, architectures: [ agent.architecture ] },
           resources: nil,
@@ -382,6 +441,10 @@ module Api
     def execution_json(execution) = { ref: execution.ref, workspace: @workspace.ref, sequence: execution.sequence, state: execution.state, invocation: execution.invocation, cwd: execution.cwd, env: execution.env, secret_env_names: execution.secret_env_names, started_at: execution.started_at, finished_at: execution.finished_at, exit_code: execution.exit_code, terminating_signal: execution.terminating_signal, requested_timeout_seconds: timeout_seconds_value(execution.requested_timeout_seconds), stdout: stream_projection(execution, :stdout), stderr: stream_projection(execution, :stderr) }
     def timeout_seconds_value(value) = value.nil? ? nil : value.to_f
     def stream_projection(execution, stream)
+      if execution.workspace.remote_workspace_placement.present?
+        result = remote_output(execution, "stream" => stream.to_s, "format" => "auto")
+        return { format: result.fetch("format"), data: result.fetch("data"), total_byte_size: result.fetch("total_byte_size"), inline_complete: result.fetch("stream_complete") }
+      end
       result = runner.request(:post, "/executions/#{execution.ref}/output", "stream" => stream.to_s, "format" => "auto")
       { format: result.fetch("format"), data: result.fetch("data"), total_byte_size: result.fetch("total_byte_size", result.fetch("chunk_byte_size", 0)), inline_complete: result.fetch("stream_complete", false) }
     rescue WorkspaceRunnerClient::Unavailable
@@ -389,7 +452,7 @@ module Api
     end
     def render_runner_error(error)
       code = error.respond_to?(:code) && error.code.present? ? error.code : "workspace_unavailable"
-      status = %w[invalid_range invalid_cursor not_text path_invalid path_not_found path_exists path_not_file credential_not_found credential_conflict credential_injection_failed target_not_found executor_unsupported capability_unavailable].include?(code) ? :unprocessable_content : :service_unavailable
+      status = %w[invalid_range invalid_cursor invalid_invocation not_text path_invalid path_not_found path_exists path_not_file credential_not_found credential_conflict credential_injection_failed target_not_found executor_unsupported capability_unavailable].include?(code) ? :unprocessable_content : :service_unavailable
       render json: { error: { code:, message: error.message } }, status:
     end
   end

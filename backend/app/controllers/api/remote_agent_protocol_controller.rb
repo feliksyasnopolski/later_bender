@@ -63,7 +63,12 @@ module Api
       operations = @session.remote_agent.remote_workspace_placements
         .where(state: %w[pending preparing]).includes(:workspace).order(:created_at)
       operations.each { |placement| placement.update!(state: "preparing") if placement.state == "pending" }
-      render json: { operations: operations.map(&:prepare_payload) }
+      executions = WorkspaceExecution.joins(workspace: :remote_workspace_placement).where(remote_workspace_placements: { remote_agent_id: @session.remote_agent.id }).where(state: "running").includes(workspace: :remote_workspace_placement).order(:created_at)
+      execution_operations = executions.map do |execution|
+        placement = execution.workspace.remote_workspace_placement
+        execution.cancel_operation_id.present? ? placement.cancel_payload(execution) : placement.execution_payload(execution)
+      end
+      render json: { operations: operations.map(&:prepare_payload) + execution_operations }
     end
 
     def operation_result
@@ -96,6 +101,14 @@ module Api
         raise ArgumentError
       end
       render json: { operation_id: placement.operation_id, workspace: placement.workspace.ref, state: placement.state }
+    rescue ActiveRecord::RecordNotFound
+      execution = WorkspaceExecution.joins(workspace: :remote_workspace_placement).where(remote_operation_id: params[:operation_id], remote_workspace_placements: { remote_agent_id: @session.remote_agent.id }).first || WorkspaceExecution.joins(workspace: :remote_workspace_placement).where(cancel_operation_id: params[:operation_id], remote_workspace_placements: { remote_agent_id: @session.remote_agent.id }).first
+      raise unless execution
+      payload = request_payload
+      raise ArgumentError unless payload.fetch("operation_id") == params[:operation_id] && payload.fetch("workspace") == execution.workspace.ref && payload.fetch("execution") == execution.ref
+      raise ArgumentError unless payload.fetch("spec_hash") == execution.spec_hash
+      apply_execution_result!(execution, payload)
+      render json: { operation_id: params[:operation_id], workspace: execution.workspace.ref, execution: execution.ref, state: execution.state }
     rescue KeyError, ArgumentError, ActiveRecord::RecordInvalid
       render json: { error: { code: "validation_failed", message: "Invalid Workspace operation result" } }, status: :unprocessable_content
     rescue ActiveRecord::RecordNotFound
@@ -103,6 +116,40 @@ module Api
     end
 
     private
+
+    def apply_execution_result!(execution, payload)
+      status = payload.fetch("status")
+      return if execution.state != "running" && status != "running"
+      if payload["stdout_base64"]
+        execution.stdout_data = bounded_output(payload["stdout_base64"])
+      end
+      if payload["stderr_base64"]
+        execution.stderr_data = bounded_output(payload["stderr_base64"])
+      end
+      execution.finished_at = Time.current if %w[exited timed_out cancelled failed].include?(status)
+      execution.state = status == "failed" ? "failed_to_start" : status if %w[running exited timed_out cancelled failed].include?(status)
+      execution.exit_code = payload["exit_code"] if payload.key?("exit_code")
+      execution.terminating_signal = printable_value(payload["terminating_signal"], 80) if payload.key?("terminating_signal")
+      changed = execution.state_changed?
+      execution.save!
+      if changed
+        execution.workspace.append_event!("execution", {
+          "execution" => execution.ref, "invocation" => execution.invocation, "cwd" => execution.cwd,
+          "secret_env_names" => execution.secret_env_names, "started_at" => execution.started_at,
+          "finished_at" => execution.finished_at, "requested_timeout_seconds" => execution.requested_timeout_seconds,
+          "state" => execution.state, "exit_code" => execution.exit_code, "terminating_signal" => execution.terminating_signal,
+          "stdout_preview" => { "format" => "base64", "data" => "", "total_byte_size" => execution.stdout_data.to_s.bytesize, "inline_complete" => execution.state != "running" },
+          "stderr_preview" => { "format" => "base64", "data" => "", "total_byte_size" => execution.stderr_data.to_s.bytesize, "inline_complete" => execution.state != "running" }
+        })
+      end
+    end
+
+    def bounded_output(value)
+      decoded = Base64.strict_decode64(value.to_s)
+      decoded.byteslice(0, WorkspaceExecution::MAX_REMOTE_OUTPUT_BYTES)
+    rescue ArgumentError
+      raise ArgumentError
+    end
 
     def request_payload
       return JSON.parse(request.raw_post) if request.content_mime_type == Mime[:json]

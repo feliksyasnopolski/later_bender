@@ -52,7 +52,7 @@ RSpec.describe "Remote Agent contract", type: :request do
 
     get "/api/workspaces/targets", headers: json_headers(@raw_token)
     remote = json_body.fetch("targets").find { |target| target["ref"] == agent.ref }
-    expect(remote).to include("name" => "Felix Mac", "availability" => "online", "supported_executors" => [ "native" ])
+    expect(remote).to include("name" => "Felix Mac", "availability" => "available", "supported_executors" => [ "native" ])
     expect(remote).not_to have_key("session_token")
 
     post "/api/remote-agents/#{agent.ref}/revoke", headers: json_headers(@raw_token)
@@ -127,6 +127,35 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(response).to have_http_status(:service_unavailable)
     expect(json_body.dig("error", "code")).to eq("workspace_unavailable")
     expect(user.workspaces).to be_empty
+  end
+
+  it "allocates WSE identity before dispatch and projects native output" do
+    agent = enroll_agent
+    session_token = authenticate_agent(agent)
+    post "/api/workspaces", params: { target: agent.ref, executor: "native" }.to_json, headers: json_headers(@raw_token)
+    workspace = Workspace.find_by!(ref: json_body.fetch("ref"))
+    placement = workspace.remote_workspace_placement
+    post "/api/remote-agent/operations/#{placement.operation_id}/result", params: { operation_id: placement.operation_id, workspace: workspace.ref, spec_hash: placement.spec_hash, status: "prepared", provider_workspace_ref: workspace.ref }.to_json, headers: json_headers(session_token)
+
+    post "/api/workspaces/#{workspace.ref}/executions", params: { command: "printf remote" }.to_json, headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:created)
+    execution = workspace.workspace_executions.last
+    expect(execution).to be_present
+    expect(execution.state).to eq("running")
+
+    get "/api/remote-agent/operations", headers: json_headers(session_token)
+    operation = json_body.fetch("operations").find { |item| item["type"] == "start_execution" }
+    expect(operation).to include("execution" => execution.ref, "operation_id" => execution.remote_operation_id)
+    result = operation.merge("status" => "running", "execution" => execution.ref, "stdout_base64" => Base64.strict_encode64("remote"), "stderr_base64" => "")
+    post "/api/remote-agent/operations/#{execution.remote_operation_id}/result", params: result.to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:ok)
+
+    post "/api/remote-agent/operations/#{execution.remote_operation_id}/result", params: result.merge("status" => "exited", "exit_code" => 0).to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:ok)
+    get "/api/workspace-executions/#{execution.ref}", headers: json_headers(@raw_token)
+    expect(json_body).to include("state" => "exited", "exit_code" => 0)
+    post "/api/workspace-executions/#{execution.ref}/output", params: { stream: "stdout", format: "text" }.to_json, headers: json_headers(@raw_token)
+    expect(json_body).to include("data" => "remote", "stream_complete" => true)
   end
 
   private

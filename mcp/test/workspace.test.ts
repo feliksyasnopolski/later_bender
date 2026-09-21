@@ -24,6 +24,12 @@ test("Workspace schemas keep capability and resource identifiers open", () => {
     platform: { environment: "linux", os: { name: "Linux", version: "6.8" }, architectures: ["arm64"] },
     supported_executors: [], resources: { default: { cpus: 1, memory_bytes: 1, disk_bytes: 1, pids: 1 }, max: { cpus: 1, memory_bytes: 1, disk_bytes: 1, pids: 1 } }, capabilities: { internet: true }
   }] }).success, true);
+  assert.equal(registered.list_workspace_targets.outputSchema.safeParse({ targets: [{
+    ref: "RA-3", kind: "remote_agent", name: "Felix Mac", availability: "available", last_seen_at: "2026-01-01T00:00:00Z",
+    platform: { environment: "darwin", os: { name: "darwin", version: "unknown" }, architectures: ["arm64"] },
+    supported_executors: ["native"], resources: null,
+    capabilities: { process_control: "process_group", isolation: "none", hardware_access: "host" }
+  }] }).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({}).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({ target: "RA-1", executor: "native" }).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({ executor: "unsupported" }).success, false);

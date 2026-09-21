@@ -26,7 +26,10 @@ const resourceLimits = z.object({
   disk_bytes: bytes,
   pids: z.number().int().positive(),
 });
-const capabilityFlags = z.record(z.string(), z.boolean());
+const capabilityFlags = z.record(
+  z.string(),
+  z.union([z.boolean(), z.string()]),
+);
 const os = z.object({ name: z.string(), version: z.string() });
 const architectureOffering = z.object({
   architecture: z.string(),

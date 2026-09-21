@@ -15,9 +15,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -41,8 +45,53 @@ type Workspace struct {
 
 type Store struct{ Dir string }
 
+type LocalExecution struct {
+	Execution         string     `json:"execution"`
+	Workspace         string     `json:"workspace"`
+	SpecHash          string     `json:"spec_hash"`
+	State             string     `json:"state"`
+	PID               int        `json:"pid"`
+	ProcessGroup      int        `json:"process_group"`
+	StartedAt         time.Time  `json:"started_at"`
+	FinishedAt        *time.Time `json:"finished_at,omitempty"`
+	ExitCode          *int       `json:"exit_code,omitempty"`
+	TerminatingSignal string     `json:"terminating_signal,omitempty"`
+	Stdout            string     `json:"stdout"`
+	Stderr            string     `json:"stderr"`
+	mu                sync.Mutex
+	cmd               *exec.Cmd
+	timedOut          bool
+	cancelled         bool
+}
+
+type boundedOutput struct {
+	file    *os.File
+	written int
+}
+
+func (w *boundedOutput) Write(p []byte) (int, error) {
+	original := len(p)
+	if w.written >= 1024*1024 {
+		return original, nil
+	}
+	limit := 1024*1024 - w.written
+	if len(p) > limit {
+		p = p[:limit]
+	}
+	n, err := w.file.Write(p)
+	w.written += n
+	if n < len(p) {
+		return n, err
+	}
+	return original, err
+}
+
+var executionMu sync.Mutex
+var executions = map[string]*LocalExecution{}
+
 func (s Store) identityPath() string           { return filepath.Join(s.Dir, "identity.json") }
 func (s Store) workspaceDir(ref string) string { return filepath.Join(s.Dir, "workspaces", ref) }
+func (s Store) executionDir(ref string) string { return filepath.Join(s.Dir, "executions", ref) }
 
 func (s Store) load() (*Identity, error) {
 	b, err := os.ReadFile(s.identityPath())
@@ -286,6 +335,7 @@ type Operation struct {
 	Executor    string         `json:"executor"`
 	SpecHash    string         `json:"spec_hash"`
 	Spec        map[string]any `json:"spec"`
+	Execution   string         `json:"execution"`
 }
 
 func (c *Client) result(ctx context.Context, op Operation, status string, extra map[string]string) error {
@@ -294,6 +344,209 @@ func (c *Client) result(ctx context.Context, op Operation, status string, extra 
 		p[k] = v
 	}
 	return c.post(ctx, "/api/remote-agent/operations/"+url.PathEscape(op.OperationID)+"/result", p, true, &struct{}{})
+}
+
+func localExecution(op Operation) (*LocalExecution, bool) {
+	executionMu.Lock()
+	defer executionMu.Unlock()
+	e, ok := executions[op.Execution]
+	return e, ok
+}
+
+func startNative(s Store, op Operation) (*LocalExecution, error) {
+	if op.Execution == "" || op.SpecHash == "" || op.Executor != "native" {
+		return nil, errors.New("invalid execution request")
+	}
+	if e, ok := localExecution(op); ok {
+		if e.SpecHash != op.SpecHash || e.Workspace != op.Workspace {
+			return nil, errors.New("execution identity conflicts with existing spec")
+		}
+		return e, nil
+	}
+	if secretNames, _ := op.Spec["secret_env_names"].([]any); len(secretNames) > 0 {
+		return nil, errors.New("remote secret_env is not supported")
+	}
+	w, err := s.loadWorkspace(op.Workspace)
+	if err != nil {
+		return nil, err
+	}
+	if b, readErr := os.ReadFile(filepath.Join(s.executionDir(op.Execution), "metadata.json")); readErr == nil {
+		var existing LocalExecution
+		if jsonErr := json.Unmarshal(b, &existing); jsonErr == nil {
+			if existing.SpecHash != op.SpecHash || existing.Workspace != op.Workspace {
+				return nil, errors.New("execution identity conflicts with existing spec")
+			}
+			executionMu.Lock()
+			executions[op.Execution] = &existing
+			executionMu.Unlock()
+			return &existing, nil
+		}
+	}
+	invocation, ok := op.Spec["invocation"].(map[string]any)
+	if !ok {
+		return nil, errors.New("missing invocation")
+	}
+	var argv []string
+	switch invocation["kind"] {
+	case "shell":
+		command, ok := invocation["command"].(string)
+		if !ok {
+			return nil, errors.New("invalid shell invocation")
+		}
+		argv = []string{"/bin/bash", "-lc", command}
+	case "argv":
+		values, ok := invocation["argv"].([]any)
+		if !ok || len(values) == 0 {
+			return nil, errors.New("invalid argv invocation")
+		}
+		for _, value := range values {
+			item, ok := value.(string)
+			if !ok {
+				return nil, errors.New("invalid argv value")
+			}
+			argv = append(argv, item)
+		}
+	default:
+		return nil, errors.New("invalid invocation kind")
+	}
+	cwd, _ := op.Spec["cwd"].(string)
+	root := filepath.Join(w.Root, "root")
+	if cwd == "" || cwd == "/workspace" {
+		cwd = root
+	} else {
+		if strings.HasPrefix(cwd, "/workspace/") {
+			cwd = filepath.Join(root, strings.TrimPrefix(cwd, "/workspace/"))
+		} else if !filepath.IsAbs(cwd) {
+			cwd = filepath.Join(root, cwd)
+		} else {
+			return nil, errors.New("cwd escapes Workspace root")
+		}
+		clean, err := filepath.Abs(cwd)
+		if err != nil {
+			return nil, err
+		}
+		if clean != root && !strings.HasPrefix(clean, root+string(filepath.Separator)) {
+			return nil, errors.New("cwd escapes Workspace root")
+		}
+		cwd = clean
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = cwd
+	cmd.Env = os.Environ()
+	if env, ok := op.Spec["env"].(map[string]any); ok {
+		for key, value := range env {
+			val, ok := value.(string)
+			if !ok {
+				return nil, errors.New("invalid environment")
+			}
+			cmd.Env = append(cmd.Env, key+"="+val)
+		}
+	}
+	if stdin, ok := op.Spec["stdin"].(string); ok {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	if err := os.MkdirAll(s.executionDir(op.Execution), 0700); err != nil {
+		return nil, err
+	}
+	out, err := os.OpenFile(filepath.Join(s.executionDir(op.Execution), "stdout"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return nil, err
+	}
+	errout, err := os.OpenFile(filepath.Join(s.executionDir(op.Execution), "stderr"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		_ = out.Close()
+		return nil, err
+	}
+	cmd.Stdout, cmd.Stderr = &boundedOutput{file: out}, &boundedOutput{file: errout}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		_ = out.Close()
+		_ = errout.Close()
+		return nil, err
+	}
+	e := &LocalExecution{Execution: op.Execution, Workspace: op.Workspace, SpecHash: op.SpecHash, State: "running", PID: cmd.Process.Pid, ProcessGroup: cmd.Process.Pid, StartedAt: time.Now().UTC(), Stdout: filepath.Join(s.executionDir(op.Execution), "stdout"), Stderr: filepath.Join(s.executionDir(op.Execution), "stderr"), cmd: cmd}
+	executionMu.Lock()
+	executions[op.Execution] = e
+	executionMu.Unlock()
+	_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), e, 0600)
+	go func() {
+		timeout := 0.0
+		if raw, ok := op.Spec["timeout_seconds"].(float64); ok {
+			timeout = raw
+		}
+		var timer *time.Timer
+		var timeoutC <-chan time.Time
+		if timeout > 0 {
+			timer = time.NewTimer(time.Duration(timeout * float64(time.Second)))
+			timeoutC = timer.C
+			defer timer.Stop()
+		}
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+		select {
+		case <-done:
+		case <-timeoutC:
+			e.mu.Lock()
+			e.timedOut = true
+			e.mu.Unlock()
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				<-done
+			}
+		}
+		_ = out.Close()
+		_ = errout.Close()
+		now := time.Now().UTC()
+		code := cmd.ProcessState.ExitCode()
+		state := "exited"
+		if e.timedOut {
+			state = "timed_out"
+		}
+		if e.cancelled && !e.timedOut {
+			state = "cancelled"
+		}
+		e.mu.Lock()
+		e.State, e.FinishedAt, e.ExitCode = state, &now, &code
+		e.mu.Unlock()
+		_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), e, 0600)
+	}()
+	return e, nil
+}
+
+func signalNative(e *LocalExecution) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.State != "running" {
+		return nil
+	}
+	e.cancelled = true
+	return syscall.Kill(-e.ProcessGroup, syscall.SIGTERM)
+}
+
+func executionReport(e *LocalExecution) map[string]string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	read := func(path string) string {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		if len(b) > 1024*1024 {
+			b = b[:1024*1024]
+		}
+		return base64.StdEncoding.EncodeToString(b)
+	}
+	result := map[string]string{"execution": e.Execution, "status": e.State, "stdout_base64": read(e.Stdout), "stderr_base64": read(e.Stderr)}
+	if e.ExitCode != nil {
+		result["exit_code"] = strconv.Itoa(*e.ExitCode)
+	}
+	if e.TerminatingSignal != "" {
+		result["terminating_signal"] = e.TerminatingSignal
+	}
+	return result
 }
 
 func run(ctx context.Context, c *Client, store Store, id *Identity) error {
@@ -365,6 +618,26 @@ func handleOperation(ctx context.Context, c *Client, s Store, op Operation) erro
 			return err
 		}
 		return c.result(ctx, op, "destroyed", nil)
+	case "start_execution":
+		e, err := startNative(s, op)
+		if err != nil {
+			return c.result(ctx, op, "failed", map[string]string{"execution": op.Execution, "message": err.Error()})
+		}
+		extra := executionReport(e)
+		status := extra["status"]
+		return c.result(ctx, op, status, extra)
+	case "cancel_execution":
+		e, ok := localExecution(op)
+		if !ok {
+			return errors.New("execution is not known locally")
+		}
+		if err := signalNative(e); err != nil {
+			return err
+		}
+		e.mu.Lock()
+		e.State = "cancelled"
+		e.mu.Unlock()
+		return c.result(ctx, op, "cancelled", executionReport(e))
 	default:
 		return fmt.Errorf("unknown operation type %q", op.Type)
 	}

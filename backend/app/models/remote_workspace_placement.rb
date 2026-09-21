@@ -21,6 +21,29 @@ class RemoteWorkspacePlacement < ApplicationRecord
     }
   end
 
+  def execution_payload(execution)
+    {
+      "type" => "start_execution",
+      "workspace" => workspace.ref,
+      "operation_id" => execution.remote_operation_id,
+      "execution" => execution.ref,
+      "executor" => executor,
+      "spec_hash" => execution.spec_hash,
+      "spec" => execution.remote_spec
+    }
+  end
+
+  def cancel_payload(execution)
+    {
+      "type" => "cancel_execution",
+      "workspace" => workspace.ref,
+      "operation_id" => execution.cancel_operation_id,
+      "execution" => execution.ref,
+      "executor" => executor,
+      "spec_hash" => execution.spec_hash
+    }
+  end
+
   def replace_operation!(kind:)
     update!(operation_kind: kind, operation_id: "WSOP-#{SecureRandom.hex(16)}", state: "pending", error_message: nil)
   end
