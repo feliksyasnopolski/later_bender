@@ -12,6 +12,7 @@ gem "json", "< 3"
 gem "bcrypt", "~> 3.1"
 gem "rotp"
 gem "rqrcode"
+gem "ed25519", "~> 1.4"
 gem "rack-cors"
 gem "chewy", "~> 8.0"
 

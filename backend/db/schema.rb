@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_21_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -205,6 +205,62 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_130000) do
     t.index ["user_id"], name: "index_projects_on_user_id"
   end
 
+  create_table "remote_agent_challenges", force: :cascade do |t|
+    t.string "challenge_id", null: false
+    t.datetime "consumed_at"
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "nonce_digest", null: false
+    t.bigint "remote_agent_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["challenge_id"], name: "index_remote_agent_challenges_on_challenge_id", unique: true
+    t.index ["remote_agent_id"], name: "index_remote_agent_challenges_on_remote_agent_id"
+  end
+
+  create_table "remote_agent_enrollment_tokens", force: :cascade do |t|
+    t.datetime "consumed_at"
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "token_digest", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["token_digest"], name: "index_remote_agent_enrollment_tokens_on_digest", unique: true
+    t.index ["user_id"], name: "index_remote_agent_enrollment_tokens_on_user_id"
+  end
+
+  create_table "remote_agent_sessions", force: :cascade do |t|
+    t.datetime "connected_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "disconnected_at"
+    t.datetime "last_heartbeat_at", null: false
+    t.bigint "remote_agent_id", null: false
+    t.string "token_digest", null: false
+    t.datetime "updated_at", null: false
+    t.index ["remote_agent_id", "disconnected_at"], name: "idx_on_remote_agent_id_disconnected_at_1cc0276ba4"
+    t.index ["remote_agent_id"], name: "index_remote_agent_sessions_on_remote_agent_id"
+    t.index ["token_digest"], name: "index_remote_agent_sessions_on_token_digest", unique: true
+  end
+
+  create_table "remote_agents", force: :cascade do |t|
+    t.string "architecture", null: false
+    t.jsonb "capabilities", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.boolean "enabled", default: true, null: false
+    t.datetime "last_seen_at"
+    t.string "name", null: false
+    t.string "platform", null: false
+    t.text "public_key", null: false
+    t.integer "public_number", null: false
+    t.string "ref", null: false
+    t.datetime "revoked_at"
+    t.jsonb "supported_executors", default: [], null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.index ["user_id", "public_number"], name: "index_remote_agents_on_user_id_and_public_number", unique: true
+    t.index ["user_id", "ref"], name: "index_remote_agents_on_user_id_and_ref", unique: true
+    t.index ["user_id"], name: "index_remote_agents_on_user_id"
+  end
+
   create_table "stored_files", force: :cascade do |t|
     t.string "archive_entry_path"
     t.bigint "archive_source_id"
@@ -367,6 +423,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_130000) do
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
   add_foreign_key "projects", "users"
+  add_foreign_key "remote_agent_challenges", "remote_agents"
+  add_foreign_key "remote_agent_enrollment_tokens", "users"
+  add_foreign_key "remote_agent_sessions", "remote_agents"
+  add_foreign_key "remote_agents", "users"
   add_foreign_key "stored_files", "projects"
   add_foreign_key "stored_files", "stored_files", column: "archive_source_id"
   add_foreign_key "task_notes", "notes"

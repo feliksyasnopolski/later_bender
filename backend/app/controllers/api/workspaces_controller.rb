@@ -12,7 +12,7 @@ module Api
 
     def targets
       capabilities = runner.request(:get, "/capabilities")
-      render json: { targets: [ hosted_target(capabilities) ] }
+      render json: { targets: [ hosted_target(capabilities), *remote_agent_targets ] }
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
     end
@@ -292,6 +292,21 @@ module Api
         resources: architecture["resources"],
         capabilities: architecture["capabilities"] || {}
       }
+    end
+
+    def remote_agent_targets
+      current_user.remote_agents.where(enabled: true, revoked_at: nil).order(:public_number).map do |agent|
+        {
+          ref: agent.ref,
+          kind: "remote_agent",
+          name: agent.name,
+          availability: agent.online? ? "online" : "offline",
+          last_seen_at: agent.last_seen_at,
+          platform: { environment: agent.platform, architectures: [ agent.architecture ] },
+          supported_executors: agent.supported_executors,
+          capabilities: agent.capabilities
+        }
+      end
     end
 
     def execution_attributes(result)

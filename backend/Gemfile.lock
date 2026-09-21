@@ -111,6 +111,7 @@ GEM
     doorkeeper (5.9.7)
       railties (>= 5)
     drb (2.2.3)
+    ed25519 (1.4.0)
     elastic-transport (8.5.3)
       faraday (< 3)
       multi_json
@@ -367,6 +368,7 @@ DEPENDENCIES
   debug
   devise
   doorkeeper (~> 5.9)
+  ed25519 (~> 1.4)
   factory_bot_rails
   json (< 3)
   openapi_parser
@@ -414,6 +416,7 @@ CHECKSUMS
   diff-lcs (1.6.2) sha256=9ae0d2cba7d4df3075fe8cd8602a8604993efc0dfa934cff568969efb1909962
   doorkeeper (5.9.7) sha256=aa27426a84a1ee0676eee54528e8c247b543a9a441f2571633720617fcb37c11
   drb (2.2.3) sha256=0b00d6fdb50995fe4a45dea13663493c841112e4068656854646f418fda13373
+  ed25519 (1.4.0) sha256=16e97f5198689a154247169f3453ef4cfd3f7a47481fde0ae33206cdfdcac506
   elastic-transport (8.5.3) sha256=3bf036afb10728a58591593bc48fd736ea9fe2bf7b1252810e774340dcfe58c4
   elasticsearch (8.19.3) sha256=3fe0275073a93730778bce33ceb76dd098d2feea499d3ecf7984790c474deb98
   elasticsearch-api (8.19.3) sha256=dc8029b596cc82f9a3a8c9dcc8a1286b4485288c8e62f5ed540eb0540ce474f2

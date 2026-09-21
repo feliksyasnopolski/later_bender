@@ -1,0 +1,104 @@
+require "rails_helper"
+
+RSpec.describe "Remote Agent contract", type: :request do
+  let!(:user) { User.create!(username: "remote-agent-user", password: "password123") }
+  let!(:other_user) { User.create!(username: "other-remote-user", password: "password123") }
+  let!(:runner_capabilities) do
+    { "environments" => [ { "environment" => "linux", "architectures" => [ { "architecture" => "arm64", "os" => { "name" => "Linux", "version" => "6.8" }, "resources" => {}, "capabilities" => {} } ] } ] }
+  end
+  let(:key) { Ed25519::SigningKey.generate }
+  let(:advertisement) { { "name" => "Felix Mac", "platform" => "macos", "architecture" => "arm64", "supported_executors" => [ "native" ], "capabilities" => { "process_control" => "process_group" } } }
+
+  before do
+    _token, @raw_token = ApiToken.issue!(user:, name: "remote agent test")
+    allow_any_instance_of(WorkspaceRunnerClient).to receive(:request).with(:get, "/capabilities", anything).and_return(runner_capabilities)
+    allow_any_instance_of(WorkspaceRunnerClient).to receive(:request).with(:get, "/capabilities").and_return(runner_capabilities)
+  end
+
+  it "requires authentication to mint an enrollment token and stores only a public key on enrollment" do
+    post "/api/remote-agents/enrollment-tokens", headers: json_headers
+    expect(response).to have_http_status(:unauthorized)
+
+    post "/api/remote-agents/enrollment-tokens", headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:created)
+    token = json_body.fetch("token")
+    expect(token).to match(/\A[0-9a-f]{64}\z/)
+    expect(RemoteAgentEnrollmentToken.last.token_digest).not_to eq(token)
+
+    post "/api/remote-agent/enroll", params: advertisement.merge("enrollment_token" => token, "public_key" => Base64.strict_encode64(key.verify_key.to_bytes)).to_json, headers: json_headers
+    expect(response).to have_http_status(:created)
+    expect(json_body.fetch("ref")).to eq("RA-1")
+    agent = user.remote_agents.first
+    expect(agent.public_key).to eq(Base64.strict_encode64(key.verify_key.to_bytes))
+    expect(agent.attributes.keys).not_to include("private_key")
+
+    post "/api/remote-agent/enroll", params: advertisement.merge("enrollment_token" => token, "public_key" => Base64.strict_encode64(key.verify_key.to_bytes)).to_json, headers: json_headers
+    expect(response).to have_http_status(:unprocessable_content)
+    expect(user.remote_agents.count).to eq(1)
+  end
+
+  it "authenticates a signed challenge, replaces sessions, refreshes capabilities, and projects truthful targets" do
+    agent = enroll_agent
+    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    challenge = json_body
+    signature = key.sign(challenge.fetch("signed_bytes"))
+    post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(signature) }.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
+    session_token = json_body.fetch("session_token")
+
+    post "/api/remote-agent/heartbeat", params: advertisement.merge("name" => "Felix Mac Updated").to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:ok)
+    expect(agent.reload.capabilities).to eq("process_control" => "process_group")
+
+    get "/api/workspaces/targets", headers: json_headers(@raw_token)
+    remote = json_body.fetch("targets").find { |target| target["ref"] == agent.ref }
+    expect(remote).to include("name" => "Felix Mac", "availability" => "online", "supported_executors" => [ "native" ])
+    expect(remote).not_to have_key("session_token")
+
+    post "/api/remote-agents/#{agent.ref}/revoke", headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:ok)
+    post "/api/remote-agent/heartbeat", params: advertisement.to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:unauthorized)
+    get "/api/workspaces/targets", headers: json_headers(@raw_token)
+    expect(json_body.fetch("targets").map { |target| target["ref"] }).not_to include(agent.ref)
+  end
+
+  it "rejects a replayed challenge and an expired enrollment token" do
+    post "/api/remote-agents/enrollment-tokens", headers: json_headers(@raw_token)
+    enrollment_token = json_body.fetch("token")
+    RemoteAgentEnrollmentToken.last.update!(expires_at: 1.second.ago)
+    post "/api/remote-agent/enroll", params: advertisement.merge("enrollment_token" => enrollment_token, "public_key" => Base64.strict_encode64(key.verify_key.to_bytes)).to_json, headers: json_headers
+    expect(response).to have_http_status(:unprocessable_content)
+
+    agent = enroll_agent
+    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    challenge = json_body
+    params = { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(key.sign(challenge.fetch("signed_bytes"))) }
+    post "/api/remote-agent/authenticate", params: params.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
+    post "/api/remote-agent/authenticate", params: params.to_json, headers: json_headers
+    expect(response).to have_http_status(:unauthorized)
+  end
+
+  it "rejects the wrong key and cross-user access" do
+    agent = enroll_agent
+    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    challenge = json_body
+    wrong_key = Ed25519::SigningKey.generate
+    post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(wrong_key.sign(challenge.fetch("signed_bytes"))) }.to_json, headers: json_headers
+    expect(response).to have_http_status(:unauthorized)
+
+    _other_token, other_raw = ApiToken.issue!(user: other_user, name: "other")
+    post "/api/remote-agents/#{agent.ref}/revoke", headers: json_headers(other_raw)
+    expect(response).to have_http_status(:not_found)
+  end
+
+  private
+
+  def enroll_agent
+    post "/api/remote-agents/enrollment-tokens", headers: json_headers(@raw_token)
+    enrollment_token = json_body.fetch("token")
+    post "/api/remote-agent/enroll", params: advertisement.merge("enrollment_token" => enrollment_token, "public_key" => Base64.strict_encode64(key.verify_key.to_bytes)).to_json, headers: json_headers
+    user.remote_agents.first
+  end
+end

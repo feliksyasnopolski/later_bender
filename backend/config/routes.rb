@@ -17,6 +17,13 @@ Rails.application.routes.draw do
     get "search", to: "search#index"
     get "workspaces/capabilities", to: "workspaces#capabilities"
     get "workspaces/targets", to: "workspaces#targets"
+    post "remote-agents/enrollment-tokens", to: "remote_agents#enrollment_token"
+    get "remote-agents", to: "remote_agents#index"
+    post "remote-agents/:ref/revoke", to: "remote_agents#revoke"
+    post "remote-agent/enroll", to: "remote_agent_protocol#enroll"
+    post "remote-agent/challenge", to: "remote_agent_protocol#challenge"
+    post "remote-agent/authenticate", to: "remote_agent_protocol#authenticate"
+    post "remote-agent/heartbeat", to: "remote_agent_protocol#heartbeat"
     resources :credentials, only: %i[index create show update destroy]
     resources :workspaces, only: %i[index create]
     get "workspaces/:ref", to: "workspaces#show"

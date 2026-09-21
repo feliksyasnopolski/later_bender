@@ -66,6 +66,7 @@ RSpec.configure do |config|
     "/api/auth/login", "/api/auth/current", "/api/projects", "/api/projects/{project_slug}/tasks",
     "/api/search", "/api/notes/{id}/edit"
   ]
+  public_remote_agent_paths = %w[/api/remote-agent/enroll /api/remote-agent/challenge /api/remote-agent/authenticate]
   Rails.application.routes.routes.each do |route|
     route_path = route.path.spec.to_s.sub("(.:format)", "").gsub(/:([a-z_]+)/, '{\\1}')
     next unless route_path.start_with?("/api/")
@@ -99,7 +100,7 @@ RSpec.configure do |config|
         tags: [ route.defaults[:controller].to_s.delete_prefix("api/").split("/").first.capitalize ],
         responses: responses
       }
-      operation[:security] = [ { bearerAuth: [] } ] unless [ "/api/auth/login", "/api/auth/recover" ].include?(route_path)
+      operation[:security] = [ { bearerAuth: [] } ] unless [ "/api/auth/login", "/api/auth/recover", *public_remote_agent_paths ].include?(route_path)
       unless fully_specified_paths.include?(route_path)
         operation[:parameters] = case route_path
         when "/api/tasks"
