@@ -2,7 +2,7 @@ module Api
   class WorkspacesController < BaseController
     require "base64"
     EXECUTION_OBSERVATION_WINDOW_SECONDS = 5.0
-    REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS = 5.0
+    REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS = 6.5
     REMOTE_EXECUTION_OBSERVATION_WINDOW_SECONDS = 2.5
     REMOTE_OBSERVATION_INTERVAL_SECONDS = 0.1
     before_action :set_workspace, only: %i[show destroy put_file read_file promote_file execute execution output cancel transcript promote_transcript]
