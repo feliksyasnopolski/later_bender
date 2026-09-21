@@ -27,6 +27,12 @@ test("Workspace schemas keep capability and resource identifiers open", () => {
   assert.equal(registered.create_workspace.inputSchema.safeParse({}).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({ target: "RA-1", executor: "native" }).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({ executor: "unsupported" }).success, false);
+  assert.equal(registered.create_workspace.outputSchema.safeParse({ workspace: {
+    ref: "WS-1", label: null, state: "starting", environment: "macos", architecture: "arm64",
+    os: { name: "macOS", version: "unknown" }, shell: "/bin/bash", workspace_root: "/workspace",
+    limits: { cpus: 1, memory_bytes: 1, disk_bytes: 1, pids: 1 }, capabilities: {}, created_at: "2026-01-01T00:00:00Z", last_activity_at: "2026-01-01T00:00:00Z", expires_at: null,
+    target: "RA-1", executor: "native", availability: "online"
+  }}).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({ environment: "future-linux", architecture: "riscv64", resources: { min_cpus: 1.5, min_memory_bytes: 1024 } }).success, true);
   assert.equal(registered.create_workspace.outputSchema.safeParse({ workspace: {
     ref: "WS-1", label: null, state: "ready", environment: "future-linux", architecture: "riscv64",

@@ -26,6 +26,8 @@ module Api
     def create
       payload = request_payload
       validate_target_selection!(payload)
+      return create_remote_workspace(payload) if payload["target"].present? && payload["target"] != "hosted"
+
       refs = Array(payload["credentials"])
       raise WorkspaceRunnerClient::Unavailable.new("Credential was not found", code: "credential_not_found") if refs.length > 32 || refs.uniq.length != refs.length
       credentials = current_user.credentials.where(ref: refs).index_by(&:ref)
@@ -57,6 +59,14 @@ module Api
     def show = render json: full(@workspace)
 
     def destroy
+      if (placement = @workspace.remote_workspace_placement)
+        raise WorkspaceRunnerClient::Unavailable.new("Remote Workspace target is offline", code: "workspace_unavailable") unless placement.remote_agent.online?
+
+        placement.replace_operation!(kind: "destroy")
+        @workspace.update!(state: "stopping")
+        @workspace.append_event!("workspace_destroy_requested", { "operation_id" => placement.operation_id })
+        return render json: { ref: @workspace.ref, destroyed: false, state: "stopping" }, status: :accepted
+      end
       runner.request(:delete, "/workspaces/#{@workspace.runner_handle}") if @workspace.runner_handle.present?
       @workspace.update!(state: "stopping")
       @workspace.destroy!
@@ -94,6 +104,9 @@ module Api
     end
 
     def execute
+      if @workspace.remote_workspace_placement.present?
+        raise WorkspaceRunnerClient::Unavailable.new("Remote Workspace execution is not available yet", code: "executor_unsupported")
+      end
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/executions", request_payload)
       execution = @workspace.workspace_executions.create!(execution_attributes(result))
       @workspace.append_event!("execution", transcript_execution_payload(result, execution))
@@ -255,6 +268,48 @@ module Api
       { label: payload["label"], state: result.fetch("state", "ready"), environment: result.fetch("environment", payload["environment"] || "linux"), architecture: result.fetch("architecture", payload["architecture"] || "arm64"), os_name: result.dig("os", "name") || "Linux", os_version: result.dig("os", "version") || "unknown", shell: result.fetch("shell", "/bin/bash"), workspace_root: result.fetch("workspace_root", "/workspace"), limits: result.fetch("limits", {}), capabilities: result.fetch("capabilities", {}), runner_handle: result["runner_handle"] || result["ref"], last_activity_at: Time.current, expires_at: result["expires_at"] }
     end
 
+    def create_remote_workspace(payload)
+      agent = current_user.remote_agents.find_by(ref: payload.fetch("target"))
+      raise WorkspaceRunnerClient::Unavailable.new("Workspace target is not available: #{payload["target"]}", code: "target_not_found") unless agent&.enabled? && agent.revoked_at.nil?
+      raise WorkspaceRunnerClient::Unavailable.new("Workspace target is offline", code: "workspace_unavailable") unless agent.online?
+
+      executor = payload["executor"].presence || "native"
+      unless agent.supported_executors.include?(executor)
+        raise WorkspaceRunnerClient::Unavailable.new("Executor #{executor} is not supported by #{agent.ref}", code: "executor_unsupported")
+      end
+      requested_architecture = payload["architecture"].presence
+      if requested_architecture.present? && requested_architecture != agent.architecture
+        raise WorkspaceRunnerClient::Unavailable.new("Workspace target does not satisfy the requested architecture", code: "capability_unavailable")
+      end
+      capabilities = Array(payload["required_capabilities"]).map(&:to_s)
+      missing = capabilities.reject { |capability| agent.capabilities[capability] == true || agent.capabilities[capability].to_s == "true" }
+      raise WorkspaceRunnerClient::Unavailable.new("Workspace target is missing required capabilities: #{missing.join(", ")}", code: "capability_unavailable") if missing.any?
+
+      spec = {
+        "environment" => payload["environment"].presence || agent.platform,
+        "architecture" => agent.architecture,
+        "resources" => payload["resources"] || {},
+        "required_capabilities" => capabilities,
+        "label" => payload["label"]
+      }
+      digest = Digest::SHA256.hexdigest(JSON.generate(spec))
+      workspace = nil
+      current_user.workspaces.transaction do
+        workspace = current_user.workspaces.create!(
+          label: payload["label"], state: "starting", environment: spec["environment"], architecture: agent.architecture,
+          os_name: agent.platform, os_version: "unknown", shell: "/bin/bash", workspace_root: "/workspace",
+          limits: { "cpus" => 1, "memory_bytes" => 1, "disk_bytes" => 1, "pids" => 1 }, capabilities: agent.capabilities, last_activity_at: Time.current, expires_at: payload["ttl_seconds"].present? ? payload["ttl_seconds"].to_i.seconds.from_now : nil
+        )
+        placement = workspace.create_remote_workspace_placement!(remote_agent: agent, executor:, operation_id: "WSOP-#{SecureRandom.hex(16)}", spec_hash: digest, spec:)
+        workspace.append_event!("workspace_created", { "target" => agent.ref, "executor" => executor, "operation_id" => placement.operation_id })
+      end
+      render json: full(workspace), status: :created
+    rescue ActiveRecord::RecordInvalid
+      raise
+    rescue WorkspaceRunnerClient::Unavailable => e
+      render_runner_error(e)
+    end
+
     def validate_binding_conflicts!(bindings)
       raise WorkspaceRunnerClient::Unavailable.new("Credential conflict", code: "credential_conflict") if bindings.map { |b| b["ref"] }.uniq.length != bindings.length
       env_names = bindings.filter_map { |b| b["env_name"] }
@@ -266,9 +321,7 @@ module Api
 
     def validate_target_selection!(payload)
       target = payload["target"].presence || "hosted"
-      unless target == "hosted"
-        raise WorkspaceRunnerClient::Unavailable.new("Workspace target is not available: #{target}", code: "target_not_found")
-      end
+      return if target != "hosted"
       return if payload["executor"].blank?
 
       raise WorkspaceRunnerClient::Unavailable.new("Executor #{payload["executor"]} is not supported by the hosted target", code: "executor_unsupported")
@@ -302,7 +355,8 @@ module Api
           name: agent.name,
           availability: agent.online? ? "online" : "offline",
           last_seen_at: agent.last_seen_at,
-          platform: { environment: agent.platform, architectures: [ agent.architecture ] },
+          platform: { environment: agent.platform, os: { name: agent.platform, version: "unknown" }, architectures: [ agent.architecture ] },
+          resources: nil,
           supported_executors: agent.supported_executors,
           capabilities: agent.capabilities
         }
@@ -320,7 +374,11 @@ module Api
     end
 
     def summary(workspace) = full(workspace).slice(:ref, :label, :state, :environment, :architecture, :created_at, :last_activity_at, :expires_at)
-    def full(workspace) = { ref: workspace.ref, label: workspace.label, state: workspace.state, environment: workspace.environment, architecture: workspace.architecture, os: workspace.os, shell: workspace.shell, workspace_root: workspace.workspace_root, limits: workspace.limits, capabilities: workspace.capabilities, credential_bindings: workspace.credential_bindings, created_at: workspace.created_at, last_activity_at: workspace.last_activity_at, expires_at: workspace.expires_at }
+    def full(workspace)
+      placement = workspace.remote_workspace_placement
+      { ref: workspace.ref, label: workspace.label, state: workspace.state, environment: workspace.environment, architecture: workspace.architecture, os: workspace.os, shell: workspace.shell, workspace_root: workspace.workspace_root, limits: workspace.limits, capabilities: workspace.capabilities, credential_bindings: workspace.credential_bindings, created_at: workspace.created_at, last_activity_at: workspace.last_activity_at, expires_at: workspace.expires_at,
+        target: placement&.remote_agent&.ref || "hosted", executor: placement&.executor, availability: placement ? (placement.remote_agent.online? ? "online" : "offline") : "available" }
+    end
     def execution_json(execution) = { ref: execution.ref, workspace: @workspace.ref, sequence: execution.sequence, state: execution.state, invocation: execution.invocation, cwd: execution.cwd, env: execution.env, secret_env_names: execution.secret_env_names, started_at: execution.started_at, finished_at: execution.finished_at, exit_code: execution.exit_code, terminating_signal: execution.terminating_signal, requested_timeout_seconds: timeout_seconds_value(execution.requested_timeout_seconds), stdout: stream_projection(execution, :stdout), stderr: stream_projection(execution, :stderr) }
     def timeout_seconds_value(value) = value.nil? ? nil : value.to_f
     def stream_projection(execution, stream)
@@ -331,7 +389,7 @@ module Api
     end
     def render_runner_error(error)
       code = error.respond_to?(:code) && error.code.present? ? error.code : "workspace_unavailable"
-      status = %w[invalid_range invalid_cursor not_text path_invalid path_not_found path_exists path_not_file credential_not_found credential_conflict credential_injection_failed target_not_found executor_unsupported].include?(code) ? :unprocessable_content : :service_unavailable
+      status = %w[invalid_range invalid_cursor not_text path_invalid path_not_found path_exists path_not_file credential_not_found credential_conflict credential_injection_failed target_not_found executor_unsupported capability_unavailable].include?(code) ? :unprocessable_content : :service_unavailable
       render json: { error: { code:, message: error.message } }, status:
     end
   end

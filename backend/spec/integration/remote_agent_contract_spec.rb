@@ -93,6 +93,42 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(response).to have_http_status(:not_found)
   end
 
+  it "allocates the canonical Workspace before exposing an idempotent prepare operation" do
+    agent = enroll_agent
+    session_token = authenticate_agent(agent)
+
+    post "/api/workspaces", params: { target: agent.ref, executor: "native", label: "remote test" }.to_json, headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:created)
+    workspace = Workspace.find_by!(ref: json_body.fetch("ref"))
+    placement = workspace.remote_workspace_placement
+    expect(placement).to be_present
+    expect(workspace.state).to eq("starting")
+
+    get "/api/remote-agent/operations", headers: json_headers(session_token)
+    operation = json_body.fetch("operations").sole
+    expect(operation).to include("workspace" => workspace.ref, "operation_id" => placement.operation_id, "executor" => "native")
+
+    post "/api/remote-agent/operations/#{placement.operation_id}/result", params: operation.merge("status" => "prepared", "provider_workspace_ref" => "local-#{workspace.ref}").to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:ok)
+    expect(workspace.reload.state).to eq("ready")
+    expect(workspace.remote_workspace_placement.reload.state).to eq("ready")
+
+    post "/api/remote-agent/operations/#{placement.operation_id}/result", params: operation.merge("status" => "prepared").to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:ok)
+    expect(workspace.reload.remote_workspace_placement.state).to eq("ready")
+
+    get "/api/workspaces/#{workspace.ref}", headers: json_headers(@raw_token)
+    expect(json_body).to include("target" => agent.ref, "executor" => "native", "availability" => "online")
+  end
+
+  it "does not fail over or create a Workspace when the selected Agent is offline" do
+    agent = enroll_agent
+    post "/api/workspaces", params: { target: agent.ref, executor: "native" }.to_json, headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:service_unavailable)
+    expect(json_body.dig("error", "code")).to eq("workspace_unavailable")
+    expect(user.workspaces).to be_empty
+  end
+
   private
 
   def enroll_agent
@@ -100,5 +136,12 @@ RSpec.describe "Remote Agent contract", type: :request do
     enrollment_token = json_body.fetch("token")
     post "/api/remote-agent/enroll", params: advertisement.merge("enrollment_token" => enrollment_token, "public_key" => Base64.strict_encode64(key.verify_key.to_bytes)).to_json, headers: json_headers
     user.remote_agents.first
+  end
+
+  def authenticate_agent(agent)
+    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    challenge = json_body
+    post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(key.sign(challenge.fetch("signed_bytes"))) }.to_json, headers: json_headers
+    json_body.fetch("session_token")
   end
 end

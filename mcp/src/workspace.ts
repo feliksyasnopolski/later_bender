@@ -81,6 +81,9 @@ const workspace = z.object({
   created_at: timestamp,
   last_activity_at: timestamp,
   expires_at: timestamp.nullable(),
+  target: z.string().optional(),
+  executor: z.enum(["native", "docker"]).nullable().optional(),
+  availability: z.string().optional(),
 });
 const workspaceSummary = z.object({
   ref: opaqueRef,

@@ -24,6 +24,8 @@ Rails.application.routes.draw do
     post "remote-agent/challenge", to: "remote_agent_protocol#challenge"
     post "remote-agent/authenticate", to: "remote_agent_protocol#authenticate"
     post "remote-agent/heartbeat", to: "remote_agent_protocol#heartbeat"
+    get "remote-agent/operations", to: "remote_agent_protocol#operations"
+    post "remote-agent/operations/:operation_id/result", to: "remote_agent_protocol#operation_result"
     resources :credentials, only: %i[index create show update destroy]
     resources :workspaces, only: %i[index create]
     get "workspaces/:ref", to: "workspaces#show"

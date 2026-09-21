@@ -2,6 +2,7 @@ class Workspace < ApplicationRecord
   belongs_to :user
   has_many :workspace_executions, dependent: :delete_all
   has_many :workspace_events, dependent: :delete_all
+  has_one :remote_workspace_placement, dependent: :destroy
 
   before_validation :assign_public_identity, on: :create
 

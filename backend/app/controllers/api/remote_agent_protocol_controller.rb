@@ -1,7 +1,7 @@
 module Api
   class RemoteAgentProtocolController < ActionController::API
     require "base64"
-    before_action :set_session, only: :heartbeat
+    before_action :set_session, only: %i[heartbeat operations operation_result]
 
     def enroll
       payload = request_payload
@@ -59,6 +59,49 @@ module Api
       render json: { error: { code: "validation_failed", message: "Invalid heartbeat" } }, status: :unprocessable_content
     end
 
+    def operations
+      operations = @session.remote_agent.remote_workspace_placements
+        .where(state: %w[pending preparing]).includes(:workspace).order(:created_at)
+      operations.each { |placement| placement.update!(state: "preparing") if placement.state == "pending" }
+      render json: { operations: operations.map(&:prepare_payload) }
+    end
+
+    def operation_result
+      placement = @session.remote_agent.remote_workspace_placements.find_by!(operation_id: params[:operation_id])
+      payload = request_payload
+      raise ArgumentError unless payload.fetch("operation_id") == placement.operation_id
+      raise ArgumentError unless payload.fetch("workspace") == placement.workspace.ref
+      raise ArgumentError unless payload.fetch("spec_hash") == placement.spec_hash
+
+      case payload.fetch("status")
+      when "prepared"
+        placement.with_lock do
+          placement.update!(state: "ready", provider_workspace_ref: printable_value(payload["provider_workspace_ref"], 200), prepared_at: placement.prepared_at || Time.current)
+          placement.workspace.update!(state: "ready", last_activity_at: Time.current)
+          placement.workspace.append_event!("workspace_prepared", {}) unless placement.workspace.workspace_events.exists?(kind: "workspace_prepared")
+        end
+      when "failed"
+        message = printable_value(payload.fetch("message"), 500)
+        placement.with_lock do
+          placement.update!(state: "failed", error_message: message)
+          placement.workspace.update!(state: "failed", last_activity_at: Time.current)
+        end
+      when "destroyed"
+        raise ArgumentError unless placement.operation_kind == "destroy"
+        placement.with_lock do
+          placement.update!(state: "destroyed", prepared_at: nil)
+          placement.workspace.destroy!
+        end
+      else
+        raise ArgumentError
+      end
+      render json: { operation_id: placement.operation_id, workspace: placement.workspace.ref, state: placement.state }
+    rescue KeyError, ArgumentError, ActiveRecord::RecordInvalid
+      render json: { error: { code: "validation_failed", message: "Invalid Workspace operation result" } }, status: :unprocessable_content
+    rescue ActiveRecord::RecordNotFound
+      render json: { error: { code: "operation_not_found", message: "Workspace operation was not found" } }, status: :not_found
+    end
+
     private
 
     def request_payload
@@ -97,6 +140,13 @@ module Api
       raise ArgumentError unless capabilities.is_a?(Hash) && capabilities.length <= 32 && capabilities.all? { |key, value| key.to_s.match?(/\A[a-z0-9_.-]{1,64}\z/) && (value == true || value == false || value.is_a?(String) && value.bytesize <= 200) }
 
       { name: payload.fetch("name").to_s.match?(/\A[[:print:]]{1,120}\z/) ? payload.fetch("name").to_s : (raise ArgumentError), platform:, architecture:, supported_executors: executors, capabilities: }
+    end
+
+    def printable_value(value, max)
+      return nil if value.nil?
+      value = value.to_s
+      raise ArgumentError unless value.match?("\\A[[:print:]]{1,#{max}}\\z")
+      value
     end
   end
 end

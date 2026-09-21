@@ -2,6 +2,7 @@ class RemoteAgent < ApplicationRecord
   belongs_to :user, inverse_of: :remote_agents
   has_many :remote_agent_challenges, dependent: :delete_all
   has_many :remote_agent_sessions, dependent: :delete_all
+  has_many :remote_workspace_placements, dependent: :restrict_with_exception
 
   EXECUTORS = %w[native docker].freeze
   HEARTBEAT_TIMEOUT = 90.seconds

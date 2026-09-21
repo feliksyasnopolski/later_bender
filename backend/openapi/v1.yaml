@@ -413,6 +413,69 @@ paths:
             schema:
               type: object
               additionalProperties: true
+  "/api/remote-agent/operations":
+    get:
+      summary: api/remote_agent_protocol#operations
+      tags:
+      - Remote_agent_protocol
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+  "/api/remote-agent/operations/{operation_id}/result":
+    post:
+      summary: api/remote_agent_protocol#operation_result
+      tags:
+      - Remote_agent_protocol
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: operation_id
+      in: path
+      required: true
+      schema:
+        type: string
   "/api/credentials":
     get:
       summary: api/credentials#index
