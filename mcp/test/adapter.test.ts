@@ -21,6 +21,13 @@ function apiFor(responses: Array<{ status: number; body: unknown }>, publicBaseU
   return { api, calls };
 }
 
+test("list_workspace_targets uses the target discovery endpoint", async () => {
+  const { api, calls } = apiFor([{ status: 200, body: { targets: [] } }]);
+  await api.listWorkspaceTargets();
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/workspaces/targets");
+  assert.equal(calls[0].init.method, undefined);
+});
+
 test("sends bearer auth and maps project and task endpoints", async () => {
   const { api, calls } = apiFor([{ status: 200, body: { projects: [], next_cursor: null } }, { status: 200, body: {} }, { status: 200, body: { tasks: [], next_cursor: null } }]);
   await api.listProjects();

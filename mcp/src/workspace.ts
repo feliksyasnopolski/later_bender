@@ -40,6 +40,23 @@ const environmentOffering = z.object({
   description: z.string(),
   architectures: z.array(architectureOffering),
 });
+const workspaceTarget = z.object({
+  ref: opaqueRef,
+  kind: z.string(),
+  name: z.string(),
+  availability: z.enum(["available", "unavailable"]),
+  last_seen_at: timestamp.nullable(),
+  platform: z.object({
+    environment: z.string(),
+    os,
+    architectures: z.array(z.string()),
+  }),
+  supported_executors: z.array(z.enum(["native", "docker"])),
+  resources: z
+    .object({ default: resourceLimits, max: resourceLimits })
+    .nullable(),
+  capabilities: capabilityFlags,
+});
 const credentialBinding = z.object({
   ref: opaqueRef,
   name: z.string(),
@@ -288,6 +305,8 @@ async function workspaceOperation(
     switch (name) {
       case "get_workspace_capabilities":
         return api.getWorkspaceCapabilities();
+      case "list_workspace_targets":
+        return api.listWorkspaceTargets();
       case "create_workspace":
         return api.createWorkspace(input);
       case "list_workspaces":
@@ -376,10 +395,11 @@ const overwrite = {
   openWorldHint: false,
 };
 const workspaceFailure =
-  "Expected failures use stable error codes, including workspace_not_found, workspace_not_ready, workspace_unavailable, capability_unavailable, workspace_quota_exceeded, file_not_found, path_invalid, path_not_found, path_exists, path_not_file, not_text, execution_not_found, execution_not_running, invalid_range, invalid_cursor, and invalid_invocation.";
+  "Expected failures use stable error codes, including workspace_not_found, workspace_not_ready, workspace_unavailable, capability_unavailable, workspace_quota_exceeded, target_not_found, executor_unsupported, file_not_found, path_invalid, path_not_found, path_exists, path_not_file, not_text, execution_not_found, execution_not_running, invalid_range, invalid_cursor, and invalid_invocation.";
 
 export const workspaceToolNames = [
   "get_workspace_capabilities",
+  "list_workspace_targets",
   "create_workspace",
   "list_workspaces",
   "get_workspace",
@@ -416,11 +436,24 @@ export function registerWorkspaceTools(
   );
 
   server.registerTool(
+    "list_workspace_targets",
+    {
+      description: `List the logical execution targets available for Workspace placement. Results expose only compact effective runtime facts useful to the model; provider connection, session, journal, and container identities are omitted. ${workspaceFailure}`,
+      inputSchema: {},
+      outputSchema: { targets: z.array(workspaceTarget) },
+      annotations: readOnly,
+    },
+    runtime(api, "list_workspace_targets"),
+  );
+
+  server.registerTool(
     "create_workspace",
     {
       description: `Create a transient Workspace using optional minimum resource requirements and capability requirements. Every required capability must resolve true for the selected offering; otherwise return capability_unavailable. An empty object requests the normal useful default; requirements are minimums, not exact operator configuration, and are never silently substituted. ${workspaceFailure}`,
       inputSchema: {
         label: z.string().optional(),
+        target: z.string().optional(),
+        executor: z.enum(["native", "docker"]).optional(),
         environment: z.string().optional(),
         architecture: z.string().optional(),
         ttl_seconds: z.number().int().positive().max(604800).optional(),

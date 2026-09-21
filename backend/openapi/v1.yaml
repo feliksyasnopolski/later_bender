@@ -153,6 +153,28 @@ paths:
       security:
       - bearerAuth: []
       parameters: []
+  "/api/workspaces/targets":
+    get:
+      summary: api/workspaces#targets
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
   "/api/credentials":
     get:
       summary: api/credentials#index

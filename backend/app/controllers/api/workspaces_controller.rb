@@ -10,6 +10,13 @@ module Api
       render_runner_error(e)
     end
 
+    def targets
+      capabilities = runner.request(:get, "/capabilities")
+      render json: { targets: [ hosted_target(capabilities) ] }
+    rescue WorkspaceRunnerClient::Unavailable => e
+      render_runner_error(e)
+    end
+
     def index
       scope = current_user.workspaces.where.not(state: "stopping").order(:created_at, :id)
       scope = scope.where(state: params[:state]) if params[:state].present?
@@ -18,6 +25,7 @@ module Api
 
     def create
       payload = request_payload
+      validate_target_selection!(payload)
       refs = Array(payload["credentials"])
       raise WorkspaceRunnerClient::Unavailable.new("Credential was not found", code: "credential_not_found") if refs.length > 32 || refs.uniq.length != refs.length
       credentials = current_user.credentials.where(ref: refs).index_by(&:ref)
@@ -25,7 +33,7 @@ module Api
       bindings = credentials.values.map(&:metadata)
       validate_binding_conflicts!(bindings)
       injections = credentials.values.map { |credential| credential.metadata.merge("secret" => credential.secret) }
-      offering = runner.request(:post, "/workspaces", payload.except("credentials").merge("credential_injections" => injections))
+      offering = runner.request(:post, "/workspaces", payload.except("credentials", "target", "executor").merge("credential_injections" => injections))
       result = offering.fetch("workspace", offering)
       applied = Array(result["credential_injections_applied"] || offering["credential_injections_applied"])
       expected = bindings.map { |binding| binding.except("name") }.sort_by { |binding| binding["ref"] }
@@ -256,6 +264,36 @@ module Api
       end
     end
 
+    def validate_target_selection!(payload)
+      target = payload["target"].presence || "hosted"
+      unless target == "hosted"
+        raise WorkspaceRunnerClient::Unavailable.new("Workspace target is not available: #{target}", code: "target_not_found")
+      end
+      return if payload["executor"].blank?
+
+      raise WorkspaceRunnerClient::Unavailable.new("Executor #{payload["executor"]} is not supported by the hosted target", code: "executor_unsupported")
+    end
+
+    def hosted_target(capabilities)
+      offering = Array(capabilities["environments"]).first || {}
+      architecture = Array(offering["architectures"]).first || {}
+      {
+        ref: "hosted",
+        kind: "hosted",
+        name: "Hosted Workspace",
+        availability: "available",
+        last_seen_at: nil,
+        platform: {
+          environment: offering["environment"],
+          os: architecture["os"],
+          architectures: Array(offering["architectures"]).filter_map { |item| item["architecture"] }
+        },
+        supported_executors: [],
+        resources: architecture["resources"],
+        capabilities: architecture["capabilities"] || {}
+      }
+    end
+
     def execution_attributes(result)
       result = result.fetch("execution", result)
       { ref: result.fetch("ref"), sequence: result.fetch("sequence", @workspace.workspace_executions.maximum(:sequence).to_i + 1), state: result.fetch("state", "running"), invocation: result.fetch("invocation", {}), cwd: result.fetch("cwd", "/workspace"), env: result.fetch("env", {}), secret_env_names: result.fetch("secret_env_names", []), started_at: result.fetch("started_at", Time.current), finished_at: result["finished_at"], exit_code: result["exit_code"], terminating_signal: result["terminating_signal"], requested_timeout_seconds: result["requested_timeout_seconds"], stdout_handle: result.fetch("stdout_handle", SecureRandom.hex(8)), stderr_handle: result.fetch("stderr_handle", SecureRandom.hex(8)) }
@@ -278,7 +316,7 @@ module Api
     end
     def render_runner_error(error)
       code = error.respond_to?(:code) && error.code.present? ? error.code : "workspace_unavailable"
-      status = %w[invalid_range invalid_cursor not_text path_invalid path_not_found path_exists path_not_file credential_not_found credential_conflict credential_injection_failed].include?(code) ? :unprocessable_content : :service_unavailable
+      status = %w[invalid_range invalid_cursor not_text path_invalid path_not_found path_exists path_not_file credential_not_found credential_conflict credential_injection_failed target_not_found executor_unsupported].include?(code) ? :unprocessable_content : :service_unavailable
       render json: { error: { code:, message: error.message } }, status:
     end
   end

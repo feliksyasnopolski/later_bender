@@ -29,7 +29,9 @@ export type ApiErrorCode =
   | "empty_fetch"
   | "credential_not_found"
   | "credential_conflict"
-  | "credential_injection_failed";
+  | "credential_injection_failed"
+  | "target_not_found"
+  | "executor_unsupported";
 
 export class ApiError extends Error {
   constructor(
@@ -367,6 +369,9 @@ export class LaterBenderApi {
   }
   getWorkspaceCapabilities() {
     return this.request<unknown>("/api/workspaces/capabilities");
+  }
+  listWorkspaceTargets() {
+    return this.request<unknown>("/api/workspaces/targets");
   }
   createWorkspace(payload: Record<string, unknown>) {
     return this.request<unknown>("/api/workspaces", json("POST", payload));

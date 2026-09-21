@@ -18,7 +18,15 @@ test("registers exactly the frozen Workspace tool surface", () => {
 test("Workspace schemas keep capability and resource identifiers open", () => {
   const registered = tools();
   assert.deepEqual(Object.keys(registered.get_workspace_capabilities.inputSchema.shape), []);
+  assert.deepEqual(Object.keys(registered.list_workspace_targets.inputSchema.shape), []);
+  assert.equal(registered.list_workspace_targets.outputSchema.safeParse({ targets: [{
+    ref: "hosted", kind: "hosted", name: "Hosted Workspace", availability: "available", last_seen_at: null,
+    platform: { environment: "linux", os: { name: "Linux", version: "6.8" }, architectures: ["arm64"] },
+    supported_executors: [], resources: { default: { cpus: 1, memory_bytes: 1, disk_bytes: 1, pids: 1 }, max: { cpus: 1, memory_bytes: 1, disk_bytes: 1, pids: 1 } }, capabilities: { internet: true }
+  }] }).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({}).success, true);
+  assert.equal(registered.create_workspace.inputSchema.safeParse({ target: "RA-1", executor: "native" }).success, true);
+  assert.equal(registered.create_workspace.inputSchema.safeParse({ executor: "unsupported" }).success, false);
   assert.equal(registered.create_workspace.inputSchema.safeParse({ environment: "future-linux", architecture: "riscv64", resources: { min_cpus: 1.5, min_memory_bytes: 1024 } }).success, true);
   assert.equal(registered.create_workspace.outputSchema.safeParse({ workspace: {
     ref: "WS-1", label: null, state: "ready", environment: "future-linux", architecture: "riscv64",
