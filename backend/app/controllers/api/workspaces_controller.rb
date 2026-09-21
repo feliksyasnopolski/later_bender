@@ -2,7 +2,8 @@ module Api
   class WorkspacesController < BaseController
     require "base64"
     EXECUTION_OBSERVATION_WINDOW_SECONDS = 5.0
-    REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS = 2.5
+    REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS = 5.0
+    REMOTE_EXECUTION_OBSERVATION_WINDOW_SECONDS = 2.5
     REMOTE_OBSERVATION_INTERVAL_SECONDS = 0.1
     before_action :set_workspace, only: %i[show destroy put_file read_file promote_file execute execution output cancel transcript promote_transcript]
 
@@ -321,7 +322,7 @@ module Api
       execution
     end
     def observe_remote_execution!(execution)
-      observe_remote_operation do
+      observe_remote_operation(window: REMOTE_EXECUTION_OBSERVATION_WINDOW_SECONDS) do
         execution.reload
         break if execution.state != "running"
       end
@@ -341,8 +342,8 @@ module Api
         break if workspace.nil? || workspace.remote_workspace_placement&.state == "destroyed"
       end
     end
-    def observe_remote_operation
-      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS
+    def observe_remote_operation(window: REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + window
       loop do
         yield
         break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
