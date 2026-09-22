@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -48,6 +49,55 @@ func TestNativeExecutionCapturesOutputAndUsesStableIdentity(t *testing.T) {
 	}
 	if again, ok := localExecution(op); !ok || again != e {
 		t.Fatal("execution identity was not reused")
+	}
+}
+
+func TestCredentialFilesAreCreateOnlyAndWorkspaceScoped(t *testing.T) {
+	root := t.TempDir()
+	w := &Workspace{Root: root}
+	workspaceRoot := filepath.Join(root, "root")
+	if err := os.MkdirAll(workspaceRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(workspaceRoot, "root", "id_ed25519")
+	if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := []byte("pre-existing sentinel")
+	if err := os.WriteFile(target, sentinel, 0600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Lstat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureCredentialPathAvailable(w, target); err == nil {
+		t.Fatal("accepted an existing credential target")
+	}
+	after, err := os.Lstat(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Sys().(*syscall.Stat_t).Ino != after.Sys().(*syscall.Stat_t).Ino {
+		t.Fatal("existing credential inode changed")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(sentinel) || after.Mode().Perm() != 0600 {
+		t.Fatal("existing credential file changed")
+	}
+
+	symlink := filepath.Join(workspaceRoot, "root", "linked")
+	if err := os.Symlink(target, symlink); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureCredentialPathAvailable(w, symlink); err == nil {
+		t.Fatal("accepted a symlink credential target")
+	}
+	if _, err := os.Lstat(symlink); err != nil {
+		t.Fatal(err)
 	}
 }
 

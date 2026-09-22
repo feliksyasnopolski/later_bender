@@ -560,20 +560,6 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 						cmd.Env = append(cmd.Env, name+"="+secret)
 					}
 				}
-				if binding["kind"] == "file" {
-					filePath, _ := binding["file_path"].(string)
-					filePath = filepath.Join(root, "root", strings.TrimPrefix(filePath, "/root/"))
-					if err := os.MkdirAll(filepath.Dir(filePath), 0700); err != nil {
-						return nil, err
-					}
-					mode := os.FileMode(0400)
-					if numberValue(binding["file_mode"]) == 600 {
-						mode = 0600
-					}
-					if err := os.WriteFile(filePath, []byte(secret), mode); err != nil {
-						return nil, err
-					}
-				}
 			}
 		}
 	}
@@ -852,6 +838,11 @@ func provisionWorkspaceFiles(ctx context.Context, c *Client, s Store, ref string
 		return err
 	}
 	bindings, _ := credentials["__bindings"].([]any)
+	type materialization struct {
+		path, secret string
+		mode         os.FileMode
+	}
+	materializations := make([]materialization, 0, len(bindings))
 	for _, raw := range bindings {
 		binding, _ := raw.(map[string]any)
 		if binding["kind"] != "file" {
@@ -860,16 +851,71 @@ func provisionWorkspaceFiles(ctx context.Context, c *Client, s Store, ref string
 		ref, _ := binding["ref"].(string)
 		secret, _ := credentials[ref].(string)
 		filePath, _ := binding["file_path"].(string)
-		filePath = filepath.Join(w.Root, "root", strings.TrimPrefix(filePath, "/root/"))
-		if err := os.MkdirAll(filepath.Dir(filePath), 0700); err != nil {
+		filePath, err := credentialFileDestination(w, filePath)
+		if err != nil {
 			return err
 		}
 		mode := os.FileMode(0400)
 		if numberValue(binding["file_mode"]) == 600 {
 			mode = 0600
 		}
-		if err := os.WriteFile(filePath, []byte(secret), mode); err != nil {
+		materializations = append(materializations, materialization{path: filePath, secret: secret, mode: mode})
+	}
+	for _, item := range materializations {
+		if err := ensureCredentialPathAvailable(w, item.path); err != nil {
 			return err
+		}
+	}
+	for _, item := range materializations {
+		if err := os.MkdirAll(filepath.Dir(item.path), 0700); err != nil {
+			return err
+		}
+		file, err := os.OpenFile(item.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, item.mode)
+		if err != nil {
+			return errors.New("credential target is not safely create-only")
+		}
+		if _, err := file.WriteString(item.secret); err != nil {
+			_ = file.Close()
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func credentialFileDestination(w *Workspace, declared string) (string, error) {
+	if !strings.HasPrefix(declared, "/root/") {
+		return "", errors.New("credential path is outside the controlled native Workspace area")
+	}
+	path := filepath.Join(w.Root, "root", strings.TrimPrefix(declared, "/root/"))
+	clean, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	root, err := filepath.Abs(filepath.Join(w.Root, "root"))
+	if err != nil {
+		return "", err
+	}
+	if clean != root && !strings.HasPrefix(clean, root+string(filepath.Separator)) {
+		return "", errors.New("credential path escapes Workspace root")
+	}
+	return clean, nil
+}
+
+func ensureCredentialPathAvailable(w *Workspace, path string) error {
+	root, err := filepath.Abs(filepath.Join(w.Root, "root"))
+	if err != nil {
+		return err
+	}
+	for current := path; current != root; current = filepath.Dir(current) {
+		if info, statErr := os.Lstat(current); statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return errors.New("credential target path already exists or is unsafe")
+			}
+		} else if !os.IsNotExist(statErr) {
+			return statErr
 		}
 	}
 	return nil
