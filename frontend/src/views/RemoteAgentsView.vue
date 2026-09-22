@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { request } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { useLiveInvalidation } from '../useLiveInvalidation'
 import '../remote-agents.css'
 const auth=useAuthStore(), agents=ref([]), selectedRef=ref(''), loading=ref(true), error=ref(''), enrollment=ref(null), enrollmentLoading=ref(false), renameOpen=ref(false), rename=ref(''), saving=ref(false)
 const selected=computed(()=>agents.value.find(a=>a.ref===selectedRef.value)||null)
@@ -10,6 +11,7 @@ const knownCapabilityValues={process_control:{process_group:'Process group',cgro
 const humanize=value=>String(value).replace(/[_-]+/g,' ').replace(/\b\w/g,letter=>letter.toUpperCase())
 const capabilityFacts=computed(()=>Object.entries(selected.value?.capabilities||{}).map(([key,value])=>({label:knownCapabilityLabels[key]||humanize(key),value:knownCapabilityValues[key]?.[value]||humanize(value)})))
 const date=v=>v?new Date(v).toLocaleString():'Never'; const status=a=>a.revoked?'Revoked':a.availability==='online'?'Online':'Offline'
+useLiveInvalidation(load, ['remote_agent.updated'])
 async function load(){loading.value=true;error.value='';try{const d=await request('/remote-agents',{},auth.token);agents.value=d.agents||[];if(!agents.value.some(a=>a.ref===selectedRef.value))selectedRef.value=agents.value[0]?.ref||''}catch(e){error.value=e.message}finally{loading.value=false}}
 async function enroll(){enrollmentLoading.value=true;error.value='';try{enrollment.value=await request('/remote-agents/enrollment-tokens',{method:'POST',body:'{}'},auth.token)}catch(e){error.value=e.message}finally{enrollmentLoading.value=false}}
 function startRename(){rename.value=selected.value?.name||'';renameOpen.value=true}

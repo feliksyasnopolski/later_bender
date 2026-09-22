@@ -11,12 +11,14 @@ module Api
 
     def revoke
       current_user.remote_agents.find_by!(ref: params[:ref]).revoke!
+      LiveEvents.publish(user: current_user, type: "remote_agent.updated", ref: params[:ref])
       render json: { ref: params[:ref], revoked: true }
     end
 
     def update
       agent = current_user.remote_agents.find_by!(ref: params[:ref])
       agent.update!(name: params.require(:name).to_s.strip)
+      LiveEvents.publish(user: current_user, type: "remote_agent.updated", ref: agent.ref)
       render json: { agent: projection(agent) }
     end
 

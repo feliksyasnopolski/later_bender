@@ -15,6 +15,7 @@ module Api
 
     def create
       credential = current_user.credentials.create!(credential_params)
+      LiveEvents.publish(user: current_user, type: "credential.updated", ref: credential.ref)
       render json: metadata(credential), status: :created
     rescue ActiveRecord::RecordNotUnique
       render json: { error: { code: "credential_conflict", message: "Credential name is already in use" } }, status: :unprocessable_content
@@ -22,6 +23,7 @@ module Api
 
     def update
       @credential.update!(credential_params)
+      LiveEvents.publish(user: current_user, type: "credential.updated", ref: @credential.ref)
       render json: metadata(@credential)
     rescue ActiveRecord::RecordNotUnique
       render json: { error: { code: "credential_conflict", message: "Credential name is already in use" } }, status: :unprocessable_content
@@ -29,6 +31,7 @@ module Api
 
     def destroy
       @credential.destroy!
+      LiveEvents.publish(user: current_user, type: "credential.updated", ref: @credential.ref)
       render json: { ref: @credential.ref, destroyed: true }
     end
 

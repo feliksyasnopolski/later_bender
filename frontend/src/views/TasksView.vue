@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { request } from '../api'
 import { useAuthStore } from '../stores/auth'
+import { useLiveInvalidation } from '../useLiveInvalidation'
 
 const statuses = [{ id: 'backlog', label: 'Backlog' }, { id: 'ready', label: 'Ready' }, { id: 'doing', label: 'Doing' }, { id: 'done', label: 'Done' }]
 const route = useRoute(); const router = useRouter(); const auth = useAuthStore()
@@ -89,7 +90,7 @@ function dragOver(status, fallbackIndex, event) {
 async function moveSelected(direction) { if (!selected.value) return; const column = columns.value.find((item) => item.id === selected.value.status); const index = column.tasks.findIndex((item) => item.id === selected.value.id); draggingId.value = selected.value.id; await dropAt(column.id, Math.max(0, Math.min(column.tasks.length, index + direction))) }
 watch(() => route.fullPath, () => { if (selectedId.value) loadSelected(selectedId.value); else selected.value = null })
 watch(createOpen, (open) => { if (open) nextTick(() => createTitle.value?.focus()) })
-onMounted(load)
+onMounted(load); useLiveInvalidation(load, ['task.updated', 'project.updated'])
 </script>
 
 <template>

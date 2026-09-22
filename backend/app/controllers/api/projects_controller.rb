@@ -19,11 +19,13 @@ module Api
 
     def create
       project = current_user.projects.create!(project_params(request_payload))
+      LiveEvents.publish(user: current_user, type: "project.updated", ref: project.slug)
       render json: project_json(project), status: :created
     end
 
     def update
       @project.update!(project_params(request_payload))
+      LiveEvents.publish(user: current_user, type: "project.updated", ref: @project.slug)
       render json: project_json(@project)
     end
 

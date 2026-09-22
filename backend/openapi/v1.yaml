@@ -131,6 +131,28 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/live":
+    get:
+      summary: api/live#stream
+      tags:
+      - Live
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
   "/api/workspaces/capabilities":
     get:
       summary: api/workspaces#capabilities

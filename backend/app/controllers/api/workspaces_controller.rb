@@ -51,6 +51,7 @@ module Api
         workspace = current_user.workspaces.create!(workspace_attributes(offering, payload).merge(credential_bindings: bindings))
         workspace.append_event!("workspace_created", {})
       end
+      LiveEvents.publish(user: current_user, type: "workspace.updated", ref: workspace.ref)
       render json: full(workspace), status: :created
     rescue ActiveRecord::RecordInvalid
       runner.request(:delete, "/workspaces/#{offering.dig("workspace", "runner_handle") || offering.dig("workspace", "ref") || offering["runner_handle"] || offering["ref"]}") rescue nil
@@ -76,6 +77,7 @@ module Api
       runner.request(:delete, "/workspaces/#{@workspace.runner_handle}") if @workspace.runner_handle.present?
       @workspace.update!(state: "stopping")
       @workspace.destroy!
+      LiveEvents.publish(user: current_user, type: "workspace.updated", ref: @workspace.ref)
       render json: { ref: @workspace.ref, destroyed: true }
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
@@ -114,6 +116,7 @@ module Api
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/executions", request_payload)
       execution = @workspace.workspace_executions.create!(execution_attributes(result))
       @workspace.append_event!("execution", transcript_execution_payload(result, execution))
+      LiveEvents.publish(user: current_user, type: "workspace_execution.updated", ref: execution.ref, workspace_ref: @workspace.ref)
       observe_execution!(execution)
       render json: execution_json(execution), status: :created
     rescue WorkspaceRunnerClient::Unavailable => e

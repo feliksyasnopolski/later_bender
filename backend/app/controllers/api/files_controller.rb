@@ -26,6 +26,7 @@ module Api
     def create
       payload = request_payload
       file = StoredFileIngestor.call(project: @project, payload: payload["file"], url: payload["url"], filename: payload["filename"], tags: payload["tags"], related_task_refs: payload["related_task_refs"], related_note_ids: payload["related_note_ids"])
+      LiveEvents.publish(user: current_user, type: "file.created", ref: file.ref)
       render json: { ref: file.ref, updated_at: file.updated_at }, status: :created
     end
 
@@ -45,12 +46,14 @@ module Api
         replace_tasks(payload["related_task_refs"]) if payload.key?("related_task_refs")
         replace_notes(payload["related_note_ids"]) if payload.key?("related_note_ids")
       end
+      LiveEvents.publish(user: current_user, type: "file.updated", ref: @file.ref)
       render json: { ref: @file.ref, updated_at: @file.reload.updated_at }
     end
 
     def destroy
       ref = @file.ref
       @file.destroy!
+      LiveEvents.publish(user: current_user, type: "file.updated", ref: ref)
       render json: { ref: ref }
     end
 

@@ -36,6 +36,7 @@ module Api
         replace_related_files(task, payload["related_file_refs"]) if payload.key?("related_file_refs")
         replace_citations(task, payload["citations"]) if payload.key?("citations")
       end
+      LiveEvents.publish(user: current_user, type: "task.updated", ref: task.ref)
       render json: task_json(task), status: :created
     end
 
@@ -48,6 +49,7 @@ module Api
         replace_related_files(@task, payload["related_file_refs"]) if payload.key?("related_file_refs")
         replace_citations(@task, payload["citations"]) if payload.key?("citations")
       end
+      LiveEvents.publish(user: current_user, type: "task.updated", ref: @task.ref)
       render json: task_json(@task)
     end
 
@@ -56,7 +58,9 @@ module Api
     end
 
     def destroy
+      ref = @task.ref
       @task.destroy!
+      LiveEvents.publish(user: current_user, type: "task.updated", ref: ref)
       head :no_content
     end
 

@@ -59,6 +59,7 @@ module Api
         end
         @note.update!(body:)
       end
+      LiveEvents.publish(user: current_user, type: "note.updated", ref: @note.id.to_s)
       render json: note_json(@note)
     end
 
@@ -76,6 +77,7 @@ module Api
         TagReconciler.call(note, payload["tags"]) if payload.key?("tags")
         replace_citations(note, payload["citations"]) if payload.key?("citations")
       end
+      LiveEvents.publish(user: current_user, type: "note.updated", ref: note.id.to_s)
       render json: note_json(note), status: :created
     end
 
@@ -88,12 +90,14 @@ module Api
         TagReconciler.call(@note, payload["tags"]) if payload.key?("tags")
         replace_citations(@note, payload["citations"]) if payload.key?("citations")
       end
+      LiveEvents.publish(user: current_user, type: "note.updated", ref: @note.id.to_s)
       render json: note_json(@note)
     end
 
     def destroy
       id = @note.id
       @note.destroy!
+      LiveEvents.publish(user: current_user, type: "note.updated", ref: id.to_s)
       render json: { id: id }
     end
 

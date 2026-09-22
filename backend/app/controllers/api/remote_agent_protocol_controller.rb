@@ -44,6 +44,7 @@ module Api
       RemoteAgentCrypto.verify!(agent.public_key, payload.fetch("signature"), RemoteAgentCrypto.signed_bytes(agent.ref, challenge.challenge_id, nonce, challenge.expires_at))
       session, raw = RemoteAgentSession.issue!(remote_agent: agent)
       agent.update!(last_seen_at: Time.current)
+      LiveEvents.publish(user: agent.user, type: "remote_agent.updated", ref: agent.ref)
       render json: { session_token: raw, ref: agent.ref, connected_at: session.connected_at, heartbeat_interval_seconds: 30 }
     rescue KeyError, ActiveRecord::RecordNotFound, RemoteAgentCrypto::InvalidSignature
       render json: { error: { code: "authentication_failed", message: "Agent authentication failed" } }, status: :unauthorized
@@ -56,7 +57,9 @@ module Api
     def heartbeat
       payload = request_payload
       advertisement = normalized_advertisement(payload)
+      was_online = @session.remote_agent.online?
       @session.heartbeat!(**advertisement.except(:name))
+      LiveEvents.publish(user: @session.remote_agent.user, type: "remote_agent.updated", ref: @session.remote_agent.ref) unless was_online
       render json: { ref: @session.remote_agent.ref, last_seen_at: @session.reload.last_heartbeat_at, availability: "online" }
     rescue KeyError, ActiveRecord::RecordInvalid
       render json: { error: { code: "validation_failed", message: "Invalid heartbeat" } }, status: :unprocessable_content

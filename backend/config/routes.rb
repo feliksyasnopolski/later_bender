@@ -15,6 +15,7 @@ Rails.application.routes.draw do
     post "auth/login", to: "auth#login"
     get "auth/current", to: "auth#current"
     get "search", to: "search#index"
+    get "live", to: "live#stream"
     get "workspaces/capabilities", to: "workspaces#capabilities"
     get "workspaces/targets", to: "workspaces#targets"
     post "remote-agents/enrollment-tokens", to: "remote_agents#enrollment_token"
