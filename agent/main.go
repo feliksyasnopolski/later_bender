@@ -904,12 +904,12 @@ func credentialFileDestination(w *Workspace, declared string) (string, error) {
 	if !strings.HasPrefix(declared, "/root/") {
 		return "", errors.New("credential path is outside the controlled native Workspace area")
 	}
-	path := filepath.Join(w.Root, "root", strings.TrimPrefix(declared, "/root/"))
+	path := filepath.Join(w.Root, "root", "root", strings.TrimPrefix(declared, "/root/"))
 	clean, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
-	root, err := filepath.Abs(filepath.Join(w.Root, "root"))
+	root, err := filepath.Abs(filepath.Join(w.Root, "root", "root"))
 	if err != nil {
 		return "", err
 	}
@@ -920,7 +920,7 @@ func credentialFileDestination(w *Workspace, declared string) (string, error) {
 }
 
 func ensureCredentialPathAvailable(w *Workspace, path string) error {
-	root, err := filepath.Abs(filepath.Join(w.Root, "root"))
+	root, err := filepath.Abs(filepath.Join(w.Root, "root", "root"))
 	if err != nil {
 		return err
 	}
