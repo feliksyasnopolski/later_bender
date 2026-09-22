@@ -1,7 +1,7 @@
 module Api
   class RemoteAgentProtocolController < ActionController::API
     require "base64"
-    before_action :set_session, only: %i[heartbeat operations operation_result]
+    before_action :set_session, only: %i[heartbeat operations operation_result workspace_credentials workspace_file_download workspace_file_upload]
 
     def enroll
       payload = request_payload
@@ -74,12 +74,25 @@ module Api
         placement = execution.workspace.remote_workspace_placement
         execution.cancel_operation_id.present? ? placement.cancel_payload(execution) : placement.execution_payload(execution)
       end
-      render json: { operations: operations.map(&:prepare_payload) + execution_operations }
+      data_operations = RemoteWorkspaceOperation.joins(workspace: :remote_workspace_placement)
+        .where(remote_workspace_placements: { remote_agent_id: @session.remote_agent.id }, state: %w[pending running]).includes(:workspace).order(:created_at)
+      data_operations.each { |operation| operation.update!(state: "running") if operation.state == "pending" }
+      render json: { operations: operations.map(&:prepare_payload) + data_operations.map { |operation| { "type" => operation.kind, "workspace" => operation.workspace.ref, "operation_id" => operation.operation_id, "spec_hash" => operation.spec_hash, "spec" => operation.spec } } + execution_operations }
     end
 
     def operation_result
-      placement = @session.remote_agent.remote_workspace_placements.find_by!(operation_id: params[:operation_id])
       payload = request_payload
+      remote_operation = RemoteWorkspaceOperation.joins(workspace: :remote_workspace_placement).where(operation_id: params[:operation_id], remote_workspace_placements: { remote_agent_id: @session.remote_agent.id }).first
+      if remote_operation
+        raise ArgumentError unless payload.fetch("operation_id") == remote_operation.operation_id
+        raise ArgumentError unless payload.fetch("workspace") == remote_operation.workspace.ref && payload.fetch("spec_hash") == remote_operation.spec_hash
+        result = payload.except("operation_id", "workspace", "spec_hash", "status")
+        result["range"] = JSON.parse(result.delete("range_json")) if result["range_json"]
+        remote_operation.update!(state: payload.fetch("status") == "failed" ? "failed" : "succeeded", result:, error_message: payload["message"])
+        return render json: { operation_id: remote_operation.operation_id, workspace: remote_operation.workspace.ref, state: remote_operation.state }
+      end
+
+      placement = @session.remote_agent.remote_workspace_placements.find_by!(operation_id: params[:operation_id])
       raise ArgumentError unless payload.fetch("operation_id") == placement.operation_id
       raise ArgumentError unless payload.fetch("workspace") == placement.workspace.ref
       raise ArgumentError unless payload.fetch("spec_hash") == placement.spec_hash
@@ -119,6 +132,45 @@ module Api
       render json: { error: { code: "validation_failed", message: "Invalid Workspace operation result" } }, status: :unprocessable_content
     rescue ActiveRecord::RecordNotFound
       render json: { error: { code: "operation_not_found", message: "Workspace operation was not found" } }, status: :not_found
+    end
+
+    def workspace_credentials
+      workspace = @session.remote_agent.user.workspaces.find_by!(ref: params[:workspace_ref])
+      raise ActiveRecord::RecordNotFound unless workspace.remote_workspace_placement&.remote_agent_id == @session.remote_agent.id
+      if request.headers["X-Remote-Execution-Id"].present?
+        execution = workspace.workspace_executions.find_by!(ref: request.headers["X-Remote-Execution-Id"])
+        return render json: { credentials: JSON.parse(execution.secret_env_snapshot.to_s.presence || "{}") }
+      end
+      snapshot = JSON.parse(workspace.credential_snapshot.to_s.presence || "{}")
+      render json: { credentials: snapshot.transform_values { |value| value["secret"] }.merge("__bindings" => workspace.credential_bindings) }
+    end
+
+    def workspace_file_download
+      workspace = @session.remote_agent.user.workspaces.find_by!(ref: params[:workspace_ref])
+      raise ActiveRecord::RecordNotFound unless workspace.remote_workspace_placement&.remote_agent_id == @session.remote_agent.id
+      operation = workspace.remote_workspace_operations.find_by!(operation_id: request.headers["X-Remote-Operation-Id"])
+      raise ActiveRecord::RecordNotFound unless operation.kind == "put_file" && operation.spec["file"] == params[:file_ref]
+      shorthand, number = params[:file_ref].to_s.split("-F", 2)
+      file = workspace.user.projects.where(shorthand: shorthand.to_s.upcase).joins(:stored_files).merge(StoredFile.where(number: number)).first!.stored_files.find_by!(number: number)
+      send_data file.original.download, filename: file.filename, type: file.media_type, disposition: "attachment"
+    end
+
+    def workspace_file_upload
+      workspace = @session.remote_agent.user.workspaces.find_by!(ref: params[:workspace_ref])
+      raise ActiveRecord::RecordNotFound unless workspace.remote_workspace_placement&.remote_agent_id == @session.remote_agent.id
+      operation = workspace.remote_workspace_operations.find_by!(operation_id: request.headers["X-Remote-Operation-Id"])
+      raise ActiveRecord::RecordNotFound unless operation.kind == "promote_file"
+      return render json: operation.result if operation.state == "succeeded"
+      project = workspace.user.projects.find_by!(slug: operation.spec.fetch("project"))
+      bytes = request.body.read
+      expected_size = request.headers["X-Byte-Size"]
+      expected_sha = request.headers["X-SHA256"]
+      raise ArgumentError unless expected_size.to_i == bytes.bytesize && expected_sha.to_s == Digest::SHA256.hexdigest(bytes)
+      file = StoredFileBytesCreator.call(project:, bytes:, filename: operation.spec["filename"] || File.basename(operation.spec.fetch("path")), media_type: operation.spec["media_type"], tags: operation.spec["tags"])
+      operation.update!(state: "succeeded", result: { "ref" => file.ref, "filename" => file.filename, "media_type" => file.media_type, "byte_size" => file.byte_size, "sha256" => file.sha256 })
+      render json: operation.result
+    rescue KeyError, ArgumentError
+      render json: { error: { code: "validation_failed", message: "Invalid transfer" } }, status: :unprocessable_content
     end
 
     private
@@ -165,7 +217,8 @@ module Api
 
     def set_session
       @session = RemoteAgentSession.authenticate(request.headers["Authorization"].to_s.delete_prefix("Bearer "))
-      return if @session&.remote_agent&.enabled? && @session.remote_agent.revoked_at.nil?
+      valid = @session&.remote_agent&.enabled? && @session.remote_agent.revoked_at.nil?
+      return if valid
 
       render json: { error: { code: "authentication_required", message: "Authenticated Agent session required" } }, status: :unauthorized
     end

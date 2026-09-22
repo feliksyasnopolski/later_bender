@@ -29,6 +29,9 @@ Rails.application.routes.draw do
     post "remote-agent/heartbeat", to: "remote_agent_protocol#heartbeat"
     get "remote-agent/operations", to: "remote_agent_protocol#operations"
     post "remote-agent/operations/:operation_id/result", to: "remote_agent_protocol#operation_result"
+    get "remote-agent/workspaces/:workspace_ref/credentials", to: "remote_agent_protocol#workspace_credentials"
+    get "remote-agent/workspaces/:workspace_ref/files/:file_ref", to: "remote_agent_protocol#workspace_file_download"
+    post "remote-agent/workspaces/:workspace_ref/file-upload", to: "remote_agent_protocol#workspace_file_upload"
     resources :credentials, only: %i[index create show update destroy]
     resources :workspaces, only: %i[index create]
     get "workspaces/:ref", to: "workspaces#show"

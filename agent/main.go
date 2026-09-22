@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -23,6 +25,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 )
@@ -257,6 +260,102 @@ func (c *Client) do(req *http.Request, out any) error {
 	return nil
 }
 
+func (c *Client) bytes(ctx context.Context, method, path string, body io.Reader, contentType string) ([]byte, http.Header, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.Base+path, body)
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Session)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	b, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return nil, nil, readErr
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, resp.Header, fmt.Errorf("remote transfer failed with status %d", resp.StatusCode)
+	}
+	return b, resp.Header, nil
+}
+
+func (c *Client) workspaceCredentials(ctx context.Context, workspace, execution string) (map[string]any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Base+"/api/remote-agent/workspaces/"+url.PathEscape(workspace)+"/credentials", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Session)
+	if execution != "" {
+		req.Header.Set("X-Remote-Execution-Id", execution)
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, errors.New("remote credential delivery failed")
+	}
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Credentials map[string]any `json:"credentials"`
+	}
+	if err := json.Unmarshal(b, &result); err != nil {
+		return nil, err
+	}
+	return result.Credentials, nil
+}
+
+func (c *Client) downloadFile(ctx context.Context, workspace, operation, file string) ([]byte, error) {
+	reqPath := "/api/remote-agent/workspaces/" + url.PathEscape(workspace) + "/files/" + url.PathEscape(file)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Base+reqPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Session)
+	req.Header.Set("X-Remote-Operation-Id", operation)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, errors.New("remote file download failed")
+	}
+	return io.ReadAll(resp.Body)
+}
+
+func (c *Client) uploadFile(ctx context.Context, workspace, operation string, body []byte) error {
+	path := "/api/remote-agent/workspaces/" + url.PathEscape(workspace) + "/file-upload"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Base+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.Session)
+	req.Header.Set("X-Remote-Operation-Id", operation)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("X-Byte-Size", strconv.Itoa(len(body)))
+	digest := sha256.Sum256(body)
+	req.Header.Set("X-SHA256", fmt.Sprintf("%x", digest))
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return errors.New("remote file upload failed")
+	}
+	return nil
+}
+
 type Advertisement struct {
 	Name               string         `json:"name"`
 	Platform           string         `json:"platform"`
@@ -356,6 +455,10 @@ func localExecution(op Operation) (*LocalExecution, bool) {
 }
 
 func startNative(s Store, op Operation) (*LocalExecution, error) {
+	return startNativeWithClient(context.Background(), &Client{HTTP: http.DefaultClient}, s, op)
+}
+
+func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation) (*LocalExecution, error) {
 	if op.Execution == "" || op.SpecHash == "" || op.Executor != "native" {
 		return nil, errors.New("invalid execution request")
 	}
@@ -364,9 +467,6 @@ func startNative(s Store, op Operation) (*LocalExecution, error) {
 			return nil, errors.New("execution identity conflicts with existing spec")
 		}
 		return e, nil
-	}
-	if secretNames, _ := op.Spec["secret_env_names"].([]any); len(secretNames) > 0 {
-		return nil, errors.New("remote secret_env is not supported")
 	}
 	w, err := s.loadWorkspace(op.Workspace)
 	if err != nil {
@@ -441,6 +541,42 @@ func startNative(s Store, op Operation) (*LocalExecution, error) {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = cwd
 	cmd.Env = os.Environ()
+	credentials := map[string]any{}
+	if c.Base != "" {
+		var credentialErr error
+		credentials, credentialErr = c.workspaceCredentials(ctx, op.Workspace, "")
+		if credentialErr != nil {
+			return nil, credentialErr
+		}
+	}
+	if credentials != nil {
+		if bindings, ok := credentials["__bindings"].([]any); ok {
+			for _, raw := range bindings {
+				binding, _ := raw.(map[string]any)
+				ref, _ := binding["ref"].(string)
+				secret, _ := credentials[ref].(string)
+				if binding["kind"] == "env" {
+					if name, ok := binding["env_name"].(string); ok {
+						cmd.Env = append(cmd.Env, name+"="+secret)
+					}
+				}
+				if binding["kind"] == "file" {
+					filePath, _ := binding["file_path"].(string)
+					filePath = filepath.Join(root, "root", strings.TrimPrefix(filePath, "/root/"))
+					if err := os.MkdirAll(filepath.Dir(filePath), 0700); err != nil {
+						return nil, err
+					}
+					mode := os.FileMode(0400)
+					if numberValue(binding["file_mode"]) == 600 {
+						mode = 0600
+					}
+					if err := os.WriteFile(filePath, []byte(secret), mode); err != nil {
+						return nil, err
+					}
+				}
+			}
+		}
+	}
 	if env, ok := op.Spec["env"].(map[string]any); ok {
 		for key, value := range env {
 			val, ok := value.(string)
@@ -449,6 +585,15 @@ func startNative(s Store, op Operation) (*LocalExecution, error) {
 			}
 			cmd.Env = append(cmd.Env, key+"="+val)
 		}
+	}
+	if secretEnv, fetchErr := c.workspaceCredentials(ctx, op.Workspace, op.Execution); c.Base != "" && fetchErr == nil {
+		for key, value := range secretEnv {
+			if secret, ok := value.(string); ok {
+				cmd.Env = append(cmd.Env, key+"="+secret)
+			}
+		}
+	} else if names, ok := op.Spec["secret_env_names"].([]any); ok && len(names) > 0 {
+		return nil, fetchErr
 	}
 	if stdin, ok := op.Spec["stdin"].(string); ok {
 		cmd.Stdin = strings.NewReader(stdin)
@@ -559,6 +704,175 @@ func executionReport(e *LocalExecution) map[string]string {
 		result["terminating_signal"] = e.TerminatingSignal
 	}
 	return result
+}
+
+func workspacePath(s Store, ref, value string) (string, error) {
+	w, err := s.loadWorkspace(ref)
+	if err != nil {
+		return "", err
+	}
+	root, err := filepath.Abs(filepath.Join(w.Root, "root"))
+	if err != nil {
+		return "", err
+	}
+	clean := filepath.Clean(filepath.Join(root, strings.TrimPrefix(value, "/workspace/")))
+	if clean != root && !strings.HasPrefix(clean, root+string(filepath.Separator)) {
+		return "", errors.New("path escapes Workspace root")
+	}
+	for current := clean; current != root; current = filepath.Dir(current) {
+		if info, statErr := os.Lstat(current); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("path traverses symlink")
+		}
+	}
+	return clean, nil
+}
+
+func remoteFileOperation(ctx context.Context, c *Client, s Store, op Operation) (string, map[string]string, error) {
+	path, err := workspacePath(s, op.Workspace, stringValue(op.Spec["path"]))
+	if err != nil {
+		return "failed", nil, err
+	}
+	switch op.Type {
+	case "put_file":
+		file, _ := op.Spec["file"].(string)
+		bytes, err := c.downloadFile(ctx, op.Workspace, op.OperationID, file)
+		if err != nil {
+			return "failed", nil, err
+		}
+		if int64(len(bytes)) != int64(numberValue(op.Spec["byte_size"])) || stringValue(op.Spec["sha256"]) != fmt.Sprintf("%x", sha256.Sum256(bytes)) {
+			return "failed", nil, errors.New("file integrity check failed")
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return "failed", nil, err
+		}
+		if existing, readErr := os.ReadFile(path); readErr == nil {
+			if stringValue(op.Spec["sha256"]) == fmt.Sprintf("%x", sha256.Sum256(existing)) && len(existing) == len(bytes) {
+				return "succeeded", map[string]string{"byte_size": strconv.Itoa(len(bytes)), "sha256": fmt.Sprintf("%x", sha256.Sum256(bytes))}, nil
+			}
+			return "failed", nil, errors.New("path already exists")
+		}
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return "failed", nil, err
+		}
+		_, writeErr := f.Write(bytes)
+		closeErr := f.Close()
+		if writeErr != nil {
+			return "failed", nil, writeErr
+		}
+		if closeErr != nil {
+			return "failed", nil, closeErr
+		}
+		return "succeeded", map[string]string{"byte_size": strconv.Itoa(len(bytes)), "sha256": fmt.Sprintf("%x", sha256.Sum256(bytes))}, nil
+	case "read_file":
+		bytes, err := os.ReadFile(path)
+		if err != nil {
+			return "failed", nil, err
+		}
+		if !utf8.Valid(bytes) || bytesContainsNul(bytes) {
+			return "failed", map[string]string{"code": "not_text"}, errors.New("file is not text")
+		}
+		lines := strings.SplitAfter(string(bytes), "\n")
+		start := numberValue(op.Spec["cursor"])
+		end := len(lines)
+		if locator, ok := op.Spec["locator"].(map[string]any); ok {
+			start = numberValue(locator["start"]) - 1
+			end = numberValue(locator["end"])
+			if start < 0 || end <= start || start >= len(lines) || end > len(lines) {
+				return "failed", map[string]string{"code": "invalid_range"}, errors.New("invalid line range")
+			}
+		} else {
+			end = start + 200
+			if end > len(lines) {
+				end = len(lines)
+			}
+		}
+		if start < 0 || start > len(lines) {
+			return "failed", map[string]string{"code": "invalid_cursor"}, errors.New("invalid cursor")
+		}
+		content := strings.Join(lines[start:end], "")
+		next := ""
+		if end < len(lines) {
+			next = strconv.Itoa(end)
+		}
+		prefix := strings.Join(lines[:start], "")
+		through := strings.Join(lines[:end], "")
+		rangeJSON, _ := json.Marshal(map[string]any{"kind": "lines", "start": start + 1, "end": end, "byte_start": len([]byte(prefix)), "byte_end": len([]byte(through)), "complete": next == ""})
+		extra := map[string]string{"format": "text", "content": content, "media_type": "text/plain", "range_json": string(rangeJSON)}
+		if next != "" {
+			extra["next_cursor"] = next
+		}
+		return "succeeded", extra, nil
+	case "promote_file":
+		bytes, err := os.ReadFile(path)
+		if err != nil {
+			return "failed", nil, err
+		}
+		if err := c.uploadFile(ctx, op.Workspace, op.OperationID, bytes); err != nil {
+			return "failed", nil, err
+		}
+		return "succeeded", nil, nil
+	default:
+		return "failed", nil, errors.New("unknown remote file operation")
+	}
+}
+
+func numberValue(value any) int {
+	switch n := value.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case string:
+		value, _ := strconv.Atoi(n)
+		return value
+	default:
+		return 0
+	}
+}
+func bytesContainsNul(value []byte) bool {
+	for _, b := range value {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func provisionWorkspaceFiles(ctx context.Context, c *Client, s Store, ref string) error {
+	if c.Base == "" {
+		return nil
+	}
+	w, err := s.loadWorkspace(ref)
+	if err != nil {
+		return err
+	}
+	credentials, err := c.workspaceCredentials(ctx, ref, "")
+	if err != nil {
+		return err
+	}
+	bindings, _ := credentials["__bindings"].([]any)
+	for _, raw := range bindings {
+		binding, _ := raw.(map[string]any)
+		if binding["kind"] != "file" {
+			continue
+		}
+		ref, _ := binding["ref"].(string)
+		secret, _ := credentials[ref].(string)
+		filePath, _ := binding["file_path"].(string)
+		filePath = filepath.Join(w.Root, "root", strings.TrimPrefix(filePath, "/root/"))
+		if err := os.MkdirAll(filepath.Dir(filePath), 0700); err != nil {
+			return err
+		}
+		mode := os.FileMode(0400)
+		if numberValue(binding["file_mode"]) == 600 {
+			mode = 0600
+		}
+		if err := os.WriteFile(filePath, []byte(secret), mode); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const (
@@ -708,7 +1022,7 @@ func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
 				if err := json.Unmarshal(b, &op); err != nil {
 					return err
 				}
-				if err := handleOperationWithResult(ctx, store, op, func(status string, extra map[string]string) error {
+				if err := handleOperationWithResult(ctx, c, store, op, func(status string, extra map[string]string) error {
 					payload := map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": status}
 					for key, value := range extra {
 						payload[key] = value
@@ -734,12 +1048,27 @@ func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
 	}
 }
 
-func handleOperationWithResult(ctx context.Context, s Store, op Operation, result func(string, map[string]string) error) error {
+func handleOperationWithResult(ctx context.Context, c *Client, s Store, op Operation, result func(string, map[string]string) error) error {
 	log.Printf("handling %s for %s", op.Type, op.Workspace)
 	switch op.Type {
+	case "put_file", "read_file", "promote_file":
+		status, extra, err := remoteFileOperation(ctx, c, s, op)
+		if err != nil {
+			if extra == nil {
+				extra = map[string]string{}
+			}
+			if extra["code"] == "" {
+				extra["message"] = err.Error()
+			}
+			return result("failed", extra)
+		}
+		return result(status, extra)
 	case "prepare_workspace":
 		w, err := s.prepare(op.Workspace, op.Executor, op.OperationID, op.SpecHash)
 		if err != nil {
+			return err
+		}
+		if err := provisionWorkspaceFiles(ctx, c, s, op.Workspace); err != nil {
 			return err
 		}
 		return result("prepared", map[string]string{"provider_workspace_ref": w.Root})
@@ -749,7 +1078,7 @@ func handleOperationWithResult(ctx context.Context, s Store, op Operation, resul
 		}
 		return result("destroyed", nil)
 	case "start_execution":
-		e, err := startNative(s, op)
+		e, err := startNativeWithClient(ctx, c, s, op)
 		if err != nil {
 			return result("failed", map[string]string{"execution": op.Execution, "message": err.Error()})
 		}
@@ -796,9 +1125,22 @@ func mapValue(v any) map[string]any { value, _ := v.(map[string]any); return val
 func handleOperation(ctx context.Context, c *Client, s Store, op Operation) error {
 	log.Printf("handling %s for %s", op.Type, op.Workspace)
 	switch op.Type {
+	case "put_file", "read_file", "promote_file":
+		status, extra, err := remoteFileOperation(ctx, c, s, op)
+		if err != nil {
+			if extra == nil {
+				extra = map[string]string{}
+			}
+			extra["message"] = err.Error()
+			return c.result(ctx, op, "failed", extra)
+		}
+		return c.result(ctx, op, status, extra)
 	case "prepare_workspace":
 		w, err := s.prepare(op.Workspace, op.Executor, op.OperationID, op.SpecHash)
 		if err != nil {
+			return err
+		}
+		if err := provisionWorkspaceFiles(ctx, c, s, op.Workspace); err != nil {
 			return err
 		}
 		return c.result(ctx, op, "prepared", map[string]string{"provider_workspace_ref": w.Root})
@@ -808,7 +1150,7 @@ func handleOperation(ctx context.Context, c *Client, s Store, op Operation) erro
 		}
 		return c.result(ctx, op, "destroyed", nil)
 	case "start_execution":
-		e, err := startNative(s, op)
+		e, err := startNativeWithClient(ctx, c, s, op)
 		if err != nil {
 			return c.result(ctx, op, "failed", map[string]string{"execution": op.Execution, "message": err.Error()})
 		}

@@ -3,6 +3,9 @@ class Workspace < ApplicationRecord
   has_many :workspace_executions, dependent: :delete_all
   has_many :workspace_events, dependent: :delete_all
   has_one :remote_workspace_placement, dependent: :destroy
+  has_many :remote_workspace_operations, dependent: :delete_all
+
+  encrypts :credential_snapshot
 
   before_validation :assign_public_identity, on: :create
 

@@ -567,6 +567,108 @@ paths:
       required: true
       schema:
         type: string
+  "/api/remote-agent/workspaces/{workspace_ref}/credentials":
+    get:
+      summary: api/remote_agent_protocol#workspace_credentials
+      tags:
+      - Remote_agent_protocol
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    parameters:
+    - name: workspace_ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/remote-agent/workspaces/{workspace_ref}/files/{file_ref}":
+    get:
+      summary: api/remote_agent_protocol#workspace_file_download
+      tags:
+      - Remote_agent_protocol
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    parameters:
+    - name: workspace_ref
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: file_ref
+      in: path
+      required: true
+      schema:
+        type: string
+  "/api/remote-agent/workspaces/{workspace_ref}/file-upload":
+    post:
+      summary: api/remote_agent_protocol#workspace_file_upload
+      tags:
+      - Remote_agent_protocol
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: workspace_ref
+      in: path
+      required: true
+      schema:
+        type: string
   "/api/credentials":
     get:
       summary: api/credentials#index

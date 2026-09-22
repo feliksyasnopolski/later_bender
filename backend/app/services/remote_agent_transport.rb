@@ -7,8 +7,13 @@ class RemoteAgentTransport
     executions = WorkspaceExecution.joins(workspace: :remote_workspace_placement)
       .where(remote_workspace_placements: { remote_agent_id: agent.id }, state: "running")
       .includes(workspace: :remote_workspace_placement).order(:created_at)
+    data_operations = RemoteWorkspaceOperation.joins(workspace: :remote_workspace_placement)
+      .where(remote_workspace_placements: { remote_agent_id: agent.id }, state: %w[pending running]).includes(:workspace).order(:created_at)
     {
-      "operations" => placements.map(&:prepare_payload) + executions.map { |execution|
+      "operations" => placements.map(&:prepare_payload) + data_operations.map { |operation|
+        operation.update!(state: "running") if operation.state == "pending"
+        { "type" => operation.kind, "workspace" => operation.workspace.ref, "operation_id" => operation.operation_id, "spec_hash" => operation.spec_hash, "spec" => operation.spec }
+      } + executions.map { |execution|
         placement = execution.workspace.remote_workspace_placement
         execution.cancel_operation_id.present? ? placement.cancel_payload(execution) : placement.execution_payload(execution)
       }
@@ -31,6 +36,17 @@ class RemoteAgentTransport
       raise ArgumentError unless payload.fetch("spec_hash") == placement.spec_hash
       apply_placement_result!(placement, payload)
       return { "operation_id" => operation_id, "workspace" => placement.workspace.ref, "state" => placement.state }
+    end
+
+    remote_operation = RemoteWorkspaceOperation.joins(workspace: :remote_workspace_placement)
+      .where(operation_id:, remote_workspace_placements: { remote_agent_id: agent.id }).first
+    if remote_operation
+      raise ArgumentError unless payload.fetch("workspace") == remote_operation.workspace.ref
+      raise ArgumentError unless payload.fetch("spec_hash") == remote_operation.spec_hash
+      result = payload.except("operation_id", "workspace", "spec_hash", "status")
+      result["range"] = JSON.parse(result.delete("range_json")) if result["range_json"]
+      remote_operation.update!(state: payload.fetch("status") == "failed" ? "failed" : "succeeded", result:, error_message: payload["message"])
+      return { "operation_id" => operation_id, "workspace" => remote_operation.workspace.ref, "state" => remote_operation.state }
     end
 
     execution = WorkspaceExecution.joins(workspace: :remote_workspace_placement)

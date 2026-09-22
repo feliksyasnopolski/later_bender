@@ -86,6 +86,8 @@ module Api
     def put_file
       payload = request_payload
       file = find_file(payload.fetch("file"))
+      path = payload["path"].presence || "/workspace/#{file.filename}"
+      return remote_file_operation("put_file", payload.merge("path" => path, "file" => file.ref, "filename" => file.filename, "media_type" => file.media_type, "byte_size" => file.byte_size, "sha256" => file.sha256)) if @workspace.remote_workspace_placement.present?
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/files", payload.merge("bytes_base64" => Base64.strict_encode64(file.original.download), "filename" => file.filename, "media_type" => file.media_type))
       @workspace.append_event!("file_imported", result.merge("file" => file.ref))
       render json: result.merge("workspace" => @workspace.ref, "file" => file.ref)
@@ -94,12 +96,14 @@ module Api
     end
 
     def read_file
+      return remote_file_operation("read_file", request_payload) if @workspace.remote_workspace_placement.present?
       render json: runner.request(:post, "/workspaces/#{@workspace.runner_handle}/file-read", request_payload).merge("workspace" => @workspace.ref)
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
     end
     def promote_file
       payload = request_payload
+      return remote_file_operation("promote_file", payload.merge("path" => workspace_relative_path(payload.fetch("path")))) if @workspace.remote_workspace_placement.present?
       promotion_payload = payload.merge("path" => workspace_relative_path(payload.fetch("path")))
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/file-promote", promotion_payload)
       project = current_user.projects.find_by!(slug: payload.fetch("project"))
@@ -221,9 +225,6 @@ module Api
 
     def execute_remote
       payload = request_payload
-      if payload["secret_env"].present?
-        raise WorkspaceRunnerClient::Unavailable.new("Remote secret_env is not supported yet", code: "executor_unsupported")
-      end
       placement = @workspace.remote_workspace_placement
       raise WorkspaceRunnerClient::Unavailable.new("Workspace is not ready", code: "workspace_not_ready") unless @workspace.state == "ready" && placement&.state == "ready"
       raise WorkspaceRunnerClient::Unavailable.new("Remote Workspace target is offline", code: "workspace_unavailable") unless placement.remote_agent.online?
@@ -231,15 +232,17 @@ module Api
 
       invocation = payload.key?("command") ? { "kind" => "shell", "command" => payload.fetch("command") } : { "kind" => "argv", "argv" => Array(payload.fetch("argv")) }
       env = payload["env"] || {}
+      secret_env = payload["secret_env"] || {}
+      raise WorkspaceRunnerClient::Unavailable.new("Invalid secret environment", code: "invalid_invocation") unless secret_env.is_a?(Hash) && secret_env.keys.all? { |key| key.to_s.match?(/\A[A-Za-z_][A-Za-z0-9_]*\z/) } && secret_env.values.all? { |value| value.is_a?(String) }
       cwd = payload["cwd"] || "/workspace"
-      spec = { "invocation" => invocation, "cwd" => cwd, "env" => env, "stdin" => payload["stdin"], "timeout_seconds" => payload["timeout_seconds"] }
+      spec = { "invocation" => invocation, "cwd" => cwd, "env" => env, "secret_env_names" => secret_env.keys.map(&:to_s).sort, "stdin" => payload["stdin"], "timeout_seconds" => payload["timeout_seconds"] }
       execution = nil
       @workspace.with_lock do
         sequence = @workspace.workspace_executions.maximum(:sequence).to_i + 1
         ref = "WSE-#{SecureRandom.hex(12)}"
         operation_id = "WSOP-#{SecureRandom.hex(16)}"
         spec_hash = Digest::SHA256.hexdigest(JSON.generate(spec))
-        execution = @workspace.workspace_executions.create!(ref:, sequence:, state: "running", invocation:, cwd:, env:, secret_env_names: [], started_at: Time.current, requested_timeout_seconds: payload["timeout_seconds"], stdout_handle: "#{ref}:stdout", stderr_handle: "#{ref}:stderr", remote_operation_id: operation_id, spec_hash:, remote_spec: spec)
+        execution = @workspace.workspace_executions.create!(ref:, sequence:, state: "running", invocation:, cwd:, env:, secret_env_names: secret_env.keys.map(&:to_s).sort, secret_env_snapshot: JSON.generate(secret_env), started_at: Time.current, requested_timeout_seconds: payload["timeout_seconds"], stdout_handle: "#{ref}:stdout", stderr_handle: "#{ref}:stderr", remote_operation_id: operation_id, spec_hash:, remote_spec: spec)
         @workspace.append_event!("execution", transcript_execution_payload(execution.attributes, execution))
       end
       observe_remote_execution!(execution)
@@ -278,6 +281,28 @@ module Api
     end
 
     def runner = (@runner ||= WorkspaceRunnerClient.new)
+
+    def remote_file_operation(kind, payload)
+      placement = @workspace.remote_workspace_placement
+      raise WorkspaceRunnerClient::Unavailable.new("Workspace is not ready", code: "workspace_not_ready") unless @workspace.state == "ready" && placement&.state == "ready"
+      raise WorkspaceRunnerClient::Unavailable.new("Remote Workspace target is offline", code: "workspace_unavailable") unless placement.remote_agent.online?
+      spec = payload.stringify_keys
+      operation = @workspace.remote_workspace_operations.create!(operation_id: "WSOP-#{SecureRandom.hex(16)}", kind:, spec_hash: Digest::SHA256.hexdigest(JSON.generate(spec)), spec:)
+      observe_remote_operation(window: REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS) { operation.reload; %w[succeeded failed].include?(operation.state) }
+      operation.reload
+      raise WorkspaceRunnerClient::Unavailable.new(operation.error_message.presence || "Remote Workspace operation failed", code: operation.result["code"] || "workspace_unavailable") if operation.state == "failed"
+      result = operation.result.merge("workspace" => @workspace.ref)
+      if kind == "put_file"
+        result.merge!("file" => payload["file"], "path" => payload["path"])
+        @workspace.append_event!("file_imported", result.slice("file", "path", "byte_size", "sha256"))
+      elsif kind == "promote_file"
+        @workspace.append_event!("file_promoted", result.slice("ref", "path", "byte_size", "sha256"))
+      end
+      render json: result
+    rescue ActiveRecord::RecordInvalid => e
+      raise WorkspaceRunnerClient::Unavailable.new(e.message, code: "validation_failed")
+    end
+
     def find_execution_by_ref = current_user.workspaces.joins(:workspace_executions).merge(WorkspaceExecution.where(ref: params[:ref])).first!.workspace_executions.find_by!(ref: params[:ref])
     def find_file(ref)
       shorthand, number = ref.to_s.split("-F", 2)
@@ -400,7 +425,15 @@ module Api
           os_name: agent.platform, os_version: "unknown", shell: "/bin/bash", workspace_root: "/workspace",
           limits: { "cpus" => nil, "memory_bytes" => nil, "disk_bytes" => nil, "pids" => nil }, capabilities: agent.capabilities, last_activity_at: Time.current, expires_at: payload["ttl_seconds"].present? ? payload["ttl_seconds"].to_i.seconds.from_now : nil
         )
-        placement = workspace.create_remote_workspace_placement!(remote_agent: agent, executor:, operation_id: "WSOP-#{SecureRandom.hex(16)}", spec_hash: digest, spec:)
+        refs = Array(payload["credentials"])
+        raise WorkspaceRunnerClient::Unavailable.new("Credential was not found", code: "credential_not_found") if refs.length > 32 || refs.uniq.length != refs.length
+        credentials = current_user.credentials.where(ref: refs).index_by(&:ref)
+        raise WorkspaceRunnerClient::Unavailable.new("Credential was not found", code: "credential_not_found") unless credentials.length == refs.length
+        bindings = credentials.values.map(&:metadata)
+        validate_binding_conflicts!(bindings)
+        workspace.update!(credential_bindings: bindings, credential_snapshot: JSON.generate(credentials.values.index_by(&:ref).transform_values { |credential| { "metadata" => credential.metadata, "secret" => credential.secret } }))
+        spec["credential_bindings"] = bindings
+        placement = workspace.create_remote_workspace_placement!(remote_agent: agent, executor:, operation_id: "WSOP-#{SecureRandom.hex(16)}", spec_hash: Digest::SHA256.hexdigest(JSON.generate(spec)), spec:)
         workspace.append_event!("workspace_created", { "target" => agent.ref, "executor" => executor, "operation_id" => placement.operation_id })
       end
       wait_for_remote_workspace!(workspace)

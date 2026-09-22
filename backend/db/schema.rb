@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_22_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_22_160000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -263,6 +263,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_140000) do
     t.index ["user_id"], name: "index_remote_agents_on_user_id"
   end
 
+  create_table "remote_workspace_operations", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "error_message"
+    t.string "kind", null: false
+    t.string "operation_id", null: false
+    t.jsonb "result", default: {}, null: false
+    t.jsonb "spec", default: {}, null: false
+    t.string "spec_hash", null: false
+    t.string "state", default: "pending", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "workspace_id", null: false
+    t.index ["operation_id"], name: "index_remote_workspace_operations_on_operation_id", unique: true
+    t.index ["workspace_id", "state"], name: "index_remote_workspace_operations_on_workspace_id_and_state"
+    t.index ["workspace_id"], name: "index_remote_workspace_operations_on_workspace_id"
+  end
+
   create_table "remote_workspace_placements", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.text "error_message"
@@ -389,6 +405,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_140000) do
     t.jsonb "remote_spec", default: {}, null: false
     t.decimal "requested_timeout_seconds"
     t.jsonb "secret_env_names", default: [], null: false
+    t.text "secret_env_snapshot"
     t.integer "sequence", null: false
     t.string "spec_hash"
     t.datetime "started_at", null: false
@@ -412,6 +429,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_140000) do
     t.jsonb "capabilities", default: {}, null: false
     t.datetime "created_at", null: false
     t.jsonb "credential_bindings", default: [], null: false
+    t.text "credential_snapshot"
     t.string "environment", null: false
     t.datetime "expires_at"
     t.string "label"
@@ -457,6 +475,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_140000) do
   add_foreign_key "remote_agent_enrollment_tokens", "users"
   add_foreign_key "remote_agent_sessions", "remote_agents"
   add_foreign_key "remote_agents", "users"
+  add_foreign_key "remote_workspace_operations", "workspaces"
   add_foreign_key "remote_workspace_placements", "remote_agents"
   add_foreign_key "remote_workspace_placements", "workspaces"
   add_foreign_key "stored_files", "projects"
