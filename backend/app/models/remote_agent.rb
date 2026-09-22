@@ -10,6 +10,7 @@ class RemoteAgent < ApplicationRecord
   before_validation :assign_ref, on: :create
 
   validates :ref, :name, :public_key, :platform, :architecture, presence: true
+  validates :name, length: { maximum: 120 }
   validates :public_number, numericality: { only_integer: true, greater_than: 0 }, presence: true
   validate :supported_executors_are_known
 

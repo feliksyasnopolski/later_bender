@@ -19,6 +19,7 @@ Rails.application.routes.draw do
     get "workspaces/targets", to: "workspaces#targets"
     post "remote-agents/enrollment-tokens", to: "remote_agents#enrollment_token"
     get "remote-agents", to: "remote_agents#index"
+    patch "remote-agents/:ref", to: "remote_agents#update"
     post "remote-agents/:ref/revoke", to: "remote_agents#revoke"
     post "remote-agent/enroll", to: "remote_agent_protocol#enroll"
     post "remote-agent/challenge", to: "remote_agent_protocol#challenge"

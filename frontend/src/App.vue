@@ -5,7 +5,7 @@ import { useAuthStore } from './stores/auth'
 import { request } from './api'
 const auth = useAuthStore(); const route = useRoute(); const router = useRouter()
 const projects = ref([]); const projectSlug = ref('')
-const nav = [{ label: 'Tasks', to: '/tasks' }, { label: 'Search', to: '/search' }, { label: 'Notes', to: '/notes' }, { label: 'Files', to: '/files' }, { label: 'Workspaces', to: '/workspaces' }, { label: 'Credentials', to: '/credentials' }]
+const nav = [{ label: 'Tasks', to: '/tasks' }, { label: 'Search', to: '/search' }, { label: 'Notes', to: '/notes' }, { label: 'Files', to: '/files' }, { label: 'Workspaces', to: '/workspaces' }, { label: 'Agents', to: '/agents' }, { label: 'Credentials', to: '/credentials' }]
 const isAuthed = computed(() => auth.isAuthenticated)
 const active = (to) => route.path === to || route.path.startsWith(`${to}/`)
 async function loadProjects() { try { projects.value = await request('/projects', {}, auth.token) } catch { projects.value = [] } }

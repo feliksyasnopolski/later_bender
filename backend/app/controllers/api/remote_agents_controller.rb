@@ -14,6 +14,12 @@ module Api
       render json: { ref: params[:ref], revoked: true }
     end
 
+    def update
+      agent = current_user.remote_agents.find_by!(ref: params[:ref])
+      agent.update!(name: params.require(:name).to_s.strip)
+      render json: { agent: projection(agent) }
+    end
+
     private
 
     def projection(agent)

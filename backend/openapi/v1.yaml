@@ -232,6 +232,53 @@ paths:
       security:
       - bearerAuth: []
       parameters: []
+  "/api/remote-agents/{ref}":
+    patch:
+      summary: api/remote_agents#update
+      tags:
+      - Remote_agents
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
   "/api/remote-agents/{ref}/revoke":
     post:
       summary: api/remote_agents#revoke

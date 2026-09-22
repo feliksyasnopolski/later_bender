@@ -37,6 +37,14 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(user.remote_agents.count).to eq(1)
   end
 
+  it "allows the owner to rename an enrolled agent" do
+    agent = enroll_agent
+    patch "/api/remote-agents/#{agent.ref}", params: { name: "Build Mac" }.to_json, headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:ok)
+    expect(json_body.dig("agent", "name")).to eq("Build Mac")
+    expect(agent.reload.name).to eq("Build Mac")
+  end
+
   it "authenticates a signed challenge, replaces sessions, refreshes capabilities, and projects truthful targets" do
     agent = enroll_agent
     post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
