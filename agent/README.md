@@ -1,7 +1,7 @@
 # Later Bender Remote Agent
 
 This is the minimal native Remote Agent runtime. It implements enrollment,
-Ed25519 session authentication, heartbeat, operation polling, native Workspace
+Ed25519 session authentication, outbound WSS heartbeat/dispatch, native Workspace
 preparation/destruction, and native command execution. Native commands run as
 the Agent OS user in the prepared Workspace root. Process-group cancellation
 and timeout are best-effort; native execution is not a sandbox and daemonized
@@ -20,6 +20,8 @@ The default state directory is the user config directory under
 private key and metadata use mode `0600`, and Workspace state is stored below
 `workspaces/WS-N/` with a durable `metadata.json` and `root/` directory.
 
-The current Rails protocol is HTTPS polling: `/api/remote-agent/operations`
-is polled after authentication and operation results are posted to the
-corresponding `/result` endpoint.
+Enrollment and challenge authentication remain HTTPS. After authentication,
+the Agent opens `wss://.../api/remote-agent/stream`. Rails sends provider
+operations over that connection and the Agent returns receipts/results over
+the same connection. Canonical state and reconciliation remain in Rails and
+PostgreSQL; bulk File and Credential paths remain HTTPS.

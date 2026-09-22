@@ -42,12 +42,15 @@ module Api
 
       challenge.consume!
       RemoteAgentCrypto.verify!(agent.public_key, payload.fetch("signature"), RemoteAgentCrypto.signed_bytes(agent.ref, challenge.challenge_id, nonce, challenge.expires_at))
-      agent.remote_agent_sessions.where(disconnected_at: nil).update_all(disconnected_at: Time.current, updated_at: Time.current)
       session, raw = RemoteAgentSession.issue!(remote_agent: agent)
       agent.update!(last_seen_at: Time.current)
       render json: { session_token: raw, ref: agent.ref, connected_at: session.connected_at, heartbeat_interval_seconds: 30 }
     rescue KeyError, ActiveRecord::RecordNotFound, RemoteAgentCrypto::InvalidSignature
       render json: { error: { code: "authentication_failed", message: "Agent authentication failed" } }, status: :unauthorized
+    end
+
+    def stream
+      head :bad_request
     end
 
     def heartbeat

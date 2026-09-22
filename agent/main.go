@@ -23,6 +23,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 const protocolVersion = "later-bender-agent-auth-v1"
@@ -549,60 +551,233 @@ func executionReport(e *LocalExecution) map[string]string {
 	return result
 }
 
-func run(ctx context.Context, c *Client, store Store, id *Identity) error {
-	for {
-		hb, err := authenticate(ctx, c, id)
-		if err != nil {
-			log.Printf("authentication failed: %v; reconnecting", err)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(2 * time.Second):
-				continue
-			}
+const (
+	wsHeartbeatInterval = 10 * time.Second
+	wsHeartbeatDeadline = 5 * time.Second
+	wsMaxRTTSamples     = 8
+)
+
+type wsMessage struct {
+	Type        string         `json:"type"`
+	ID          string         `json:"id,omitempty"`
+	Operation   map[string]any `json:"operation,omitempty"`
+	OperationID string         `json:"operation_id,omitempty"`
+	Payload     map[string]any `json:"-"`
+	Interval    int            `json:"heartbeat_interval_seconds,omitempty"`
+}
+
+type rttHealth struct {
+	samples  []time.Duration
+	degraded int
+}
+
+func (h *rttHealth) observe(sample time.Duration) bool {
+	baseline := sample
+	if len(h.samples) > 0 {
+		var total time.Duration
+		for _, value := range h.samples {
+			total += value
 		}
-		log.Printf("Agent %s authenticated", id.Ref)
-		ticker := time.NewTicker(time.Duration(hb) * time.Second)
-		poll := time.NewTicker(time.Second)
-		for connected := true; connected; {
-			select {
-			case <-ctx.Done():
-				ticker.Stop()
-				poll.Stop()
-				return ctx.Err()
-			case <-ticker.C:
-				adv := advertise(id.Name)
-				var ignored map[string]any
-				if err := c.post(ctx, "/api/remote-agent/heartbeat", adv, true, &ignored); err != nil {
-					log.Printf("heartbeat failed: %v", err)
-					connected = false
+		baseline = total / time.Duration(len(h.samples))
+	}
+	if len(h.samples) < 2 || sample <= 2*baseline+250*time.Millisecond {
+		h.degraded = 0
+	} else {
+		h.degraded++
+	}
+	if h.degraded == 0 {
+		if len(h.samples) >= wsMaxRTTSamples {
+			h.samples = h.samples[1:]
+		}
+		h.samples = append(h.samples, sample)
+	}
+	return h.degraded >= 2
+}
+
+func websocketURL(base string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	if u.Scheme == "https" {
+		u.Scheme = "wss"
+	} else {
+		u.Scheme = "ws"
+	}
+	u.Path = "/api/remote-agent/stream"
+	u.RawQuery = ""
+	return u.String()
+}
+
+func run(ctx context.Context, c *Client, store Store, id *Identity) error {
+	backoff := time.Second
+	for {
+		if _, err := authenticate(ctx, c, id); err != nil {
+			log.Printf("authentication failed: %v; reconnecting", err)
+			if err := waitBackoff(ctx, backoff); err != nil {
+				return err
+			}
+			backoff = minDuration(backoff*2, 30*time.Second)
+			continue
+		}
+		if err := runWSS(ctx, c, store, id); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("WSS disconnected: %v", err)
+		}
+		if err := waitBackoff(ctx, backoff); err != nil {
+			return err
+		}
+		backoff = minDuration(backoff*2, 30*time.Second)
+		if backoff >= 4*time.Second {
+			backoff = 2 * time.Second
+		}
+	}
+}
+
+func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
+	header := http.Header{"Authorization": []string{"Bearer " + c.Session}}
+	conn, _, err := dialer.DialContext(ctx, websocketURL(c.Base), header)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	writeMu := sync.Mutex{}
+	send := func(value any) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return conn.WriteJSON(value)
+	}
+	readCh := make(chan wsMessage, 16)
+	errCh := make(chan error, 1)
+	go func() {
+		for {
+			var raw map[string]any
+			if err := conn.ReadJSON(&raw); err != nil {
+				errCh <- err
+				return
+			}
+			message := wsMessage{Type: stringValue(raw["type"]), ID: stringValue(raw["id"]), OperationID: stringValue(raw["operation_id"]), Interval: intValue(raw["heartbeat_interval_seconds"]), Operation: mapValue(raw["operation"])}
+			message.Payload = raw
+			readCh <- message
+		}
+	}()
+	heartbeat := time.NewTicker(wsHeartbeatInterval)
+	defer heartbeat.Stop()
+	lastPong := time.Now()
+	lastPing := map[string]time.Time{}
+	var health rttHealth
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-errCh:
+			return err
+		case <-heartbeat.C:
+			if time.Since(lastPong) > wsHeartbeatInterval+wsHeartbeatDeadline {
+				return errors.New("WSS heartbeat deadline exceeded")
+			}
+			pingID := fmt.Sprintf("%d", time.Now().UnixNano())
+			lastPing[pingID] = time.Now()
+			if err := send(map[string]string{"type": "ping", "id": pingID}); err != nil {
+				return err
+			}
+			if err := send(map[string]any{"type": "heartbeat", "name": id.Name, "platform": runtime.GOOS, "architecture": runtime.GOARCH, "supported_executors": []string{"native"}, "capabilities": advertise(id.Name).Capabilities}); err != nil {
+				return err
+			}
+		case message := <-readCh:
+			switch message.Type {
+			case "ready":
+			case "ping":
+				if err := send(map[string]string{"type": "pong", "id": message.ID}); err != nil {
+					return err
 				}
-			case <-poll.C:
-				var response struct {
-					Operations []Operation `json:"operations"`
+			case "ack":
+			case "operation":
+				b, _ := json.Marshal(message.Operation)
+				var op Operation
+				if err := json.Unmarshal(b, &op); err != nil {
+					return err
 				}
-				if err := c.get(ctx, "/api/remote-agent/operations", &response); err != nil {
-					log.Printf("operation poll failed: %v", err)
-					connected = false
-					continue
+				if err := handleOperationWithResult(ctx, store, op, func(status string, extra map[string]string) error {
+					payload := map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": status}
+					for key, value := range extra {
+						payload[key] = value
+					}
+					return send(payload)
+				}); err != nil {
+					_ = send(map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": "failed", "message": err.Error()})
 				}
-				for _, op := range response.Operations {
-					if err := handleOperation(ctx, c, store, op); err != nil {
-						log.Printf("operation %s failed: %v", op.OperationID, err)
-						_ = c.result(ctx, op, "failed", map[string]string{"message": err.Error()})
+			case "pong":
+				lastPong = time.Now()
+				if sent, ok := lastPing[message.ID]; ok {
+					delete(lastPing, message.ID)
+					if health.observe(time.Since(sent)) {
+						return errors.New("sustained degraded WSS RTT")
 					}
 				}
 			}
 		}
-		ticker.Stop()
-		poll.Stop()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(2 * time.Second):
-		}
 	}
 }
+
+func handleOperationWithResult(ctx context.Context, s Store, op Operation, result func(string, map[string]string) error) error {
+	log.Printf("handling %s for %s", op.Type, op.Workspace)
+	switch op.Type {
+	case "prepare_workspace":
+		w, err := s.prepare(op.Workspace, op.Executor, op.OperationID, op.SpecHash)
+		if err != nil {
+			return err
+		}
+		return result("prepared", map[string]string{"provider_workspace_ref": w.Root})
+	case "destroy_workspace":
+		if err := s.destroy(op.Workspace); err != nil {
+			return err
+		}
+		return result("destroyed", nil)
+	case "start_execution":
+		e, err := startNative(s, op)
+		if err != nil {
+			return result("failed", map[string]string{"execution": op.Execution, "message": err.Error()})
+		}
+		report := executionReport(e)
+		return result(report["status"], report)
+	case "cancel_execution":
+		e, ok := localExecution(op)
+		if !ok {
+			return errors.New("execution is not known locally")
+		}
+		if err := signalNative(e); err != nil {
+			return err
+		}
+		e.mu.Lock()
+		e.State = "cancelled"
+		e.mu.Unlock()
+		return result("cancelled", executionReport(e))
+	default:
+		return fmt.Errorf("unknown operation type %q", op.Type)
+	}
+}
+
+func waitBackoff(ctx context.Context, duration time.Duration) error {
+	timer := time.NewTimer(duration/2 + time.Duration(time.Now().UnixNano()%int64(duration/2)))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a < b {
+		return a
+	}
+	return b
+}
+func stringValue(v any) string      { value, _ := v.(string); return value }
+func intValue(v any) int            { value, _ := v.(float64); return int(value) }
+func mapValue(v any) map[string]any { value, _ := v.(map[string]any); return value }
 
 func handleOperation(ctx context.Context, c *Client, s Store, op Operation) error {
 	log.Printf("handling %s for %s", op.Type, op.Workspace)

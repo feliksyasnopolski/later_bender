@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEnrollmentAndChallengeAuthenticationUseBackendContract(t *testing.T) {
@@ -64,5 +65,30 @@ func TestEnrollmentAndChallengeAuthenticationUseBackendContract(t *testing.T) {
 	}
 	if !strings.HasPrefix(id.ServerURL, "http") {
 		t.Fatal("server URL not persisted")
+	}
+}
+
+func TestWebsocketURLUsesTheAuthenticatedTransportEndpoint(t *testing.T) {
+	if got := websocketURL("https://laterbender-api.example/base"); got != "wss://laterbender-api.example/api/remote-agent/stream" {
+		t.Fatalf("websocket URL = %q", got)
+	}
+	if got := websocketURL("http://127.0.0.1:3000"); got != "ws://127.0.0.1:3000/api/remote-agent/stream" {
+		t.Fatalf("websocket URL = %q", got)
+	}
+}
+
+func TestRTTHealthRequiresTwoMateriallyDegradedSamples(t *testing.T) {
+	var health rttHealth
+	if health.observe(100 * time.Millisecond) {
+		t.Fatal("baseline sample marked degraded")
+	}
+	if health.observe(110 * time.Millisecond) {
+		t.Fatal("normal sample marked degraded")
+	}
+	if health.observe(500 * time.Millisecond) {
+		t.Fatal("one RTT spike triggered reconnect")
+	}
+	if !health.observe(500 * time.Millisecond) {
+		t.Fatal("sustained RTT degradation did not trigger reconnect")
 	}
 }

@@ -54,8 +54,18 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(response).to have_http_status(:ok)
     session_token = json_body.fetch("session_token")
 
-    post "/api/remote-agent/heartbeat", params: advertisement.merge("name" => "Felix Mac Updated").to_json, headers: json_headers(session_token)
+    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    replacement = json_body
+    post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: replacement.fetch("challenge_id"), nonce: replacement.fetch("nonce"), signature: Base64.strict_encode64(key.sign(replacement.fetch("signed_bytes"))) }.to_json, headers: json_headers
     expect(response).to have_http_status(:ok)
+    replacement_token = json_body.fetch("session_token")
+    post "/api/remote-agent/heartbeat", params: advertisement.to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:unauthorized)
+    post "/api/remote-agent/heartbeat", params: advertisement.to_json, headers: json_headers(replacement_token)
+    expect(response).to have_http_status(:ok)
+
+    post "/api/remote-agent/heartbeat", params: advertisement.merge("name" => "Felix Mac Updated").to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:unauthorized)
     expect(agent.reload.capabilities).to eq("process_control" => "process_group")
 
     get "/api/workspaces/targets", headers: json_headers(@raw_token)
