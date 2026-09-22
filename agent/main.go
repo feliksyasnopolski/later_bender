@@ -495,13 +495,14 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 		return nil, errors.New("missing invocation")
 	}
 	var argv []string
+	root := filepath.Join(w.Root, "root")
 	switch invocation["kind"] {
 	case "shell":
 		command, ok := invocation["command"].(string)
 		if !ok {
 			return nil, errors.New("invalid shell invocation")
 		}
-		argv = []string{"/bin/bash", "-lc", command}
+		argv = []string{"/bin/bash", "-lc", rewriteNativePaths(command, root)}
 	case "argv":
 		values, ok := invocation["argv"].([]any)
 		if !ok || len(values) == 0 {
@@ -512,13 +513,12 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 			if !ok {
 				return nil, errors.New("invalid argv value")
 			}
-			argv = append(argv, item)
+			argv = append(argv, rewriteNativePaths(item, root))
 		}
 	default:
 		return nil, errors.New("invalid invocation kind")
 	}
 	cwd, _ := op.Spec["cwd"].(string)
-	root := filepath.Join(w.Root, "root")
 	if cwd == "" || cwd == "/workspace" {
 		cwd = root
 	} else {
@@ -823,6 +823,13 @@ func bytesContainsNul(value []byte) bool {
 		}
 	}
 	return false
+}
+
+func rewriteNativePaths(value, root string) string {
+	const rootMarker = "\x00LB_ROOT_PATH\x00"
+	value = strings.ReplaceAll(value, "/root", rootMarker)
+	value = strings.ReplaceAll(value, "/workspace", root)
+	return strings.ReplaceAll(value, rootMarker, filepath.Join(root, "root"))
 }
 
 func provisionWorkspaceFiles(ctx context.Context, c *Client, s Store, ref string) error {

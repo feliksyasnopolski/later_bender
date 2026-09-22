@@ -101,6 +101,15 @@ func TestCredentialFilesAreCreateOnlyAndWorkspaceScoped(t *testing.T) {
 	}
 }
 
+func TestRewriteNativePathsKeepsLogicalWorkspacePathsAgentOwned(t *testing.T) {
+	root := "/private/var/felix/workspaces/WS-1/root"
+	got := rewriteNativePaths("cat /workspace/input && test -f /root/id_ed25519", root)
+	want := "cat /private/var/felix/workspaces/WS-1/root/input && test -f /private/var/felix/workspaces/WS-1/root/root/id_ed25519"
+	if got != want {
+		t.Fatalf("rewritten command = %q, want %q", got, want)
+	}
+}
+
 func TestStorePrepareIsIdempotentAndRejectsChangedSpec(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	a, err := s.prepare("WS-7", "native", "WSOP-1", "abc")
