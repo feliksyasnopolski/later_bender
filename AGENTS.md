@@ -2,18 +2,28 @@
 
 ## Start here
 
-This repository contains the Rails API, the Vue frontend, and the TypeScript
-MCP adapter. Read [`OPERATIONS.md`](OPERATIONS.md) before deployment,
-production inspection, or model-facing acceptance. It is the authoritative
-repo-local description of validation, GitOps, MicroK8s, release, and live
-acceptance boundaries.
+Later Bender is a canonical durable working-state layer shared by humans and
+model clients. Tasks are actionable durable state. Notes are durable mutable
+non-actionable semantic memory. Files are immutable canonical evidence and
+artifacts, with readable representations and citations where applicable.
+Credentials are durable secret metadata and bindings; secret values must not
+leak into normal state, logs, or documentation. Workspaces are transient
+execution environments, and Remote Agents are execution targets behind the
+provider-neutral Workspace abstraction.
+
+The frontend, JSON API, and MCP adapter are first-class clients of the same
+canonical backend state, not separate products. Read [`OPERATIONS.md`](OPERATIONS.md)
+before deployment, production inspection, or model-facing acceptance; it is the
+authoritative repo-local guide for those boundaries.
 
 ## Repository layout and canonical checks
 
-- `backend/`: Rails application, JSON API, search, canonical Files, and RSpec/OpenAPI contracts.
+- `backend/`: Rails application, JSON API, canonical durable state, Files, and RSpec/OpenAPI contracts.
 - `mcp/`: TypeScript Streamable HTTP adapter and MCP contract tests.
 - `frontend/`: Vue/Vite application and Playwright browser acceptance.
-- `.github/workflows/`: immutable backend and MCP GHCR image publication on `master`.
+- `agent/`: Go native Remote Agent runtime and protocol tests.
+- `runner/`: hosted Workspace runner and its operational controls.
+- `.github/workflows/`: backend and MCP image publication workflows.
 
 Run commands from the component directory they belong to:
 
@@ -27,63 +37,93 @@ cd backend && bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error
 cd mcp && npm test && npm run build
 cd frontend && npm ci && npm run build
 cd frontend && PLAYWRIGHT_USERNAME=... PLAYWRIGHT_PASSWORD=... npm run test:e2e
+cd agent && go test ./...
+cd agent && go build ./...
 ```
 
-`backend/bin/ci` is the repository's canonical continuous-integration runner
-and includes RSpec, OpenAPI drift, RuboCop, MCP tests/build, bundler-audit, and
-Brakeman. The `.github/workflows/` files currently publish images; they do not
-run the test gate. Frontend Playwright is not CI-gated by this repository and
-requires authenticated local credentials; use it for rendered frontend
-changes.
+`backend/bin/ci` is the canonical backend/repository gate and includes RSpec,
+OpenAPI drift, RuboCop, MCP tests/build, bundler-audit, and Brakeman. The GitHub
+workflows currently publish images but do not run that gate. Frontend Playwright
+requires authenticated local credentials and is not CI-gated here; use it for
+rendered frontend changes. The Go Agent checks validate the standalone runtime.
 
-Hard boundaries: keep Rails as the canonical state boundary; preserve
-user/project ownership and OAuth authentication; do not weaken strict MCP
-schemas to accept Rails internals; do not deploy with old Kamal, Caddy,
-host-global systemd, or standalone MCP service paths; and do not put secrets or
-transient credentials in source, documentation, or test output.
+## Authority and execution boundaries
 
-Later, Bender is personal project and task management software. It supports multiple users, but every project has exactly one owner. Projects are not collaborative: there are no shared owners, memberships, invitations, or role matrices. Adding collaboration is a product decision, not a missing implementation detail.
+- Rails/PostgreSQL is canonical for durable Later Bender state and for
+  Workspace/Execution identity and lifecycle state.
+- Native Remote Agent execution runs with the authority of the OS identity
+  running the Agent. It is not a sandbox.
+- Hosted Workspaces are containerized execution environments, but are not to be
+  described as hardened sandboxes.
+- Workspace creation, target selection, placement, execution,
+  transcript/output interaction, and related execution operations are
+  model-facing.
+- Human UI should manage durable state and Remote Agent administration and
+  enrollment. Do not add human Workspace-placement controls merely because
+  Remote Agents exist.
+- Keep provider details behind provider-neutral Workspace contracts wherever
+  the current architecture does so.
 
-The human UI and JSON API are equal control surfaces over the same canonical backend state. External clients, including AI assistants, must be able to inspect, create, update, classify, search, and filter the same projects and tasks shown in the UI. AI is an important client, not the product definition; do not reduce Later, Bender to an "AI backlog."
+Preserve authentication and ownership boundaries, strict MCP schemas, and
+secret handling. Do not resurrect retired Kamal, Caddy, host-global systemd,
+or standalone MCP deployment paths.
 
 ## Domain invariants
 
-- A `User` owns projects and authentication credentials.
-- A `Project` belongs to one user and contains tasks.
-- A `Task` belongs to one project and has tags through task-tag associations.
-- Tags are cheap, reusable, global classification where the implementation permits, and can be created on use through the task API.
-- Scope projects to the authenticated user and reach tasks through owned projects. Never leak cross-user data or resource existence.
-- The backend is canonical. The API uses JSON; nested project/task routes are the natural task mutation surface. Cross-project retrieval and search are first-class operations.
-- Task prose, including context and intended direction, may contain Markdown.
+- A `User` owns Projects, Notes, Credentials, Workspaces, and Remote Agents.
+- A Project is a lightweight user-owned scope for its Tasks and canonical
+  Files. A Task belongs to a Project and may relate to Notes and Files.
+- Notes belong to a User and may be global or scoped to that User's Project.
+  They represent non-actionable semantic memory; Tasks represent actionable
+  work.
+- Files belong to a User-owned Project. Their canonical bytes are immutable;
+  representations, citations, tags, and Task/Note relationships are derived
+  or relational access paths to that evidence.
+- Credentials expose metadata and bindings to authorized operations, never
+  secret values in ordinary projections or diagnostics.
+- Workspaces are user-scoped transient environments with durable identity,
+  lifecycle, executions, and transcripts as implemented. A Workspace may be
+  placed on a hosted offering or a user-owned Remote Agent.
+- Remote Agents are user-owned durable administration/enrollment identities
+  and execution targets. Their provider-specific runtime state must not become
+  a second source of durable product truth.
+- Scope every resource and relationship to the authenticated user. Never leak
+  another user's data or even resource existence.
 
-Treat the code as the source of truth for exact fields and implemented scoping. Do not turn incidental fields into permanent doctrine.
+Treat the code and API as the source of truth for exact fields and current
+scoping. Do not promote incidental schema fields into permanent doctrine.
 
 ## Engineering principles
 
-- Use ordinary Rails conventions in `backend/`. Prefer the framework's conventional solution to repository, command, service, or use-case layers invented without a concrete readability or reuse need.
-- Keep `frontend/` a separate, Vue-based application. Use mature libraries when they solve a real problem; do not reimplement established framework or library behavior merely to minimize dependency count. Dependencies must earn their value, but dependency avoidance is not an ideology.
-- Keep code straightforward: obvious control flow, conventional placement, few moving parts, and easy diagnosis from shell and runtime evidence. Avoid clever metaprogramming and ornamental infrastructure.
-- Prefer normal REST resources, explicit JSON fields, predictable status codes, and structured validation errors. Treat UI-only support for an operation that naturally belongs in the API with suspicion.
-- Preserve the current authentication model unless a task deliberately changes it: Devise username/password without assuming email identity, opaque bearer credentials rather than JWTs, user-scoped access, and optional TOTP recovery where implemented. Do not casually redesign authentication.
+- Inspect the applicable code, documentation, durable Task/Note state, and repo
+  guidance before changing anything. Current task and repository evidence
+  overrides stale assumptions.
+- Keep scope literal. Preserve unrelated work and do not mix speculative
+  features, cleanup, deployment, or redesign into a focused task.
+- Use ordinary Rails, Vue, TypeScript, and Go conventions and mature mechanisms
+  where they solve the problem. Avoid invented layers, infrastructure, or
+  abstractions without a concrete need.
+- Validate behavior at the boundary where defects can occur. Runtime evidence
+  outranks contradictory green tests; do not claim deployment or live acceptance
+  from local checks alone.
+- Preserve the current authentication model and user/resource scoping. Keep
+  model-facing contracts explicit and narrow rather than accepting Rails
+  internals for convenience.
 
 ### No perdoling
 
-Do not spend prolonged effort forcing a route after its expected value has collapsed. Do not reinvent mature functionality, add impressive-looking abstractions or infrastructure, or cargo-cult tests, architecture, dependencies, or deployment practices. Almost any route can be made to work with enough effort; that does not make it worthwhile. Prefer a simpler proven tool when it solves the problem. When evidence shows the chosen path is wrong, change the path instead of polishing around it indefinitely.
+Do not spend prolonged effort forcing a route after its expected value has
+collapsed. Do not reinvent mature functionality or add impressive-looking
+infrastructure without evidence. When the chosen path is wrong, change it
+instead of polishing around it.
 
 ## Product restraint
 
-Build features for concrete, recurring problems observed in actual use—not competitor parity, hypothetical demand, implementation convenience, generic task-manager expectations, or AI-agent convenience alone.
+Build for concrete recurring problems, not competitor parity or hypothetical
+demand. Do not add automatic Jira or enterprise feature creep, collaboration,
+RBAC, workflow machinery, or speculative infrastructure without a concrete
+need. Files and other shipped surfaces are part of the current product; do not
+describe them as hypothetical task-manager attachments.
 
-Do not casually add collaboration, roles, invitations, comments, sprints, boards, milestones, assignees, notifications, attachments, or complex workflow engines. Any may be added later when real use justifies it.
-
-Keep search simple until stronger retrieval is demonstrably valuable. Elasticsearch or OpenSearch may become appropriate for useful fuzzy or relevance-ranked corpus search, or when PostgreSQL is proven insufficient; do not add search infrastructure because task trackers are expected to have it.
-
-## Agent workflow
-
-- Read the applicable code, documentation, and repository guidance before changing anything. If evidence contradicts the task's assumptions, adapt and report it; do not reinterpret settled product or architecture decisions without a concrete blocker.
-- Keep scope literal. Do not mix requested work with speculative features, cleanup, dependency changes, or redesigns.
-- Task specifications should state the goal, invariants, constraints, required evidence, and acceptance criteria. Within those boundaries, use normal framework and tooling choices without needless line-by-line ceremony.
-- Validate the changed surface: relevant Rails tests and direct API acceptance for backend behavior; relevant frontend/browser checks for UI behavior; runtime acceptance for deployment work; documentation/static checks for documentation-only work. Do not run unrelated full suites as ceremony. Runtime evidence outranks a contradictory green test suite.
-- Preserve unrelated work already present in the tree.
-
-Keep this guide durable. Do not turn it into a version inventory or record temporary hosts, routes, deployment details, or incidental implementation choices.
+Keep this guide concise and durable. It is an entry-point guide, not a feature
+inventory, changelog, or temporary production handoff.
