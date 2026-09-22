@@ -108,6 +108,10 @@ func TestRewriteNativePathsKeepsLogicalWorkspacePathsAgentOwned(t *testing.T) {
 	if got != want {
 		t.Fatalf("rewritten command = %q, want %q", got, want)
 	}
+	shell := rewriteShellNativePaths("sha256sum /workspace/input", root)
+	if shell != "sha256sum '/private/var/felix/workspaces/WS-1/root'/input" {
+		t.Fatalf("shell rewrite = %q", shell)
+	}
 }
 
 func TestStorePrepareIsIdempotentAndRejectsChangedSpec(t *testing.T) {

@@ -502,7 +502,7 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 		if !ok {
 			return nil, errors.New("invalid shell invocation")
 		}
-		argv = []string{"/bin/bash", "-lc", rewriteNativePaths(command, root)}
+		argv = []string{"/bin/bash", "-lc", rewriteShellNativePaths(command, root)}
 	case "argv":
 		values, ok := invocation["argv"].([]any)
 		if !ok || len(values) == 0 {
@@ -830,6 +830,14 @@ func rewriteNativePaths(value, root string) string {
 	value = strings.ReplaceAll(value, "/root", rootMarker)
 	value = strings.ReplaceAll(value, "/workspace", root)
 	return strings.ReplaceAll(value, rootMarker, filepath.Join(root, "root"))
+}
+
+func rewriteShellNativePaths(value, root string) string {
+	quotedRoot := "'" + strings.ReplaceAll(root, "'", "'\\''") + "'"
+	const rootMarker = "\x00LB_ROOT_PATH\x00"
+	value = strings.ReplaceAll(value, "/root", rootMarker)
+	value = strings.ReplaceAll(value, "/workspace", quotedRoot)
+	return strings.ReplaceAll(value, rootMarker, "'"+strings.ReplaceAll(filepath.Join(root, "root"), "'", "'\\''")+"'")
 }
 
 func provisionWorkspaceFiles(ctx context.Context, c *Client, s Store, ref string) error {
