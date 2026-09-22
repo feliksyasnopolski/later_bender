@@ -12,6 +12,7 @@ const executionState = z.enum([
   "timed_out",
   "cancelled",
   "failed_to_start",
+  "lost",
 ]);
 const bytes = z.number().int().nonnegative();
 const resourceRequirements = {

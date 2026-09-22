@@ -378,6 +378,12 @@ func startNative(s Store, op Operation) (*LocalExecution, error) {
 			if existing.SpecHash != op.SpecHash || existing.Workspace != op.Workspace {
 				return nil, errors.New("execution identity conflicts with existing spec")
 			}
+			if existing.State == "running" && !processIsAlive(existing.PID) {
+				now := time.Now().UTC()
+				existing.State = "lost"
+				existing.FinishedAt = &now
+				_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), &existing, 0600)
+			}
 			executionMu.Lock()
 			executions[op.Execution] = &existing
 			executionMu.Unlock()
@@ -516,6 +522,10 @@ func startNative(s Store, op Operation) (*LocalExecution, error) {
 		_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), e, 0600)
 	}()
 	return e, nil
+}
+
+func processIsAlive(pid int) bool {
+	return pid > 0 && syscall.Kill(pid, 0) == nil
 }
 
 func signalNative(e *LocalExecution) error {

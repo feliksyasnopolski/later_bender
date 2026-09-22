@@ -81,8 +81,8 @@ class RemoteAgentTransport
     return if execution.state != "running" && status != "running"
     execution.stdout_data = bounded_output(payload["stdout_base64"]) if payload["stdout_base64"]
     execution.stderr_data = bounded_output(payload["stderr_base64"]) if payload["stderr_base64"]
-    execution.finished_at = Time.current if %w[exited timed_out cancelled failed].include?(status)
-    execution.state = status == "failed" ? "failed_to_start" : status if %w[running exited timed_out cancelled failed].include?(status)
+    execution.finished_at = Time.current if %w[exited timed_out cancelled failed lost].include?(status)
+    execution.state = status == "failed" ? "failed_to_start" : status if %w[running exited timed_out cancelled failed lost].include?(status)
     execution.exit_code = payload["exit_code"] if payload.key?("exit_code")
     execution.terminating_signal = printable_value(payload["terminating_signal"], 80) if payload.key?("terminating_signal")
     changed = execution.state_changed?
