@@ -76,6 +76,28 @@ helm -n later-bender status later-bender
 The cluster API is the Oracle host at `193.123.38.157:16443`. PostgreSQL is
 host-managed and private. Elasticsearch is a private, disposable derived
 index; canonical PostgreSQL and Active Storage File bytes are not disposable.
+Redis is also private, single-instance, and disposable: it carries only
+cross-process SSE invalidation hints and is not canonical storage. It is
+deployed independently by the shared-infra Helm chart, so its lifecycle and
+endpoint are not coupled to any one application.
+
+The backend receives Redis through `REDIS_URL`, supplied in its out-of-band
+runtime Secret. The standalone chart supplies the in-cluster endpoint
+`redis://redis.shared-infra.svc.cluster.local:6379/0`; a managed Redis
+migration only needs each consumer's configuration to supply a different URL.
+Redis has no persistence, HA, cluster, or Sentinel configuration because losing
+it only loses transient invalidations; the browser converges by reconnecting
+and refetching canonical HTTP state.
+
+Verify Redis with:
+
+```sh
+helm -n shared-infra status redis
+kubectl -n shared-infra get deployment/redis pod -l app.kubernetes.io/name=redis
+kubectl -n shared-infra get service redis
+kubectl -n shared-infra exec deployment/redis -- redis-cli ping
+kubectl -n later-bender exec deployment/later-bender-later-bender -- sh -c 'test -n "$REDIS_URL" && printf "%s\\n" "$REDIS_URL"'
+```
 
 ## Image publication and deployment
 

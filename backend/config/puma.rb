@@ -34,6 +34,8 @@ port ENV.fetch("PORT", 3000)
 # Allow puma to be restarted by `bin/rails restart` command.
 plugin :tmp_restart
 
+on_worker_shutdown { LiveEvents.shutdown! }
+
 # Run the Solid Queue supervisor inside of Puma for single-server deployments.
 
 # Specify the PID file. Defaults to tmp/pids/server.pid in development.
