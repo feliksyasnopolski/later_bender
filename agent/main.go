@@ -705,7 +705,11 @@ func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
 					}
 					return send(payload)
 				}); err != nil {
-					_ = send(map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": "failed", "message": err.Error()})
+					failure := map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": "failed", "message": err.Error()}
+					if op.Execution != "" {
+						failure["execution"] = op.Execution
+					}
+					_ = send(failure)
 				}
 			case "pong":
 				lastPong = time.Now()
