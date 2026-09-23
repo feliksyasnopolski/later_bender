@@ -374,7 +374,7 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "maintain_note", "manage_files", "read_archive_entry", "read_file", "read_files", "record_note", "record_project", "record_task", "retrieve_file", "revise_note", "revise_project", "revise_task", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", ...workspaceToolNames].sort());
+  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", ...workspaceToolNames].sort());
   assert.ok(tools.create_task.inputSchema);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", representation: "text", locator: { kind: "lines", start: 138, end: 152 } }]).success, true);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", locator: { kind: "bytes", start: 1, end: 2 } }]).success, false);
@@ -386,6 +386,9 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.match(tools.read_files.description, /typed results.*bounded follow-up reads and citations/i);
   assert.equal(tools.list_tasks.annotations.readOnlyHint, true);
   assert.equal(tools.update_task.annotations.destructiveHint, true);
+  for (const name of ["create_task", "update_task", "create_note", "update_note", "edit_note", "create_project", "update_project"]) {
+    assert.equal(tools[name].annotations.readOnlyHint, true);
+  }
   assert.deepEqual(tools.create_file._meta, { "openai/fileParams": ["file"] });
   assert.equal(tools.retrieve_file.inputSchema.shape.transport.safeParse("resource_link").success, true);
   assert.equal(tools.retrieve_file.inputSchema.shape.transport.safeParse("embedded_resource").success, true);
@@ -414,32 +417,6 @@ test("registers exactly the v1 tools with schemas", () => {
   assert.equal(tools.list_notes.inputSchema.safeParse({}).success, true);
   assert.equal(tools.search_memory.inputSchema.safeParse({ query: "decision", scope: "all", project: "writing" }).success, false);
   assert.equal(tools.update_project.inputSchema.shape.archived_at, undefined);
-});
-
-test("experimental mutation aliases share canonical schemas, annotations, and handlers", async () => {
-  const pairs = [["create_task", "record_task"], ["update_task", "revise_task"], ["create_note", "record_note"], ["update_note", "revise_note"], ["edit_note", "maintain_note"], ["create_project", "record_project"], ["update_project", "revise_project"]] as const;
-  const server = new McpServer({ name: "test", version: "1" });
-  const { api } = apiFor([{ status: 201, body: { ref: "LB-8", updated_at: "2026-09-23T00:00:00Z" } }]);
-  registerTools(server, api);
-  const tools = (server as any)._registeredTools as Record<string, any>;
-  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
-  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: "test-client", version: "1" });
-  await server.connect(serverTransport);
-  await client.connect(clientTransport);
-  const listed = await client.listTools();
-  for (const [canonical, alias] of pairs) {
-    assert.ok(listed.tools.some((tool) => tool.name === canonical));
-    assert.ok(listed.tools.some((tool) => tool.name === alias));
-    assert.deepEqual(tools[canonical].inputSchema.shape, tools[alias].inputSchema.shape);
-    assert.deepEqual(tools[canonical].outputSchema.shape, tools[alias].outputSchema.shape);
-    assert.deepEqual(tools[alias].annotations, tools[canonical].annotations);
-    assert.equal(tools[alias].handler, tools[canonical].handler);
-  }
-  const result = await client.callTool({ name: "record_task", arguments: { project: "writing", title: "Alias" } });
-  assert.deepEqual(result.structuredContent, { task: { ref: "LB-8", updated_at: "2026-09-23T00:00:00Z" } });
-  await client.close();
-  await server.close();
 });
 
 test("keeps note summary and full-note schemas separate", () => {

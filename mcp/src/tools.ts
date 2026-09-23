@@ -591,19 +591,6 @@ function egressMetadata(file: FileEgress) {
 }
 
 export function registerTools(server: McpServer, api: LaterBenderApi): void {
-  const registerTool = (name: string, config: any, handler: any) => {
-    const { experimentalAlias, ...canonicalConfig } = config;
-    server.registerTool(name as any, canonicalConfig, handler);
-    if (experimentalAlias)
-      server.registerTool(
-        experimentalAlias.name,
-        {
-          ...canonicalConfig,
-          description: experimentalAlias.description,
-        },
-        handler,
-      );
-  };
   server.registerTool(
     "list_credentials",
     {
@@ -658,7 +645,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     },
     ({ slug }) => safe("project", () => api.getProject(slug)),
   );
-  registerTool(
+  server.registerTool(
     "create_project",
     {
       description:
@@ -671,11 +658,6 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       },
       outputSchema: projectCreateOutput,
       annotations: createAnnotations,
-      experimentalAlias: {
-        name: "record_project",
-        description:
-          "Persist a new Project. Omit slug to let Later Bender derive one from the name; the returned slug is the Project identity for subsequent calls.",
-      },
     },
     (input: any) =>
       safe("project", () =>
@@ -686,7 +668,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
         })),
       ),
   );
-  registerTool(
+  server.registerTool(
     "update_project",
     {
       description: "Update mutable Project fields by slug.",
@@ -697,11 +679,6 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       },
       outputSchema: projectUpdateOutput,
       annotations: updateAnnotations,
-      experimentalAlias: {
-        name: "revise_project",
-        description:
-          "Persist supplied mutable Project field changes for the Project identified by slug.",
-      },
     },
     ({ slug, ...payload }: any) =>
       safe("project", () =>
@@ -781,7 +758,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
           ),
       ),
   );
-  registerTool(
+  server.registerTool(
     "create_task",
     {
       description:
@@ -801,16 +778,11 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       },
       outputSchema: taskMutationOutput,
       annotations: createAnnotations,
-      experimentalAlias: {
-        name: "record_task",
-        description:
-          "Persist a new actionable Task in a project and return its canonical ref. Omitted status and priority use Later Bender defaults (backlog and normal). position controls canonical board order; omitted position appends. Unknown tags are created automatically. related_note_ids links Notes that materially contributed to or contextualize the Task. related_file_refs replaces the Task's generic File relationships when supplied. citations are exact evidence pointers into canonical Files, distinct from broader related_files relationships.",
-      },
     },
     ({ project: projectSlug, ...payload }: any) =>
       compactMutation("task", () => api.createTask(projectSlug, payload)),
   );
-  registerTool(
+  server.registerTool(
     "update_task",
     {
       description:
@@ -818,11 +790,6 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       inputSchema: { ref: z.string(), ...taskFields },
       outputSchema: taskMutationOutput,
       annotations: updateAnnotations,
-      experimentalAlias: {
-        name: "revise_task",
-        description:
-          "Persist supplied changes to an existing Task identified by external ref. Omitted fields preserve current values; empty relationship, tag, and citation arrays clear them; non-empty arrays replace them exactly. Unknown tags are created automatically.",
-      },
     },
     ({ ref, ...payload }: any) =>
       compactMutation("task", () => api.updateTask(ref, payload)),
@@ -856,7 +823,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     },
     ({ id }) => safe("note", () => api.getNote(id).then(noteView)),
   );
-  registerTool(
+  server.registerTool(
     "create_note",
     {
       description:
@@ -870,15 +837,10 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       },
       outputSchema: noteMutationOutput,
       annotations: createAnnotations,
-      experimentalAlias: {
-        name: "record_note",
-        description:
-          "Persist durable non-actionable context such as an idea, decision, finding, constraint, hypothesis, possible direction, or discussion result. Omit project for global context or provide a project slug for project-specific context. citations are exact evidence pointers into canonical Files, distinct from broader related_files relationships. Unknown tags are created automatically.",
-      },
     },
     (input: any) => compactMutation("note", () => api.createNote(input)),
   );
-  registerTool(
+  server.registerTool(
     "update_note",
     {
       description:
@@ -893,11 +855,6 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       },
       outputSchema: noteMutationOutput,
       annotations: updateAnnotations,
-      experimentalAlias: {
-        name: "revise_note",
-        description:
-          "Persist supplied field changes to a Note identified by global ID. Omitted fields preserve their current values; empty arrays clear corresponding tags or citations.",
-      },
     },
     ({ id, ...payload }: any) =>
       compactMutation("note", () => api.updateNote(id, payload)),
@@ -910,7 +867,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       new_text: z.string(),
     }),
   ]);
-  registerTool(
+  server.registerTool(
     "edit_note",
     {
       description:
@@ -922,11 +879,6 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       },
       outputSchema: noteMutationOutput,
       annotations: updateAnnotations,
-      experimentalAlias: {
-        name: "maintain_note",
-        description:
-          "Apply a small atomic batch of targeted body changes to a Note by global ID. Operations run in order; replace requires old_text to occur exactly once. expected_updated_at prevents overwriting a newer Note.",
-      },
     },
     ({ id, ...payload }: any) =>
       compactMutation("note", () => api.editNote(id, payload)),
