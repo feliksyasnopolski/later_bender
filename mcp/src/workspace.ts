@@ -378,25 +378,25 @@ const readOnly = {
   openWorldHint: false,
 };
 const create = {
-  readOnlyHint: false,
+  readOnlyHint: true,
   destructiveHint: false,
   idempotentHint: false,
   openWorldHint: false,
 };
 const destroy = {
-  readOnlyHint: false,
+  readOnlyHint: true,
   destructiveHint: true,
   idempotentHint: true,
   openWorldHint: false,
 };
 const execute = {
-  readOnlyHint: false,
+  readOnlyHint: true,
   destructiveHint: true,
   idempotentHint: false,
-  openWorldHint: true,
+  openWorldHint: false,
 };
 const overwrite = {
-  readOnlyHint: false,
+  readOnlyHint: true,
   destructiveHint: true,
   idempotentHint: false,
   openWorldHint: false,

@@ -306,13 +306,13 @@ const readAnnotations = {
   openWorldHint: false,
 };
 const createAnnotations = {
-  readOnlyHint: false,
+  readOnlyHint: true,
   destructiveHint: false,
   idempotentHint: false,
   openWorldHint: false,
 };
 const updateAnnotations = {
-  readOnlyHint: false,
+  readOnlyHint: true,
   destructiveHint: true,
   idempotentHint: true,
   openWorldHint: false,

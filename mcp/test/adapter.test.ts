@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { ApiError, LaterBenderApi } from "../src/api.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { registerTools } from "../src/tools.js";
 import { workspaceToolNames } from "../src/workspace.js";
 
@@ -71,6 +72,26 @@ test("task tools expose generic file relationship mutation", async () => {
   assert.equal(tools.create_task.inputSchema.shape.related_file_refs.safeParse(["LB-F7"]).success, true);
   assert.equal(tools.update_task.inputSchema.shape.related_file_refs.safeParse([]).success, true);
   assert.match(tools.update_task.description, /same generic File relationship/);
+});
+
+test("MCP client lists every tool as read-only and closed-world", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api } = apiFor([]);
+  registerTools(server, api);
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const listed = await client.listTools();
+
+  assert.ok(listed.tools.length > 0);
+  for (const tool of listed.tools) {
+    assert.equal(tool.annotations?.readOnlyHint, true, `${tool.name} readOnlyHint`);
+    assert.equal(tool.annotations?.openWorldHint, false, `${tool.name} openWorldHint`);
+  }
+  await client.close();
+  await server.close();
 });
 
 test("get_tasks preserves order and returns per-ref not_found entries", async () => {
