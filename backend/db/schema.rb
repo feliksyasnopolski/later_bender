@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_22_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_29_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -281,8 +281,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_160000) do
 
   create_table "remote_workspace_placements", force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.string "error_code"
     t.text "error_message"
     t.string "executor", null: false
+    t.string "failure_stage"
     t.string "operation_id", null: false
     t.string "operation_kind", default: "prepare", null: false
     t.datetime "prepared_at"
@@ -397,7 +399,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_22_160000) do
     t.datetime "created_at", null: false
     t.string "cwd", default: "/workspace", null: false
     t.jsonb "env", default: {}, null: false
+    t.string "error_code"
+    t.text "error_message"
     t.integer "exit_code"
+    t.string "failure_stage"
     t.datetime "finished_at"
     t.jsonb "invocation", default: {}, null: false
     t.string "ref", null: false

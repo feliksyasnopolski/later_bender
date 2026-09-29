@@ -156,7 +156,7 @@ module Api
     def transcript
       refresh_workspace_executions!
       events = @workspace.workspace_events.order(:sequence)
-      render json: { workspace: @workspace.ref, events: events.map { |event| event.payload.merge("kind" => event.kind, "sequence" => event.sequence, "occurred_at" => event.occurred_at.iso8601, "workspace" => @workspace.ref) }, next_cursor: nil }
+      render json: { workspace: @workspace.ref, events: events.map { |event| WorkspaceEventProjection.call(event) }, next_cursor: nil }
     end
 
     def promote_transcript
@@ -504,16 +504,16 @@ module Api
 
     def transcript_execution_payload(result, execution)
       result = result.fetch("execution", result)
-      { "execution" => execution.ref, "invocation" => result.fetch("invocation", execution.invocation), "cwd" => result.fetch("cwd", execution.cwd), "secret_env_names" => result.fetch("secret_env_names", execution.secret_env_names), "started_at" => result.fetch("started_at", execution.started_at), "finished_at" => result["finished_at"] || execution.finished_at, "requested_timeout_seconds" => timeout_seconds_value(result["requested_timeout_seconds"] || execution.requested_timeout_seconds), "state" => result.fetch("state", execution.state), "exit_code" => result["exit_code"] || execution.exit_code, "terminating_signal" => result["terminating_signal"] || execution.terminating_signal, "stdout_preview" => result.fetch("stdout", stream_projection(execution, :stdout)), "stderr_preview" => result.fetch("stderr", stream_projection(execution, :stderr)) }
+      { "execution" => execution.ref, "invocation" => result.fetch("invocation", execution.invocation), "cwd" => result.fetch("cwd", execution.cwd), "secret_env_names" => result.fetch("secret_env_names", execution.secret_env_names), "started_at" => result.fetch("started_at", execution.started_at), "finished_at" => result["finished_at"] || execution.finished_at, "requested_timeout_seconds" => timeout_seconds_value(result["requested_timeout_seconds"] || execution.requested_timeout_seconds), "state" => result.fetch("state", execution.state), "failure" => execution.failure_projection, "exit_code" => result["exit_code"] || execution.exit_code, "terminating_signal" => result["terminating_signal"] || execution.terminating_signal, "stdout_preview" => result.fetch("stdout", stream_projection(execution, :stdout)), "stderr_preview" => result.fetch("stderr", stream_projection(execution, :stderr)) }
     end
 
-    def summary(workspace) = full(workspace).slice(:ref, :label, :state, :environment, :architecture, :created_at, :last_activity_at, :expires_at)
+    def summary(workspace) = full(workspace).slice(:ref, :label, :state, :environment, :architecture, :created_at, :last_activity_at, :expires_at, :failure)
     def full(workspace)
       placement = workspace.remote_workspace_placement
       { ref: workspace.ref, label: workspace.label, state: workspace.state, environment: workspace.environment, architecture: workspace.architecture, os: workspace.os, shell: workspace.shell, workspace_root: workspace.workspace_root, limits: workspace.limits, capabilities: workspace.capabilities, credential_bindings: workspace.credential_bindings, created_at: workspace.created_at, last_activity_at: workspace.last_activity_at, expires_at: workspace.expires_at,
-        target: placement&.remote_agent&.ref || "hosted", executor: placement&.executor, availability: placement ? (placement.remote_agent.online? ? "online" : "offline") : "available" }
+        target: placement&.remote_agent&.ref || "hosted", executor: placement&.executor, availability: placement ? (placement.remote_agent.online? ? "online" : "offline") : "available", failure: placement&.state == "failed" ? placement.failure_projection.except("operation_id") : nil }
     end
-    def execution_json(execution) = { ref: execution.ref, workspace: @workspace.ref, sequence: execution.sequence, state: execution.state, invocation: execution.invocation, cwd: execution.cwd, env: execution.env, secret_env_names: execution.secret_env_names, started_at: execution.started_at, finished_at: execution.finished_at, exit_code: execution.exit_code, terminating_signal: execution.terminating_signal, requested_timeout_seconds: timeout_seconds_value(execution.requested_timeout_seconds), stdout: stream_projection(execution, :stdout), stderr: stream_projection(execution, :stderr) }
+    def execution_json(execution) = { ref: execution.ref, workspace: @workspace.ref, sequence: execution.sequence, state: execution.state, invocation: execution.invocation, cwd: execution.cwd, env: execution.env, secret_env_names: execution.secret_env_names, started_at: execution.started_at, finished_at: execution.finished_at, exit_code: execution.exit_code, terminating_signal: execution.terminating_signal, requested_timeout_seconds: timeout_seconds_value(execution.requested_timeout_seconds), failure: execution.failure_projection, stdout: stream_projection(execution, :stdout), stderr: stream_projection(execution, :stderr) }
     def timeout_seconds_value(value) = value.nil? ? nil : value.to_f
     def stream_projection(execution, stream)
       if execution.workspace.remote_workspace_placement.present?

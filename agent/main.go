@@ -25,6 +25,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
@@ -97,6 +98,10 @@ var executions = map[string]*LocalExecution{}
 func (s Store) identityPath() string           { return filepath.Join(s.Dir, "identity.json") }
 func (s Store) workspaceDir(ref string) string { return filepath.Join(s.Dir, "workspaces", ref) }
 func (s Store) executionDir(ref string) string { return filepath.Join(s.Dir, "executions", ref) }
+func (s Store) retiredWorkspaceDir(ref, operation string) string {
+	digest := sha256.Sum256([]byte(operation))
+	return filepath.Join(s.Dir, "retired-workspaces", ref, fmt.Sprintf("%x", digest[:8]))
+}
 
 func (s Store) load() (*Identity, error) {
 	b, err := os.ReadFile(s.identityPath())
@@ -165,15 +170,30 @@ func (s Store) loadWorkspace(ref string) (*Workspace, error) {
 	return &w, nil
 }
 
+// prepare isolates every active ref and retires a prior incarnation on ref reuse.
 func (s Store) prepare(ref, executor, op, specHash string) (*Workspace, error) {
 	if !validWorkspaceRef(ref) || executor != "native" || op == "" || specHash == "" {
 		return nil, errors.New("invalid prepare request")
 	}
 	if old, err := s.loadWorkspace(ref); err == nil {
-		if old.SpecHash != specHash || old.Executor != executor {
-			return nil, errors.New("Workspace already prepared with incompatible spec")
+		if old.Operation == op {
+			if old.SpecHash != specHash || old.Executor != executor {
+				return nil, errors.New("Workspace already prepared with incompatible spec")
+			}
+			return old, nil
 		}
-		return old, nil
+		archive := s.retiredWorkspaceDir(ref, old.Operation)
+		if err := os.MkdirAll(filepath.Dir(archive), 0700); err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(archive); err == nil {
+			return nil, errors.New("stale Workspace state archive already exists")
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
+		if err := os.Rename(s.workspaceDir(ref), archive); err != nil {
+			return nil, err
+		}
 	} else if !os.IsNotExist(err) {
 		return nil, err
 	}
@@ -439,6 +459,24 @@ type Operation struct {
 	Execution   string         `json:"execution"`
 }
 
+func failureFields(code, stage string, err error) map[string]string {
+	var cleaned strings.Builder
+	for _, r := range strings.ToValidUTF8(err.Error(), "�") {
+		if !unicode.IsPrint(r) {
+			r = ' '
+		}
+		if cleaned.Len()+utf8.RuneLen(r) > 500 {
+			break
+		}
+		cleaned.WriteRune(r)
+	}
+	message := strings.TrimSpace(cleaned.String())
+	if message == "" {
+		message = "Workspace operation failed"
+	}
+	return map[string]string{"code": code, "stage": stage, "message": message}
+}
+
 func (c *Client) result(ctx context.Context, op Operation, status string, extra map[string]string) error {
 	p := map[string]any{"operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": status}
 	for k, v := range extra {
@@ -601,7 +639,7 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 	if err := cmd.Start(); err != nil {
 		_ = out.Close()
 		_ = errout.Close()
-		return nil, err
+		return nil, fmt.Errorf("process spawn failed: %w", err)
 	}
 	e := &LocalExecution{Execution: op.Execution, Workspace: op.Workspace, SpecHash: op.SpecHash, State: "running", PID: cmd.Process.Pid, ProcessGroup: cmd.Process.Pid, StartedAt: time.Now().UTC(), Stdout: filepath.Join(s.executionDir(op.Execution), "stdout"), Stderr: filepath.Join(s.executionDir(op.Execution), "stderr"), cmd: cmd}
 	executionMu.Lock()
@@ -1090,7 +1128,7 @@ func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
 					}
 					return send(payload)
 				}); err != nil {
-					failure := map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": "failed", "message": err.Error()}
+					failure := map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": "failed", "code": "workspace_operation_failed", "stage": op.Type, "message": err.Error()}
 					if op.Execution != "" {
 						failure["execution"] = op.Execution
 					}
@@ -1127,10 +1165,10 @@ func handleOperationWithResult(ctx context.Context, c *Client, s Store, op Opera
 	case "prepare_workspace":
 		w, err := s.prepare(op.Workspace, op.Executor, op.OperationID, op.SpecHash)
 		if err != nil {
-			return err
+			return result("failed", failureFields("workspace_prepare_failed", "prepare", err))
 		}
 		if err := provisionWorkspaceFiles(ctx, c, s, op.Workspace); err != nil {
-			return err
+			return result("failed", failureFields("workspace_prepare_failed", "materialize_workspace", err))
 		}
 		return result("prepared", map[string]string{"provider_workspace_ref": w.Root})
 	case "destroy_workspace":
@@ -1141,7 +1179,15 @@ func handleOperationWithResult(ctx context.Context, c *Client, s Store, op Opera
 	case "start_execution":
 		e, err := startNativeWithClient(ctx, c, s, op)
 		if err != nil {
-			return result("failed", map[string]string{"execution": op.Execution, "message": err.Error()})
+			code, stage := "execution_start_failed", "process_start"
+			if strings.Contains(err.Error(), "cwd escapes Workspace root") || strings.Contains(err.Error(), "invalid invocation") {
+				code, stage = "invalid_invocation", "validate_invocation"
+			} else if strings.Contains(err.Error(), "process spawn failed:") {
+				stage = "process_spawn"
+			}
+			fields := failureFields(code, stage, err)
+			fields["execution"] = op.Execution
+			return result("failed", fields)
 		}
 		report := executionReport(e)
 		return result(report["status"], report)

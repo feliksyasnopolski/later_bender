@@ -32,6 +32,14 @@ const capabilityFlags = z.record(
   z.union([z.boolean(), z.string()]),
 );
 const os = z.object({ name: z.string(), version: z.string() });
+const failure = z
+  .object({
+    code: z.string().min(1),
+    stage: z.string().min(1),
+    message: z.string().max(500),
+  })
+  .nullable()
+  .optional();
 const architectureOffering = z.object({
   architecture: z.string(),
   os,
@@ -88,6 +96,7 @@ const workspace = z.object({
   target: z.string().optional(),
   executor: z.enum(["native", "docker"]).nullable().optional(),
   availability: z.string().optional(),
+  failure,
 });
 const workspaceSummary = z.object({
   ref: opaqueRef,
@@ -98,6 +107,7 @@ const workspaceSummary = z.object({
   created_at: timestamp,
   last_activity_at: timestamp,
   expires_at: timestamp.nullable(),
+  failure,
 });
 const canonicalFileAcknowledgement = z.object({
   ref: opaqueRef,
@@ -135,6 +145,7 @@ const execution = z.object({
   exit_code: z.number().int().nullable(),
   terminating_signal: z.string().nullable(),
   requested_timeout_seconds: z.number().positive().nullable(),
+  failure,
   stdout: streamProjection,
   stderr: streamProjection,
 });
@@ -216,6 +227,22 @@ const transcriptEvent = z.discriminatedUnion("kind", [
     workspace: opaqueRef,
   }),
   z.object({
+    kind: z.literal("workspace_prepared"),
+    sequence: z.number().int().positive(),
+    occurred_at: timestamp,
+    workspace: opaqueRef,
+  }),
+  z.object({
+    kind: z.literal("workspace_failed"),
+    sequence: z.number().int().positive(),
+    occurred_at: timestamp,
+    workspace: opaqueRef,
+    operation_id: opaqueRef,
+    code: z.string().min(1),
+    stage: z.string().min(1),
+    message: z.string().max(500),
+  }),
+  z.object({
     kind: z.literal("file_imported"),
     sequence: z.number().int().positive(),
     occurred_at: timestamp,
@@ -238,6 +265,7 @@ const transcriptEvent = z.discriminatedUnion("kind", [
     finished_at: timestamp.nullable(),
     requested_timeout_seconds: z.number().positive().nullable(),
     state: executionState,
+    failure,
     exit_code: z.number().int().nullable(),
     terminating_signal: z.string().nullable(),
     stdout_preview: streamProjection,

@@ -179,3 +179,50 @@ test("exec_workspace preserves invalid UTF-8 output as base64 through tools/call
 function registeredExecSchema() {
   return tools().exec_workspace.inputSchema;
 }
+
+test("Workspace diagnostic projections use bounded schemas", () => {
+  const registered = tools();
+  const failure = {
+    code: "workspace_prepare_failed",
+    stage: "prepare",
+    message: "Workspace already prepared with incompatible spec",
+  };
+  assert.equal(
+    registered.get_workspace.outputSchema.safeParse({
+      workspace: {
+        ref: "WS-3",
+        label: null,
+        state: "failed",
+        environment: "darwin",
+        architecture: "arm64",
+        os: { name: "macOS", version: "unknown" },
+        shell: "/bin/bash",
+        workspace_root: "/workspace",
+        limits: { cpus: null, memory_bytes: null, disk_bytes: null, pids: null },
+        capabilities: {},
+        created_at: "2026-01-01T00:00:00Z",
+        last_activity_at: "2026-01-01T00:00:00Z",
+        expires_at: null,
+        failure,
+      },
+    }).success,
+    true,
+  );
+  assert.equal(
+    registered.read_workspace_transcript.outputSchema.safeParse({
+      workspace: "WS-3",
+      next_cursor: null,
+      events: [
+        {
+          kind: "workspace_failed",
+          workspace: "WS-3",
+          sequence: 2,
+          occurred_at: "2026-01-01T00:00:00Z",
+          operation_id: "WSOP-1",
+          ...failure,
+        },
+      ],
+    }).success,
+    true,
+  );
+});

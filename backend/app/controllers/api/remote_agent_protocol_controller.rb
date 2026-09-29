@@ -100,15 +100,18 @@ module Api
       case payload.fetch("status")
       when "prepared"
         placement.with_lock do
-          placement.update!(state: "ready", provider_workspace_ref: printable_value(payload["provider_workspace_ref"], 200), prepared_at: placement.prepared_at || Time.current)
+          placement.update!(state: "ready", provider_workspace_ref: printable_value(payload["provider_workspace_ref"], 200), prepared_at: placement.prepared_at || Time.current, error_code: nil, failure_stage: nil, error_message: nil)
           placement.workspace.update!(state: "ready", last_activity_at: Time.current)
           placement.workspace.append_event!("workspace_prepared", {}) unless placement.workspace.workspace_events.exists?(kind: "workspace_prepared")
         end
       when "failed"
         message = printable_value(payload.fetch("message"), 500)
         placement.with_lock do
-          placement.update!(state: "failed", error_message: message)
+          placement.update!(state: "failed", error_code: printable_value(payload["code"], 80).presence || "workspace_prepare_failed", failure_stage: printable_value(payload["stage"], 80).presence || "prepare", error_message: message)
           placement.workspace.update!(state: "failed", last_activity_at: Time.current)
+          unless placement.workspace.workspace_events.exists?(kind: "workspace_failed", payload: { "operation_id" => placement.operation_id })
+            placement.workspace.append_event!("workspace_failed", placement.failure_projection.merge("operation_id" => placement.operation_id))
+          end
         end
       when "destroyed"
         raise ArgumentError unless placement.operation_kind == "destroy"
@@ -186,6 +189,11 @@ module Api
       end
       execution.finished_at = Time.current if %w[exited timed_out cancelled failed lost].include?(status)
       execution.state = status == "failed" ? "failed_to_start" : status if %w[running exited timed_out cancelled failed lost].include?(status)
+      if status == "failed"
+        execution.error_code = printable_value(payload["code"], 80).presence || "execution_start_failed"
+        execution.failure_stage = printable_value(payload["stage"], 80).presence || "process_start"
+        execution.error_message = printable_value(payload["message"], 500).presence || "Native execution could not start"
+      end
       execution.exit_code = payload["exit_code"] if payload.key?("exit_code")
       execution.terminating_signal = printable_value(payload["terminating_signal"], 80) if payload.key?("terminating_signal")
       changed = execution.state_changed?
@@ -196,6 +204,7 @@ module Api
           "secret_env_names" => execution.secret_env_names, "started_at" => execution.started_at,
           "finished_at" => execution.finished_at, "requested_timeout_seconds" => execution.requested_timeout_seconds,
           "state" => execution.state, "exit_code" => execution.exit_code, "terminating_signal" => execution.terminating_signal,
+          "failure" => execution.failure_projection,
           "stdout_preview" => { "format" => "base64", "data" => "", "total_byte_size" => execution.stdout_data.to_s.bytesize, "inline_complete" => execution.state != "running" },
           "stderr_preview" => { "format" => "base64", "data" => "", "total_byte_size" => execution.stderr_data.to_s.bytesize, "inline_complete" => execution.state != "running" }
         })

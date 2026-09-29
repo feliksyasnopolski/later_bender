@@ -45,6 +45,10 @@ class RemoteWorkspacePlacement < ApplicationRecord
   end
 
   def replace_operation!(kind:)
-    update!(operation_kind: kind, operation_id: "WSOP-#{SecureRandom.hex(16)}", state: "pending", error_message: nil)
+    update!(operation_kind: kind, operation_id: "WSOP-#{SecureRandom.hex(16)}", state: "pending", error_code: nil, failure_stage: nil, error_message: nil)
+  end
+
+  def failure_projection
+    { "code" => error_code.presence || "workspace_prepare_failed", "stage" => failure_stage.presence || "prepare", "message" => error_message.to_s.truncate(500) }
   end
 end

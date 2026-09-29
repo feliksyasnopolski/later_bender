@@ -140,6 +140,42 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(json_body).to include("target" => agent.ref, "executor" => "native", "availability" => "online")
   end
 
+  it "projects provisioning failures with a structured transcript event" do
+    stub_const("Api::WorkspacesController::REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS", 0)
+    agent = enroll_agent
+    session_token = authenticate_agent(agent)
+    post "/api/workspaces", params: { target: agent.ref, executor: "native" }.to_json, headers: json_headers(@raw_token)
+    workspace = Workspace.find_by!(ref: json_body.fetch("ref"))
+    placement = workspace.remote_workspace_placement
+    failure = { operation_id: placement.operation_id, workspace: workspace.ref, spec_hash: placement.spec_hash, status: "failed", code: "workspace_prepare_failed", stage: "prepare", message: "Workspace already prepared with incompatible spec" }
+    post "/api/remote-agent/operations/#{placement.operation_id}/result", params: failure.to_json, headers: json_headers(session_token)
+
+    expect(workspace.reload.state).to eq("failed")
+    expect(placement.reload.failure_projection).to include("code" => "workspace_prepare_failed", "stage" => "prepare", "message" => "Workspace already prepared with incompatible spec")
+    get "/api/workspaces/#{workspace.ref}", headers: json_headers(@raw_token)
+    expect(json_body.dig("failure", "code")).to eq("workspace_prepare_failed")
+    post "/api/workspaces/#{workspace.ref}/transcript", params: {}.to_json, headers: json_headers(@raw_token)
+    expect(json_body.fetch("events").last).to include("kind" => "workspace_failed", "code" => "workspace_prepare_failed", "stage" => "prepare", "message" => "Workspace already prepared with incompatible spec")
+  end
+
+  it "exposes a structured reason when native execution cannot start" do
+    stub_const("Api::WorkspacesController::REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS", 0)
+    agent = enroll_agent
+    session_token = authenticate_agent(agent)
+    post "/api/workspaces", params: { target: agent.ref, executor: "native" }.to_json, headers: json_headers(@raw_token)
+    workspace = Workspace.find_by!(ref: json_body.fetch("ref"))
+    placement = workspace.remote_workspace_placement
+    post "/api/remote-agent/operations/#{placement.operation_id}/result", params: { operation_id: placement.operation_id, workspace: workspace.ref, spec_hash: placement.spec_hash, status: "prepared" }.to_json, headers: json_headers(session_token)
+    post "/api/workspaces/#{workspace.ref}/executions", params: { argv: [ "/bin/pwd" ], cwd: "/Users/felix" }.to_json, headers: json_headers(@raw_token)
+    execution = workspace.workspace_executions.last
+    post "/api/remote-agent/operations/#{execution.remote_operation_id}/result", params: { operation_id: execution.remote_operation_id, workspace: workspace.ref, execution: execution.ref, spec_hash: execution.spec_hash, status: "failed", code: "invalid_invocation", stage: "validate_invocation", message: "cwd escapes Workspace root" }.to_json, headers: json_headers(session_token)
+
+    get "/api/workspace-executions/#{execution.ref}", headers: json_headers(@raw_token)
+    expect(json_body.dig("failure")).to include("code" => "invalid_invocation", "stage" => "validate_invocation", "message" => "cwd escapes Workspace root")
+    post "/api/workspaces/#{workspace.ref}/transcript", params: {}.to_json, headers: json_headers(@raw_token)
+    expect(json_body.fetch("events").last.dig("failure", "code")).to eq("invalid_invocation")
+  end
+
   it "does not fail over or create a Workspace when the selected Agent is offline" do
     agent = enroll_agent
     post "/api/workspaces", params: { target: agent.ref, executor: "native" }.to_json, headers: json_headers(@raw_token)

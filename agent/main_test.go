@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -14,6 +16,9 @@ import (
 func TestNativeExecutionCapturesOutputAndUsesStableIdentity(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	if _, err := s.prepare("WS-8", "native", "WSOP-prepare", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.prepare("WS-9", "native", "WSOP-prepare-9", "hash-9"); err != nil {
 		t.Fatal(err)
 	}
 	op := Operation{Type: "start_execution", Workspace: "WS-8", Execution: "WSE-8", OperationID: "WSOP-exec", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
@@ -49,6 +54,96 @@ func TestNativeExecutionCapturesOutputAndUsesStableIdentity(t *testing.T) {
 	}
 	if again, ok := localExecution(op); !ok || again != e {
 		t.Fatal("execution identity was not reused")
+	}
+}
+
+func TestSecondWorkspacePreparationDoesNotBreakFirstWorkspaceExecution(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	first, err := s.prepare("WS-1", "native", "WSOP-1", "hash-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.prepare("WS-2", "native", "WSOP-2", "hash-2"); err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{Type: "start_execution", Workspace: "WS-1", Execution: "WSE-2", OperationID: "WSOP-exec-2", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/pwd"}}, "cwd": "/workspace", "env": map[string]any{},
+	}}
+	e, err := startNative(s, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		e.mu.Lock()
+		state := e.State
+		e.mu.Unlock()
+		if state != "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if e.State != "exited" {
+		t.Fatalf("execution state = %s", e.State)
+	}
+	output, err := os.ReadFile(e.Stdout)
+	expected, evalErr := filepath.EvalSymlinks(filepath.Join(first.Root, "root"))
+	if err != nil || evalErr != nil || string(output) != expected+"\n" {
+		t.Fatalf("pwd output = %q, error = %v", output, err)
+	}
+}
+
+func TestFailedSecondWorkspacePreparationDoesNotBreakFirstWorkspaceExecution(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.prepare("WS-1", "native", "WSOP-1", "hash-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.prepare("WS-2", "native", "WSOP-2", "hash-2"); err != nil {
+		t.Fatal(err)
+	}
+	failed := false
+	prepare := Operation{Type: "prepare_workspace", Workspace: "WS-2", OperationID: "WSOP-2", Executor: "native", SpecHash: "wrong-hash"}
+	if err := handleOperationWithResult(context.Background(), &Client{}, s, prepare, func(status string, extra map[string]string) error {
+		failed = status == "failed" && extra["code"] == "workspace_prepare_failed" && extra["stage"] == "prepare" && strings.Contains(extra["message"], "incompatible spec")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !failed {
+		t.Fatal("incompatible prepare did not return structured failure details")
+	}
+	op := Operation{Type: "start_execution", Workspace: "WS-1", Execution: "WSE-1", OperationID: "WSOP-exec-1", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/pwd"}}, "cwd": "/workspace", "env": map[string]any{},
+	}}
+	e, err := startNative(s, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		e.mu.Lock()
+		state := e.State
+		e.mu.Unlock()
+		if state != "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if e.State != "exited" {
+		t.Fatalf("execution state = %s", e.State)
+	}
+}
+
+func TestNativeExecutionRejectsWorkingDirectoryOutsideWorkspace(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.prepare("WS-10", "native", "WSOP-10", "hash-10"); err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{Type: "start_execution", Workspace: "WS-10", Execution: "WSE-outside-cwd", OperationID: "WSOP-outside-cwd", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/pwd"}}, "cwd": "/Users/felix", "env": map[string]any{},
+	}}
+	if _, err := startNative(s, op); err == nil || !strings.Contains(err.Error(), "cwd escapes Workspace root") {
+		t.Fatalf("out-of-Workspace cwd error = %v", err)
 	}
 }
 
@@ -120,7 +215,7 @@ func TestStorePrepareIsIdempotentAndRejectsChangedSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.prepare("WS-7", "native", "WSOP-2", "abc")
+	b, err := s.prepare("WS-7", "native", "WSOP-1", "abc")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,8 +229,25 @@ func TestStorePrepareIsIdempotentAndRejectsChangedSpec(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("got %d workspace directories, want 1", len(entries))
 	}
-	if _, err := s.prepare("WS-7", "native", "WSOP-3", "different"); err == nil {
-		t.Fatal("changed spec unexpectedly succeeded")
+	if _, err := s.prepare("WS-7", "native", "WSOP-1", "different"); err == nil {
+		t.Fatal("changed spec unexpectedly succeeded for same operation")
+	}
+	if err := os.WriteFile(filepath.Join(a.Root, "root", "retained.txt"), []byte("old data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.prepare("WS-7", "native", "WSOP-2", "different")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Root != a.Root {
+		t.Fatalf("new incarnation changed active workspace root: %q != %q", c.Root, a.Root)
+	}
+	archived := s.retiredWorkspaceDir("WS-7", "WSOP-1")
+	if got, err := os.ReadFile(filepath.Join(archived, "root", "retained.txt")); err != nil || string(got) != "old data" {
+		t.Fatalf("prior Workspace data was not retained: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Root, "root", "retained.txt")); !os.IsNotExist(err) {
+		t.Fatalf("new Workspace inherited prior filesystem data: %v", err)
 	}
 	if err := s.destroy("WS-7"); err != nil {
 		t.Fatal(err)
