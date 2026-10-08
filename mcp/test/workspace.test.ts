@@ -111,7 +111,7 @@ test("Workspace input schemas are object-shaped in the actual MCP tools/list res
     assert.equal(byName[name].inputSchema.type, "object");
     assert.ok(byName[name].inputSchema.properties);
   }
-  assert.deepEqual(Object.keys(byName.exec_workspace.inputSchema.properties ?? {}).sort(), ["argv", "command", "cwd", "env", "interactive", "pty", "secret_env", "stdin", "timeout_seconds", "workspace"].sort());
+  assert.deepEqual(Object.keys(byName.exec_workspace.inputSchema.properties ?? {}).sort(), ["argv", "command", "cwd", "env", "interactive", "pty", "secret_env", "stdin", "timeout_seconds", "wait_seconds", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_file.inputSchema.properties ?? {}).sort(), ["cursor", "locator", "path", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_transcript.inputSchema.properties ?? {}).sort(), ["cursor", "from_sequence", "limit", "to_sequence", "workspace"].sort());
   await client.close();
@@ -148,7 +148,7 @@ test("exec_workspace publishes terminal and running projections through tools/ca
   await server.connect(serverTransport);
   await client.connect(clientTransport);
   const terminal = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "short" } });
-  const running = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "long" } });
+  const running = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "long", wait_seconds: 0 } });
   assert.equal((terminal.structuredContent as any).execution.state, "exited");
   assert.equal((terminal.structuredContent as any).execution.stdout.data, "out");
   assert.equal((terminal.structuredContent as any).execution.stderr.data, "err");
@@ -156,6 +156,27 @@ test("exec_workspace publishes terminal and running projections through tools/ca
   const timeout = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "sleep 2", timeout_seconds: 1 } });
   assert.equal((timeout.structuredContent as any).execution.state, "timed_out");
   assert.equal((timeout.structuredContent as any).execution.requested_timeout_seconds, 1);
+  await client.close();
+  await server.close();
+});
+
+test("exec_workspace waits for ordinary commands and returns the terminal projection", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const base = { ref: "WSE-wait", workspace: "WS-1", sequence: 1, invocation: { kind: "shell", command: "short-delay" }, cwd: "'/Users/felix/rails/later_bender'", env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", terminating_signal: null, requested_timeout_seconds: null, failure: null };
+  let polls = 0;
+  const api = {
+    executeWorkspace: async () => ({ ...base, state: "running", finished_at: null, exit_code: null, stdout: { format: "text", data: "partial", total_byte_size: 7, inline_complete: false }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: false } }),
+    getWorkspaceExecutionByRef: async (ref: string) => { polls++; assert.equal(ref, "WSE-wait"); return { ...base, state: "exited", finished_at: "2026-01-01T00:00:01Z", exit_code: 0, stdout: { format: "text", data: "complete", total_byte_size: 8, inline_complete: true }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: true } }; }
+  } as unknown as LaterBenderApi;
+  registerWorkspaceTools(server, api);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "short-delay", wait_seconds: 2 } });
+  assert.equal((result.structuredContent as any).execution.state, "exited");
+  assert.equal((result.structuredContent as any).execution.stdout.data, "complete");
+  assert.equal(polls, 1);
   await client.close();
   await server.close();
 });

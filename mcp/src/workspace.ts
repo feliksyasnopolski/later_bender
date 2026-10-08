@@ -159,6 +159,7 @@ const execCommonInput = {
   secret_env: z.record(z.string(), z.string()).optional(),
   stdin: z.string().optional(),
   timeout_seconds: z.number().positive().optional(),
+  wait_seconds: z.number().min(0).max(20).optional(),
 };
 const execInput = z
   .object({
@@ -333,6 +334,36 @@ const runtime = (api: LaterBenderApi | undefined, name: string) =>
         };
       }
     : noRuntime;
+const DEFAULT_EXECUTION_WAIT_SECONDS = 8;
+const EXECUTION_POLL_INTERVAL_MS = 400;
+
+async function waitForExecution(
+  api: LaterBenderApi,
+  initial: any,
+  seconds: number,
+) {
+  if (!initial?.ref || initial.state !== "running" || seconds <= 0)
+    return initial;
+  const deadline = Date.now() + seconds * 1000;
+  let latest = initial;
+  while (latest.state === "running" && Date.now() < deadline) {
+    await new Promise((resolve) =>
+      setTimeout(
+        resolve,
+        Math.min(EXECUTION_POLL_INTERVAL_MS, deadline - Date.now()),
+      ),
+    );
+    try {
+      const fetched: any = await api.getWorkspaceExecutionByRef(initial.ref);
+      latest = fetched?.execution || fetched || latest;
+    } catch {
+      // Execution has started: preserve its last known identity/state if observation fails.
+      break;
+    }
+  }
+  return latest;
+}
+
 async function workspaceOperation(
   api: LaterBenderApi,
   name: string,
@@ -443,7 +474,8 @@ async function workspaceOperation(
         });
       }
       case "exec_workspace": {
-        let payload = { ...input };
+        const { wait_seconds: _waitSeconds, ...executionInput } = input;
+        let payload = { ...executionInput };
         if (!payload.workspace) {
           const current: any = await api.getWorkContext();
           const selected = current?.context?.execution;
@@ -457,14 +489,21 @@ async function workspaceOperation(
           if (!payload.cwd) payload.cwd = selected.cwd;
         }
         const result: any = await api.executeWorkspace(payload);
-        const started = result?.execution || result;
+        let started = result?.execution || result;
         if (
           (input.pty || input.interactive) &&
           started?.ref &&
           started.state === "running"
-        )
+        ) {
           await api.selectForegroundExecution(started.ref);
-        return result;
+        } else if (started?.state === "running") {
+          started = await waitForExecution(
+            api,
+            started,
+            input.wait_seconds ?? DEFAULT_EXECUTION_WAIT_SECONDS,
+          );
+        }
+        return result?.execution ? { ...result, execution: started } : started;
       }
       case "send_workspace_execution_input": {
         let ref = input.ref as string | undefined;
@@ -775,7 +814,7 @@ export function registerWorkspaceTools(
   server.registerTool(
     "exec_workspace",
     {
-      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is a general-purpose execution surface for real engineering work, including normal tooling, filesystem work, package installation, and outbound network use when those capabilities are available. The selected Workspace target and environment are authoritative; the server waits briefly and returns a terminal projection or a running execution ref. By default each call is one-shot. Set pty=true for a persistent terminal or interactive=true for a persistent stdin pipe; the execution ref remains addressable across tool calls and may become the foreground session. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
+      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is a general-purpose execution surface for real engineering work, including normal tooling, filesystem work, package installation, and outbound network use when those capabilities are available. The selected Workspace target and environment are authoritative. Waits up to 8 seconds for ordinary commands to finish, returning the latest execution state and output; set wait_seconds to 0 for immediate return or 0–20 seconds to choose the wait window. A command still running returns its execution ref and current output. Set pty=true for a persistent terminal or interactive=true for a persistent stdin pipe; interactive sessions return immediately and become foreground. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
       inputSchema: execInput,
       outputSchema: { execution },
       annotations: execute,
