@@ -414,13 +414,30 @@ async function workspaceOperation(
             (created as any).workspace?.ref || (created as any).ref,
           );
         }
+        const requestedCwd = input.cwd || input.resource_path;
+        if (requestedCwd) {
+          const probeResult: any = await api.executeWorkspace({
+            workspace,
+            cwd: requestedCwd,
+            command: "pwd",
+            timeout_seconds: 10,
+          });
+          const probe = probeResult?.execution || probeResult;
+          if (probe?.state !== "exited" || probe?.exit_code !== 0) {
+            const detail =
+              probe?.failure?.message ||
+              probe?.stderr?.data ||
+              "the execution environment could not start a process in that directory";
+            throw new ApiError(
+              "path_not_found",
+              422,
+              `Cannot select working directory '${requestedCwd}': ${detail}`,
+            );
+          }
+        }
         return api.selectExecutionContext({
           workspace,
-          ...(input.cwd
-            ? { cwd: input.cwd }
-            : input.resource_path
-              ? { cwd: input.resource_path }
-              : {}),
+          ...(requestedCwd ? { cwd: requestedCwd } : {}),
         });
       }
       case "exec_workspace": {
