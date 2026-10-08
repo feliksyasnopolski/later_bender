@@ -5,7 +5,7 @@ module Api
     REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS = 6.5
     REMOTE_EXECUTION_OBSERVATION_WINDOW_SECONDS = 2.5
     REMOTE_OBSERVATION_INTERVAL_SECONDS = 0.1
-    before_action :set_workspace, only: %i[show destroy put_file read_file promote_file execute execution output cancel transcript promote_transcript]
+    before_action :set_workspace, only: %i[show destroy put_file read_file promote_file execute execution output input cancel transcript promote_transcript]
 
     def capabilities
       render json: runner.request(:get, "/capabilities")
@@ -133,6 +133,27 @@ module Api
       render json: execution_json(execution)
     end
 
+    def input
+      execution = @workspace.workspace_executions.find_by!(ref: params[:execution_ref])
+      payload = request_payload
+      data = payload["data"]
+      raise WorkspaceRunnerClient::Unavailable.new("data must be a string", code: "invalid_invocation") unless data.is_a?(String)
+      raise WorkspaceRunnerClient::Unavailable.new("input exceeds 64 KiB", code: "invalid_invocation") if data.bytesize > 65_536
+      raise WorkspaceRunnerClient::Unavailable.new("Execution is not running", code: "execution_not_running") unless execution.state == "running"
+      if @workspace.remote_workspace_placement.present?
+        raise WorkspaceRunnerClient::Unavailable.new("Interactive input is not supported by this Remote Agent executor", code: "capability_unavailable") unless @workspace.remote_workspace_placement.executor == "native"
+        operation = @workspace.remote_workspace_operations.create!(operation_id: "WSOP-#{SecureRandom.hex(16)}", kind: "input_execution", spec: { "execution" => execution.ref, "data" => data }, spec_hash: Digest::SHA256.hexdigest(JSON.generate("execution" => execution.ref, "data" => data)))
+        observe_remote_operation(window: REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS) { operation.reload; %w[succeeded failed].include?(operation.state) }
+        operation.reload
+        raise WorkspaceRunnerClient::Unavailable.new(operation.error_message.presence || "Execution input failed", code: "execution_not_running") if operation.state == "failed"
+        render json: operation.result.merge("execution" => execution.ref, "bytes_written" => data.bytesize)
+      else
+        render json: runner.request(:post, "/executions/#{execution.ref}/input", { data: })
+      end
+    rescue WorkspaceRunnerClient::Unavailable => e
+      render_runner_error(e)
+    end
+
     def output
       execution = @workspace.workspace_executions.find_by!(ref: params[:execution_ref])
       return render json: remote_output(execution, request_payload) if @workspace.remote_workspace_placement.present?
@@ -200,6 +221,13 @@ module Api
       render json: execution_json(execution)
     end
 
+    def input_by_ref
+      execution = find_execution_by_ref
+      @workspace = execution.workspace
+      params[:execution_ref] = execution.ref
+      input
+    end
+
     def output_by_ref
       execution = find_execution_by_ref
       return render json: remote_output(execution, request_payload) if execution.workspace.remote_workspace_placement.present?
@@ -235,7 +263,7 @@ module Api
       secret_env = payload["secret_env"] || {}
       raise WorkspaceRunnerClient::Unavailable.new("Invalid secret environment", code: "invalid_invocation") unless secret_env.is_a?(Hash) && secret_env.keys.all? { |key| key.to_s.match?(/\A[A-Za-z_][A-Za-z0-9_]*\z/) } && secret_env.values.all? { |value| value.is_a?(String) }
       cwd = payload["cwd"] || "/workspace"
-      spec = { "invocation" => invocation, "cwd" => cwd, "env" => env, "secret_env_names" => secret_env.keys.map(&:to_s).sort, "stdin" => payload["stdin"], "timeout_seconds" => payload["timeout_seconds"] }
+      spec = { "invocation" => invocation, "cwd" => cwd, "env" => env, "secret_env_names" => secret_env.keys.map(&:to_s).sort, "stdin" => payload["stdin"], "timeout_seconds" => payload["timeout_seconds"], "pty" => payload["pty"] == true, "interactive" => payload["interactive"] == true }
       execution = nil
       @workspace.with_lock do
         sequence = @workspace.workspace_executions.maximum(:sequence).to_i + 1
@@ -415,7 +443,8 @@ module Api
         "architecture" => agent.architecture,
         "resources" => payload["resources"] || {},
         "required_capabilities" => capabilities,
-        "label" => payload["label"]
+        "label" => payload["label"],
+        "resource_path" => payload["resource_path"]
       }
       digest = Digest::SHA256.hexdigest(JSON.generate(spec))
       workspace = nil
@@ -527,7 +556,7 @@ module Api
     end
     def render_runner_error(error)
       code = error.respond_to?(:code) && error.code.present? ? error.code : "workspace_unavailable"
-      status = %w[invalid_range invalid_cursor invalid_invocation not_text path_invalid path_not_found path_exists path_not_file credential_not_found credential_conflict credential_injection_failed target_not_found executor_unsupported capability_unavailable].include?(code) ? :unprocessable_content : :service_unavailable
+      status = %w[invalid_range invalid_cursor invalid_invocation not_text path_invalid path_not_found path_exists path_not_file credential_not_found credential_conflict credential_injection_failed target_not_found executor_unsupported capability_unavailable execution_not_running].include?(code) ? :unprocessable_content : :service_unavailable
       render json: { error: { code:, message: error.message } }, status:
     end
   end

@@ -134,16 +134,76 @@ func TestFailedSecondWorkspacePreparationDoesNotBreakFirstWorkspaceExecution(t *
 	}
 }
 
-func TestNativeExecutionRejectsWorkingDirectoryOutsideWorkspace(t *testing.T) {
+func TestNativeExecutionAllowsArbitraryHostWorkingDirectory(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	if _, err := s.prepare("WS-10", "native", "WSOP-10", "hash-10"); err != nil {
 		t.Fatal(err)
 	}
+	cwd := t.TempDir()
 	op := Operation{Type: "start_execution", Workspace: "WS-10", Execution: "WSE-outside-cwd", OperationID: "WSOP-outside-cwd", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
-		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/pwd"}}, "cwd": "/Users/felix", "env": map[string]any{},
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/pwd"}}, "cwd": cwd, "env": map[string]any{},
 	}}
-	if _, err := startNative(s, op); err == nil || !strings.Contains(err.Error(), "cwd escapes Workspace root") {
-		t.Fatalf("out-of-Workspace cwd error = %v", err)
+	e, err := startNative(s, op)
+	if err != nil {
+		t.Fatalf("arbitrary host cwd rejected: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		e.mu.Lock()
+		state := e.State
+		e.mu.Unlock()
+		if state != "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if e.State != "exited" {
+		t.Fatalf("execution state = %s", e.State)
+	}
+	out, err := os.ReadFile(e.Stdout)
+	if err != nil || !strings.Contains(string(out), cwd) {
+		t.Fatalf("stdout %q, error %v; expected cwd %q", out, err, cwd)
+	}
+}
+
+func TestNativePTYAcceptsInputAndRetainsOutput(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.prepare("WS-11", "native", "WSOP-11", "hash-11"); err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{Type: "start_execution", Workspace: "WS-11", Execution: "WSE-pty", OperationID: "WSOP-pty", Executor: "native", SpecHash: "exec-pty", Spec: map[string]any{
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/sh", "-i"}}, "cwd": "/workspace", "env": map[string]any{}, "pty": true,
+	}}
+	e, err := startNative(s, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if e.input != nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if e.input == nil {
+		t.Fatal("PTY input is unavailable")
+	}
+	if _, err := e.input.Write([]byte("printf 'PTY_OK\n'\nexit\n")); err != nil {
+		t.Fatal(err)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		e.mu.Lock()
+		state := e.State
+		e.mu.Unlock()
+		if state != "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	out, err := os.ReadFile(e.Stdout)
+	if err != nil || !strings.Contains(string(out), "PTY_OK") {
+		t.Fatalf("PTY output %q, error %v", out, err)
 	}
 }
 

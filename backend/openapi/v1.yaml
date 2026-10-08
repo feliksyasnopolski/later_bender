@@ -1243,6 +1243,58 @@ paths:
       required: true
       schema:
         type: string
+  "/api/workspaces/{ref}/executions/{execution_ref}/input":
+    post:
+      summary: api/workspaces#input
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
+    - name: execution_ref
+      in: path
+      required: true
+      schema:
+        type: string
   "/api/workspaces/{ref}/executions/{execution_ref}/cancel":
     post:
       summary: api/workspaces#cancel
@@ -1470,6 +1522,53 @@ paths:
       required: true
       schema:
         type: string
+  "/api/workspace-executions/{ref}/input":
+    post:
+      summary: api/workspaces#input_by_ref
+      tags:
+      - Workspaces
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+    parameters:
+    - name: ref
+      in: path
+      required: true
+      schema:
+        type: string
   "/api/workspace-executions/{ref}/cancel":
     post:
       summary: api/workspaces#cancel_by_ref
@@ -1611,6 +1710,76 @@ paths:
   "/api/work-context/task":
     post:
       summary: api/work_contexts#attach_task
+      tags:
+      - Work_contexts
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  "/api/work-context/execution":
+    post:
+      summary: api/work_contexts#execution_select
+      tags:
+      - Work_contexts
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  "/api/work-context/execution/foreground":
+    post:
+      summary: api/work_contexts#execution_foreground
       tags:
       - Work_contexts
       responses:

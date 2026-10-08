@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_08_195000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_08_210000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -387,6 +387,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_08_195000) do
   create_table "work_contexts", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.datetime "ended_at"
+    t.string "execution_cwd"
+    t.string "execution_workspace_ref"
+    t.string "foreground_execution_ref"
     t.text "scratchpad", default: "", null: false
     t.bigint "task_id"
     t.datetime "updated_at", null: false

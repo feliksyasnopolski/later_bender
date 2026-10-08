@@ -28,6 +28,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 )
 
@@ -41,12 +42,14 @@ type Identity struct {
 }
 
 type Workspace struct {
-	Workspace  string    `json:"workspace"`
-	Executor   string    `json:"executor"`
-	Operation  string    `json:"operation_id"`
-	SpecHash   string    `json:"spec_hash"`
-	Root       string    `json:"root"`
-	PreparedAt time.Time `json:"prepared_at"`
+	Workspace    string    `json:"workspace"`
+	Executor     string    `json:"executor"`
+	Operation    string    `json:"operation_id"`
+	SpecHash     string    `json:"spec_hash"`
+	Root         string    `json:"root"`
+	ExecRoot     string    `json:"exec_root,omitempty"`
+	ExternalRoot bool      `json:"external_root,omitempty"`
+	PreparedAt   time.Time `json:"prepared_at"`
 }
 
 type Store struct{ Dir string }
@@ -64,8 +67,12 @@ type LocalExecution struct {
 	TerminatingSignal string     `json:"terminating_signal,omitempty"`
 	Stdout            string     `json:"stdout"`
 	Stderr            string     `json:"stderr"`
+	PTY               bool       `json:"pty,omitempty"`
 	mu                sync.Mutex
 	cmd               *exec.Cmd
+	input             io.WriteCloser `json:"-"`
+	ptyFile           *os.File       `json:"-"`
+	outputDone        chan struct{}  `json:"-"`
 	timedOut          bool
 	cancelled         bool
 }
@@ -171,7 +178,11 @@ func (s Store) loadWorkspace(ref string) (*Workspace, error) {
 }
 
 // prepare isolates every active ref and retires a prior incarnation on ref reuse.
-func (s Store) prepare(ref, executor, op, specHash string) (*Workspace, error) {
+func (s Store) prepare(ref, executor, op, specHash string, specs ...map[string]any) (*Workspace, error) {
+	spec := map[string]any{}
+	if len(specs) > 0 && specs[0] != nil {
+		spec = specs[0]
+	}
 	if !validWorkspaceRef(ref) || executor != "native" || op == "" || specHash == "" {
 		return nil, errors.New("invalid prepare request")
 	}
@@ -203,6 +214,16 @@ func (s Store) prepare(ref, executor, op, specHash string) (*Workspace, error) {
 		return nil, err
 	}
 	w := &Workspace{Workspace: ref, Executor: executor, Operation: op, SpecHash: specHash, Root: dir, PreparedAt: time.Now().UTC()}
+	if requested, ok := spec["resource_path"].(string); ok && requested != "" {
+		if !filepath.IsAbs(requested) {
+			return nil, errors.New("resource_path must be absolute")
+		}
+		info, statErr := os.Stat(requested)
+		if statErr != nil || !info.IsDir() {
+			return nil, errors.New("resource_path must be an existing directory")
+		}
+		w.ExecRoot, w.ExternalRoot = filepath.Clean(requested), true
+	}
 	if err := atomicJSON(filepath.Join(dir, "metadata.json"), w, 0600); err != nil {
 		return nil, err
 	}
@@ -534,13 +555,17 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 	}
 	var argv []string
 	root := filepath.Join(w.Root, "root")
+	executionRoot := root
+	if w.ExecRoot != "" {
+		executionRoot = w.ExecRoot
+	}
 	switch invocation["kind"] {
 	case "shell":
 		command, ok := invocation["command"].(string)
 		if !ok {
 			return nil, errors.New("invalid shell invocation")
 		}
-		argv = []string{"/bin/bash", "-lc", rewriteShellNativePaths(command, root)}
+		argv = []string{"/bin/bash", "-lc", rewriteShellNativePaths(command, executionRoot)}
 	case "argv":
 		values, ok := invocation["argv"].([]any)
 		if !ok || len(values) == 0 {
@@ -551,31 +576,24 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 			if !ok {
 				return nil, errors.New("invalid argv value")
 			}
-			argv = append(argv, rewriteNativePaths(item, root))
+			argv = append(argv, rewriteNativePaths(item, executionRoot))
 		}
 	default:
 		return nil, errors.New("invalid invocation kind")
 	}
 	cwd, _ := op.Spec["cwd"].(string)
 	if cwd == "" || cwd == "/workspace" {
-		cwd = root
-	} else {
-		if strings.HasPrefix(cwd, "/workspace/") {
-			cwd = filepath.Join(root, strings.TrimPrefix(cwd, "/workspace/"))
-		} else if !filepath.IsAbs(cwd) {
-			cwd = filepath.Join(root, cwd)
-		} else {
-			return nil, errors.New("cwd escapes Workspace root")
-		}
-		clean, err := filepath.Abs(cwd)
-		if err != nil {
-			return nil, err
-		}
-		if clean != root && !strings.HasPrefix(clean, root+string(filepath.Separator)) {
-			return nil, errors.New("cwd escapes Workspace root")
-		}
-		cwd = clean
+		cwd = executionRoot
+	} else if strings.HasPrefix(cwd, "/workspace/") {
+		cwd = filepath.Join(executionRoot, strings.TrimPrefix(cwd, "/workspace/"))
+	} else if !filepath.IsAbs(cwd) {
+		cwd = filepath.Join(executionRoot, cwd)
 	}
+	clean, err := filepath.Abs(cwd)
+	if err != nil {
+		return nil, err
+	}
+	cwd = clean
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = cwd
 	cmd.Env = os.Environ()
@@ -619,8 +637,19 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 	} else if names, ok := op.Spec["secret_env_names"].([]any); ok && len(names) > 0 {
 		return nil, fetchErr
 	}
-	if stdin, ok := op.Spec["stdin"].(string); ok {
-		cmd.Stdin = strings.NewReader(stdin)
+	stdin, _ := op.Spec["stdin"].(string)
+	usePTY, _ := op.Spec["pty"].(bool)
+	var sessionInput io.WriteCloser
+	if !usePTY {
+		if persistent, _ := op.Spec["interactive"].(bool); persistent {
+			input, pipeErr := cmd.StdinPipe()
+			if pipeErr != nil {
+				return nil, pipeErr
+			}
+			sessionInput = input
+		} else if stdin != "" {
+			cmd.Stdin = strings.NewReader(stdin)
+		}
 	}
 	if err := os.MkdirAll(s.executionDir(op.Execution), 0700); err != nil {
 		return nil, err
@@ -635,13 +664,34 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 		return nil, err
 	}
 	cmd.Stdout, cmd.Stderr = &boundedOutput{file: out}, &boundedOutput{file: errout}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
+	if !usePTY {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
+	var ptyFile *os.File
+	if usePTY {
+		ptyFile, err = pty.Start(cmd)
+	} else {
+		err = cmd.Start()
+	}
+	if err != nil {
 		_ = out.Close()
 		_ = errout.Close()
 		return nil, fmt.Errorf("process spawn failed: %w", err)
 	}
-	e := &LocalExecution{Execution: op.Execution, Workspace: op.Workspace, SpecHash: op.SpecHash, State: "running", PID: cmd.Process.Pid, ProcessGroup: cmd.Process.Pid, StartedAt: time.Now().UTC(), Stdout: filepath.Join(s.executionDir(op.Execution), "stdout"), Stderr: filepath.Join(s.executionDir(op.Execution), "stderr"), cmd: cmd}
+	e := &LocalExecution{Execution: op.Execution, Workspace: op.Workspace, SpecHash: op.SpecHash, State: "running", PID: cmd.Process.Pid, ProcessGroup: cmd.Process.Pid, StartedAt: time.Now().UTC(), Stdout: filepath.Join(s.executionDir(op.Execution), "stdout"), Stderr: filepath.Join(s.executionDir(op.Execution), "stderr"), cmd: cmd, PTY: usePTY, ptyFile: ptyFile}
+	if usePTY {
+		e.input = ptyFile
+		e.outputDone = make(chan struct{})
+		go func() { defer close(e.outputDone); _, _ = io.Copy(&boundedOutput{file: out}, ptyFile) }()
+		if stdin != "" {
+			_, _ = ptyFile.Write([]byte(stdin))
+		}
+	} else {
+		e.input = sessionInput
+		if stdin != "" && sessionInput != nil {
+			_, _ = sessionInput.Write([]byte(stdin))
+		}
+	}
 	executionMu.Lock()
 	executions[op.Execution] = e
 	executionMu.Unlock()
@@ -672,6 +722,12 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 			case <-time.After(2 * time.Second):
 				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 				<-done
+			}
+		}
+		if e.ptyFile != nil {
+			_ = e.ptyFile.Close()
+			if e.outputDone != nil {
+				<-e.outputDone
 			}
 		}
 		_ = out.Close()
@@ -752,6 +808,35 @@ func workspacePath(s Store, ref, value string) (string, error) {
 }
 
 func remoteFileOperation(ctx context.Context, c *Client, s Store, op Operation) (string, map[string]string, error) {
+	if op.Type == "input_execution" {
+		execution := stringValue(op.Spec["execution"])
+		e, ok := executions[execution]
+		if !ok {
+			if b, err := os.ReadFile(filepath.Join(s.executionDir(execution), "metadata.json")); err == nil {
+				var saved LocalExecution
+				if json.Unmarshal(b, &saved) == nil {
+					e = &saved
+					ok = true
+				}
+			}
+		}
+		if !ok {
+			return "failed", nil, errors.New("execution is not known locally")
+		}
+		e.mu.Lock()
+		defer e.mu.Unlock()
+		if e.State != "running" || e.input == nil {
+			return "failed", nil, errors.New("execution does not accept input")
+		}
+		data := stringValue(op.Spec["data"])
+		if len(data) > 65536 {
+			return "failed", nil, errors.New("input exceeds 64 KiB")
+		}
+		if _, err := e.input.Write([]byte(data)); err != nil {
+			return "failed", nil, err
+		}
+		return "succeeded", map[string]string{"execution": execution, "bytes_written": strconv.Itoa(len(data))}, nil
+	}
 	path, err := workspacePath(s, op.Workspace, stringValue(op.Spec["path"]))
 	if err != nil {
 		return "failed", nil, err
@@ -1150,7 +1235,7 @@ func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
 func handleOperationWithResult(ctx context.Context, c *Client, s Store, op Operation, result func(string, map[string]string) error) error {
 	log.Printf("handling %s for %s", op.Type, op.Workspace)
 	switch op.Type {
-	case "put_file", "read_file", "promote_file":
+	case "put_file", "read_file", "promote_file", "input_execution":
 		status, extra, err := remoteFileOperation(ctx, c, s, op)
 		if err != nil {
 			if extra == nil {
@@ -1163,7 +1248,7 @@ func handleOperationWithResult(ctx context.Context, c *Client, s Store, op Opera
 		}
 		return result(status, extra)
 	case "prepare_workspace":
-		w, err := s.prepare(op.Workspace, op.Executor, op.OperationID, op.SpecHash)
+		w, err := s.prepare(op.Workspace, op.Executor, op.OperationID, op.SpecHash, op.Spec)
 		if err != nil {
 			return result("failed", failureFields("workspace_prepare_failed", "prepare", err))
 		}
@@ -1232,7 +1317,7 @@ func mapValue(v any) map[string]any { value, _ := v.(map[string]any); return val
 func handleOperation(ctx context.Context, c *Client, s Store, op Operation) error {
 	log.Printf("handling %s for %s", op.Type, op.Workspace)
 	switch op.Type {
-	case "put_file", "read_file", "promote_file":
+	case "put_file", "read_file", "promote_file", "input_execution":
 		status, extra, err := remoteFileOperation(ctx, c, s, op)
 		if err != nil {
 			if extra == nil {
@@ -1243,7 +1328,7 @@ func handleOperation(ctx context.Context, c *Client, s Store, op Operation) erro
 		}
 		return c.result(ctx, op, status, extra)
 	case "prepare_workspace":
-		w, err := s.prepare(op.Workspace, op.Executor, op.OperationID, op.SpecHash)
+		w, err := s.prepare(op.Workspace, op.Executor, op.OperationID, op.SpecHash, op.Spec)
 		if err != nil {
 			return err
 		}

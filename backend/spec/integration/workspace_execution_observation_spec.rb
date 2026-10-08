@@ -19,6 +19,7 @@ RSpec.describe "Workspace execution observation", type: :request do
       when [ :post, "/workspaces/WSR-test/executions" ] then execution_result(state: "running")
       when [ :get, "/executions/WSE-test" ] then execution_result(state: terminal_state)
       when [ :post, "/executions/WSE-test/output" ] then { "format" => "text", "data" => path ? "out" : "", "chunk_byte_size" => 3, "total_byte_size" => 3, "stream_complete" => true }
+      when [ :post, "/executions/WSE-test/input" ] then { "execution" => "WSE-test", "bytes_written" => 2 }
       else raise "unexpected runner request #{method} #{path}"
       end
     end
@@ -72,5 +73,34 @@ RSpec.describe "Workspace execution observation", type: :request do
     post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
     post "/api/workspaces/#{Workspace.last.ref}/executions", params: { command: "test" }.to_json, headers: json_headers(@raw_token)
     assert_equal "running", json_body.fetch("state")
+  end
+  it "persists execution selection and foreground session in the current work context" do
+    stub_runner(terminal_state: "running")
+    post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
+    workspace = Workspace.last
+    post "/api/work-context/execution", params: { workspace: workspace.ref, cwd: "/etc" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal workspace.ref, json_body.dig("context", "execution", "workspace")
+    assert_equal "/etc", json_body.dig("context", "execution", "cwd")
+
+    post "/api/workspaces/#{workspace.ref}/executions", params: { command: "cat", interactive: true }.to_json, headers: json_headers(@raw_token)
+    execution_ref = json_body.fetch("ref")
+    post "/api/work-context/execution/foreground", params: { execution: execution_ref }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal execution_ref, json_body.dig("context", "execution", "foreground")
+  end
+
+  it "routes input to a persistent hosted execution by its public ref" do
+    stub_runner(terminal_state: "running")
+    post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
+    workspace = Workspace.last
+    post "/api/workspaces/#{workspace.ref}/executions", params: { command: "cat", interactive: true }.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    post "/api/workspaces/#{workspace.ref}/executions/WSE-test/input", params: { data: "hi" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal 2, json_body.fetch("bytes_written")
+    post "/api/workspace-executions/WSE-test/input", params: { data: "hi" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal 2, json_body.fetch("bytes_written")
   end
 end

@@ -124,6 +124,18 @@ export class LaterBenderApi {
       json("POST", task ? { task } : {}),
     );
   }
+  selectExecutionContext(payload: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>(
+      "/api/work-context/execution",
+      json("POST", payload),
+    );
+  }
+  selectForegroundExecution(execution: string) {
+    return this.request<Record<string, unknown>>(
+      "/api/work-context/execution/foreground",
+      json("POST", { execution }),
+    );
+  }
   finishWorkContext() {
     return this.request<{ context: unknown }>(
       "/api/work-context/finish",
@@ -461,6 +473,12 @@ export class LaterBenderApi {
   getWorkspaceExecutionByRef(ref: string) {
     return this.request<unknown>(
       `/api/workspace-executions/${encodeURIComponent(ref)}`,
+    );
+  }
+  sendWorkspaceExecutionInput(ref: string, data: string) {
+    return this.request<Record<string, unknown>>(
+      `/api/workspace-executions/${encodeURIComponent(ref)}/input`,
+      json("POST", { data }),
     );
   }
   workspaceExecutionActionByRef(

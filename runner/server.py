@@ -34,6 +34,7 @@ REAPER_INTERVAL_SECONDS = int(os.environ.get("WORKSPACE_REAPER_INTERVAL_SECONDS"
 MAX_CHUNK = 256 * 1024
 lock = threading.RLock()
 BASELINE_ENV_NAMES = {}
+INTERACTIVE_PROCESSES = {}
 
 
 def now():
@@ -242,21 +243,45 @@ def start_execution(row, payload, container):
     out = Path(row["output_dir"])
     out.mkdir(mode=0o700, parents=True, exist_ok=True)
     command = payload.get("command")
-    argv = payload.get("argv")
-    if command is not None:
-        invocation = ["/bin/bash", "-lc", command]
-    else:
-        invocation = argv
+    invocation = ["/bin/bash", "-lc", command] if command is not None else payload.get("argv")
     env = dict(payload.get("env") or {})
-    secret_env = payload.get("secret_env") or {}
-    env.update(secret_env)
+    env.update(payload.get("secret_env") or {})
     env_args = [item for key in env for item in ("--env", key)]
-    quoted = " ".join(shlex.quote(item) for item in invocation)
-    if payload.get("timeout_seconds"):
-        quoted = f"timeout --foreground --signal=TERM --kill-after=2s {shlex.quote(str(payload['timeout_seconds']))} {quoted}"
     stdin = payload.get("stdin")
     if stdin is not None:
         (out / "stdin").write_bytes(str(stdin).encode())
+    if payload.get("pty") or payload.get("interactive"):
+        if payload.get("timeout_seconds"):
+            invocation = ["/usr/bin/timeout", "--foreground", "--signal=TERM", "--kill-after=2s", str(payload["timeout_seconds"]), *invocation]
+        args = ["docker", "exec", "-i", *( ["-t"] if payload.get("pty") else [] ), *env_args, "-w", payload.get("cwd", "/workspace"), container, *invocation]
+        child_env = os.environ.copy()
+        child_env.update(env)
+        stdout = open(out / "stdout", "wb")
+        stderr = open(out / "stderr", "wb")
+        try:
+            process = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=stdout, stderr=stderr, env=child_env)
+        except Exception:
+            stdout.close(); stderr.close()
+            raise RuntimeError("Interactive execution failed to start") from None
+        stdout.close(); stderr.close()
+        with lock:
+            INTERACTIVE_PROCESSES[row["handle"]] = process
+        if stdin is not None and process.stdin:
+            process.stdin.write(str(stdin).encode()); process.stdin.flush()
+        def monitor():
+            try:
+                code = process.wait()
+                state = "timed_out" if code == 124 else "exited"
+                marker = out / "exit.json"
+                marker.write_text(json.dumps({"state": state, "exit_code": code}))
+            finally:
+                with lock:
+                    INTERACTIVE_PROCESSES.pop(row["handle"], None)
+        threading.Thread(target=monitor, daemon=True).start()
+        return
+    quoted = " ".join(shlex.quote(item) for item in invocation)
+    if payload.get("timeout_seconds"):
+        quoted = f"timeout --foreground --signal=TERM --kill-after=2s {shlex.quote(str(payload['timeout_seconds']))} {quoted}"
     input_redirect = f" < /runner-output/{row['handle']}/stdin" if stdin is not None else ""
     wrapper = f"( {quoted}{input_redirect} > /runner-output/{row['handle']}/stdout 2> /runner-output/{row['handle']}/stderr; code=$?; state=exited; if [ $code -eq 124 ]; then state=timed_out; fi; printf '{{\"state\":\"%s\",\"exit_code\":%s}}' $state $code > /runner-output/{row['handle']}/exit.json )"
     args = ["exec", "-d", *env_args, "-w", payload.get("cwd", "/workspace"), container, "/bin/bash", "-lc", wrapper]
@@ -312,7 +337,7 @@ class Handler(BaseHTTPRequestHandler):
             elif len(path) == 3 and path[0] == "workspaces" and path[2] == "file-read": self.read_file(path[1], payload)
             elif len(path) == 3 and path[0] == "workspaces" and path[2] == "file-promote": self.promote_file(path[1], payload)
             elif len(path) == 3 and path[0] == "workspaces" and path[2] == "transcript-promote": raise ValueError("workspace_unavailable")
-            elif len(path) == 3 and path[0] == "executions" and path[2] in ("output", "cancel"): self.execution_action(path[1], path[2], payload)
+            elif len(path) == 3 and path[0] == "executions" and path[2] in ("output", "cancel", "input"): self.execution_action(path[1], path[2], payload)
             else: self.send_json(404, {"error": {"code": "not_found", "message": "Not found"}})
         except ValueError as error:
             self.send_json(422, {"error": {"code": str(error), "message": str(error)}})
@@ -439,8 +464,19 @@ class Handler(BaseHTTPRequestHandler):
         with db() as connection: row = connection.execute("SELECT * FROM executions WHERE handle=?", (handle,)).fetchone()
         if not row: raise ValueError("execution_not_found")
         if action == "output": self.send_json(200, stream(row, payload.get("stream", "stdout"), payload.get("cursor"), payload.get("format"))); return
+        if action == "input":
+            data = payload.get("data")
+            if not isinstance(data, str) or len(data.encode()) > 65536: raise ValueError("invalid_invocation")
+            with lock: process = INTERACTIVE_PROCESSES.get(handle)
+            if not process or process.poll() is not None or process.stdin is None: raise ValueError("execution_not_running")
+            try:
+                process.stdin.write(data.encode("utf-8")); process.stdin.flush()
+            except (BrokenPipeError, OSError): raise ValueError("execution_not_running") from None
+            self.send_json(200, {"execution": handle, "bytes_written": len(data.encode("utf-8"))}); return
         if execution_state(row)["state"] != "running": self.send_json(200, execution_json(row)); return
-        docker("exec", row["workspace_handle"], "/bin/bash", "-lc", "kill -TERM -- -1", check=False)
+        with lock: process = INTERACTIVE_PROCESSES.get(handle)
+        if process and process.poll() is None: process.terminate()
+        else: docker("exec", row["workspace_handle"], "/bin/bash", "-lc", "kill -TERM -- -1", check=False)
         with db() as connection: connection.execute("UPDATE executions SET state=?, finished_at=? WHERE handle=?", ("cancelled", now(), handle))
         with db() as connection: row = connection.execute("SELECT * FROM executions WHERE handle=?", (handle,)).fetchone()
         self.send_json(200, execution_json(row))

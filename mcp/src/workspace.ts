@@ -151,8 +151,10 @@ const execution = z.object({
 });
 const transcriptInvocation = invocation;
 const execCommonInput = {
-  workspace: opaqueRef,
+  workspace: opaqueRef.optional(),
   cwd: z.string().optional(),
+  pty: z.boolean().optional(),
+  interactive: z.boolean().optional(),
   env: z.record(z.string(), z.string()).optional(),
   secret_env: z.record(z.string(), z.string()).optional(),
   stdin: z.string().optional(),
@@ -356,14 +358,146 @@ async function workspaceOperation(
         return api.workspaceAction(input.workspace, "file-read", input);
       case "promote_workspace_file":
         return api.workspaceAction(input.workspace, "file-promote", input);
-      case "exec_workspace":
-        return api.executeWorkspace(input);
-      case "get_workspace_execution":
-        return api.getWorkspaceExecutionByRef(input.ref);
-      case "read_workspace_execution_output":
-        return api.workspaceExecutionActionByRef(input.ref, "output", input);
-      case "cancel_workspace_execution":
-        return api.workspaceExecutionActionByRef(input.ref, "cancel");
+      case "execution_current":
+        return api.getWorkContext();
+      case "execution_sessions": {
+        let workspace = input.workspace as string | undefined;
+        if (!workspace) {
+          const current: any = await api.getWorkContext();
+          workspace = current?.context?.execution?.workspace;
+        }
+        if (!workspace)
+          throw new ApiError(
+            "validation_failed",
+            422,
+            "No execution environment selected",
+          );
+        const transcript: any = await api.workspaceAction(
+          workspace,
+          "transcript",
+          {},
+        );
+        const sessions = (transcript?.events || [])
+          .filter((event: any) => event.kind === "execution")
+          .map((event: any) => ({
+            sequence: event.sequence,
+            ...(event.payload || {}),
+          }));
+        return { workspace, sessions };
+      }
+      case "session_select": {
+        const ref = input.ref as string;
+        return api.selectForegroundExecution(ref);
+      }
+      case "execution_select": {
+        let workspace = input.workspace as string | undefined;
+        if (!workspace) {
+          if (!input.target)
+            throw new ApiError(
+              "validation_failed",
+              422,
+              "Provide workspace to reuse or target to acquire an execution environment",
+            );
+          const created = await api.createWorkspace({
+            label: input.label,
+            target: input.target,
+            executor: input.executor,
+            resource_path: input.resource_path,
+            ttl_seconds: input.ttl_seconds,
+          });
+          workspace = String(
+            (created as any).workspace?.ref || (created as any).ref,
+          );
+        }
+        return api.selectExecutionContext({
+          workspace,
+          ...(input.cwd
+            ? { cwd: input.cwd }
+            : input.resource_path
+              ? { cwd: input.resource_path }
+              : {}),
+        });
+      }
+      case "exec_workspace": {
+        let payload = { ...input };
+        if (!payload.workspace) {
+          const current: any = await api.getWorkContext();
+          const selected = current?.context?.execution;
+          if (!selected?.workspace)
+            throw new ApiError(
+              "validation_failed",
+              422,
+              "No execution environment selected; call execution_select first",
+            );
+          payload.workspace = selected.workspace;
+          if (!payload.cwd) payload.cwd = selected.cwd;
+        }
+        const result: any = await api.executeWorkspace(payload);
+        const started = result?.execution || result;
+        if (
+          (input.pty || input.interactive) &&
+          started?.ref &&
+          started.state === "running"
+        )
+          await api.selectForegroundExecution(started.ref);
+        return result;
+      }
+      case "send_workspace_execution_input": {
+        let ref = input.ref as string | undefined;
+        if (!ref) {
+          const current: any = await api.getWorkContext();
+          ref = current?.context?.execution?.foreground;
+        }
+        if (!ref)
+          throw new ApiError(
+            "validation_failed",
+            422,
+            "No foreground execution selected",
+          );
+        return api.sendWorkspaceExecutionInput(ref, input.data as string);
+      }
+      case "get_workspace_execution": {
+        let ref = input.ref as string | undefined;
+        if (!ref) {
+          const current: any = await api.getWorkContext();
+          ref = current?.context?.execution?.foreground;
+        }
+        if (!ref)
+          throw new ApiError(
+            "validation_failed",
+            422,
+            "No execution ref or foreground execution selected",
+          );
+        return api.getWorkspaceExecutionByRef(ref);
+      }
+      case "read_workspace_execution_output": {
+        let ref = input.ref as string | undefined;
+        if (!ref) {
+          const current: any = await api.getWorkContext();
+          ref = current?.context?.execution?.foreground;
+        }
+        if (!ref)
+          throw new ApiError(
+            "validation_failed",
+            422,
+            "No execution ref or foreground execution selected",
+          );
+        return api.workspaceExecutionActionByRef(ref, "output", input);
+      }
+      case "cancel_workspace_execution": {
+        let ref = input.ref as string | undefined;
+        if (!ref) {
+          const current: any = await api.getWorkContext();
+          ref = current?.context?.execution?.foreground;
+        }
+        if (!ref)
+          throw new ApiError(
+            "validation_failed",
+            422,
+            "No execution ref or foreground execution selected",
+          );
+        return api.workspaceExecutionActionByRef(ref, "cancel");
+      }
       case "read_workspace_transcript":
         return api.workspaceAction(input.workspace, "transcript", input);
       case "promote_workspace_transcript":
@@ -448,6 +582,11 @@ export const workspaceToolNames = [
   "cancel_workspace_execution",
   "read_workspace_transcript",
   "promote_workspace_transcript",
+  "execution_select",
+  "execution_current",
+  "send_workspace_execution_input",
+  "execution_sessions",
+  "session_select",
 ] as const;
 
 export function registerWorkspaceTools(
@@ -487,6 +626,7 @@ export function registerWorkspaceTools(
       description: `Create a transient Workspace using optional minimum resource requirements and capability requirements. Every required capability must resolve true for the selected offering; otherwise return capability_unavailable. An empty object requests the normal useful default; requirements are minimums, not exact operator configuration, and are never silently substituted. ${workspaceFailure}`,
       inputSchema: {
         label: z.string().optional(),
+        resource_path: z.string().optional(),
         target: z.string().optional(),
         executor: z.enum(["native", "docker"]).optional(),
         environment: z.string().optional(),
@@ -611,7 +751,7 @@ export function registerWorkspaceTools(
   server.registerTool(
     "exec_workspace",
     {
-      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is a general-purpose execution surface for real engineering work, including normal tooling, filesystem work, package installation, and outbound network use when those capabilities are available. The selected Workspace target and environment are authoritative; the server waits briefly and returns a terminal projection or a running execution ref. There is no persistent shell session. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
+      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is a general-purpose execution surface for real engineering work, including normal tooling, filesystem work, package installation, and outbound network use when those capabilities are available. The selected Workspace target and environment are authoritative; the server waits briefly and returns a terminal projection or a running execution ref. By default each call is one-shot. Set pty=true for a persistent terminal or interactive=true for a persistent stdin pipe; the execution ref remains addressable across tool calls and may become the foreground session. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
       inputSchema: execInput,
       outputSchema: { execution },
       annotations: execute,
@@ -622,7 +762,7 @@ export function registerWorkspaceTools(
     "get_workspace_execution",
     {
       description: `Fetch the current full projection of an execution by its opaque WSE- reference. The execution ref is unambiguous, and authorization remains authenticated-user scoped. ${workspaceFailure}`,
-      inputSchema: { ref: opaqueRef },
+      inputSchema: { ref: opaqueRef.optional() },
       outputSchema: { execution },
       annotations: readOnly,
     },
@@ -633,7 +773,7 @@ export function registerWorkspaceTools(
     {
       description: `Continue reading retained stdout or stderr from an opaque cursor. Each call returns the next bounded stream chunk; a cursor at the current end of a running stream is resumable and returns later appended bytes. next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`,
       inputSchema: {
-        ref: opaqueRef,
+        ref: opaqueRef.optional(),
         stream: z.enum(["stdout", "stderr"]),
         format: z.enum(["auto", "text", "base64"]).optional(),
         cursor: z.string().optional(),
@@ -656,7 +796,7 @@ export function registerWorkspaceTools(
     "cancel_workspace_execution",
     {
       description: `Terminate the whole process group belonging to an execution. Cancellation is idempotent: an already-terminal execution returns its existing terminal projection. ${workspaceFailure}`,
-      inputSchema: { ref: opaqueRef },
+      inputSchema: { ref: opaqueRef.optional() },
       outputSchema: { execution },
       annotations: destroy,
     },
@@ -693,5 +833,71 @@ export function registerWorkspaceTools(
       annotations: create,
     },
     runtime(api, "promote_workspace_transcript"),
+  );
+  server.registerTool(
+    "execution_select",
+    {
+      description:
+        "Select the current execution environment and working directory for this work context. Reuse an existing Workspace with workspace, or acquire one on target; resource_path selects an existing directory on a native Remote Agent without copying or owning that directory. Selection persists across calls. Native execution uses the agent OS user's real authority and is not a sandbox. Existing sessions remain bound to their original Workspace.",
+      inputSchema: {
+        workspace: opaqueRef.optional(),
+        target: z.string().optional(),
+        executor: z.enum(["native", "docker"]).optional(),
+        label: z.string().optional(),
+        resource_path: z.string().optional(),
+        cwd: z.string().optional(),
+        ttl_seconds: z.number().int().positive().max(604800).optional(),
+      },
+      outputSchema: { context: z.unknown(), workspace: z.unknown().optional() },
+      annotations: create,
+    },
+    runtime(api, "execution_select"),
+  );
+  server.registerTool(
+    "execution_current",
+    {
+      description:
+        "Inspect the current work context's selected execution Workspace, working directory, and foreground process. Use this when starting a new chat or recovering after interruption; do not assume the previous selection is relevant.",
+      inputSchema: {},
+      outputSchema: { context: z.unknown() },
+      annotations: readOnly,
+    },
+    runtime(api, "execution_current"),
+  );
+  server.registerTool(
+    "send_workspace_execution_input",
+    {
+      description:
+        "Send UTF-8 bytes to a persistent interactive process. Omit ref to use the current foreground execution. Include newline explicitly when the program should receive Enter; this is not command execution. Native Remote Agent and hosted Workspace PTY/pipe sessions; maximum 64 KiB per call.",
+      inputSchema: { ref: opaqueRef.optional(), data: z.string().max(65536) },
+      outputSchema: {
+        execution: opaqueRef,
+        bytes_written: z.number().int().nonnegative(),
+      },
+      annotations: execute,
+    },
+    runtime(api, "send_workspace_execution_input"),
+  );
+  server.registerTool(
+    "execution_sessions",
+    {
+      description:
+        "List the executions recorded for the selected Workspace so you can rediscover and switch between long-running processes after interruption. Optionally pass workspace to inspect another Workspace without changing the current selection.",
+      inputSchema: { workspace: opaqueRef.optional() },
+      outputSchema: { workspace: opaqueRef, sessions: z.array(z.unknown()) },
+      annotations: readOnly,
+    },
+    runtime(api, "execution_sessions"),
+  );
+  server.registerTool(
+    "session_select",
+    {
+      description:
+        "Make an existing execution the foreground process for subsequent input, status, output, and cancellation calls. The execution must belong to the currently selected Workspace; switching execution environments does not retarget an existing session.",
+      inputSchema: { ref: opaqueRef },
+      outputSchema: { context: z.unknown() },
+      annotations: create,
+    },
+    runtime(api, "session_select"),
   );
 }

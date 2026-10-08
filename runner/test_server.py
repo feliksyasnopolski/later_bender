@@ -57,6 +57,26 @@ class RunnerUnitTest(unittest.TestCase):
         self.assertEqual("application/octet-stream", server.media_type_for("artifact.bin", b"\x00\x01\xffABC"))
         self.assertEqual("text/plain", server.media_type_for("artifact.txt", b"plain text"))
 
+    def test_pty_execution_keeps_stdin_open_and_uses_docker_tty(self):
+        from unittest.mock import Mock, patch
+        with tempfile.TemporaryDirectory() as directory:
+            process = Mock()
+            process.stdin = Mock()
+            process.wait.return_value = 0
+            process.poll.return_value = None
+            row = {"handle": "WSE-pty-test", "output_dir": directory}
+            payload = {"command": "python3 -i", "pty": True, "cwd": "/workspace", "stdin": "print(2)\n"}
+            with patch.object(server.subprocess, "Popen", return_value=process) as spawn:
+                server.start_execution(row, payload, "WSR-test")
+                args, kwargs = spawn.call_args
+                self.assertEqual("docker", args[0][0])
+                self.assertIn("-i", args[0])
+                self.assertIn("-t", args[0])
+                self.assertEqual("WSR-test", args[0][args[0].index("-w") + 2])
+                self.assertIsNotNone(kwargs["stdin"])
+                process.stdin.write.assert_called_once_with(b"print(2)\n")
+                process.stdin.flush.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

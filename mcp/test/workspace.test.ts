@@ -111,7 +111,7 @@ test("Workspace input schemas are object-shaped in the actual MCP tools/list res
     assert.equal(byName[name].inputSchema.type, "object");
     assert.ok(byName[name].inputSchema.properties);
   }
-  assert.deepEqual(Object.keys(byName.exec_workspace.inputSchema.properties ?? {}).sort(), ["argv", "command", "cwd", "env", "secret_env", "stdin", "timeout_seconds", "workspace"].sort());
+  assert.deepEqual(Object.keys(byName.exec_workspace.inputSchema.properties ?? {}).sort(), ["argv", "command", "cwd", "env", "interactive", "pty", "secret_env", "stdin", "timeout_seconds", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_file.inputSchema.properties ?? {}).sort(), ["cursor", "locator", "path", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_transcript.inputSchema.properties ?? {}).sort(), ["cursor", "from_sequence", "limit", "to_sequence", "workspace"].sort());
   await client.close();
@@ -225,4 +225,46 @@ test("Workspace diagnostic projections use bounded schemas", () => {
     }).success,
     true,
   );
+});
+
+
+test("stateful execution selection and PTY input work through MCP Client tools/call", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const calls: Array<[string, unknown]> = [];
+  let context: any = { context: { execution: { workspace: null, cwd: null, foreground: null } } };
+  const api = {
+    createWorkspace: async (payload: any) => { calls.push(["createWorkspace", payload]); return { ref: "WS-9" }; },
+    selectExecutionContext: async (payload: any) => { calls.push(["selectExecutionContext", payload]); context = { context: { execution: { workspace: payload.workspace, cwd: payload.cwd, foreground: null } }, workspace: { ref: payload.workspace, cwd: payload.cwd } }; return context; },
+    getWorkContext: async () => context,
+    executeWorkspace: async (payload: any) => { calls.push(["executeWorkspace", payload]); return { ref: "WSE-9", state: "running", workspace: payload.workspace, sequence: 1, invocation: { kind: "shell", command: payload.command }, cwd: payload.cwd, env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: null, exit_code: null, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "text", data: "", total_byte_size: 0, inline_complete: false }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: false } }; },
+    selectForegroundExecution: async (ref: string) => { calls.push(["selectForegroundExecution", ref]); context.context.execution.foreground = ref; return context; },
+    sendWorkspaceExecutionInput: async (ref: string, data: string) => { calls.push(["sendWorkspaceExecutionInput", { ref, data }]); return { execution: ref, bytes_written: data.length }; },
+    workspaceAction: async (ref: string, action: string, payload: any) => { calls.push(["workspaceAction", { ref, action, payload }]); return { events: [{ sequence: 4, kind: "execution", payload: { execution: "WSE-old", state: "running" } }, { sequence: 5, kind: "file", payload: { ref: "F-1" } }] }; },
+  } as unknown as LaterBenderApi;
+  registerWorkspaceTools(server, api);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+
+  const selected = await client.callTool({ name: "execution_select", arguments: { target: "RA-1", executor: "native", resource_path: "/Users/felix/rails/later_bender", cwd: "/Users/felix/rails/later_bender" } });
+  assert.equal(selected.isError, undefined);
+  assert.deepEqual(calls[0], ["createWorkspace", { label: undefined, target: "RA-1", executor: "native", resource_path: "/Users/felix/rails/later_bender", ttl_seconds: undefined }]);
+  assert.deepEqual(calls[1], ["selectExecutionContext", { workspace: "WS-9", cwd: "/Users/felix/rails/later_bender" }]);
+
+  const started = await client.callTool({ name: "exec_workspace", arguments: { command: "python3 -i", pty: true } });
+  assert.equal(started.isError, undefined);
+  assert.deepEqual(calls[2], ["executeWorkspace", { command: "python3 -i", pty: true, workspace: "WS-9", cwd: "/Users/felix/rails/later_bender" }]);
+  assert.deepEqual(calls[3], ["selectForegroundExecution", "WSE-9"]);
+  const sent = await client.callTool({ name: "send_workspace_execution_input", arguments: { data: "print(1 + 1)" + String.fromCharCode(10) } });
+  assert.equal(sent.isError, undefined, JSON.stringify(sent));
+  assert.deepEqual(calls[4], ["sendWorkspaceExecutionInput", { ref: "WSE-9", data: "print(1 + 1)" + String.fromCharCode(10) }]);
+  const sessions = await client.callTool({ name: "execution_sessions", arguments: {} });
+  assert.equal(sessions.isError, undefined, JSON.stringify(sessions));
+  assert.deepEqual(calls[5], ["workspaceAction", { ref: "WS-9", action: "transcript", payload: {} }]);
+  const switched = await client.callTool({ name: "session_select", arguments: { ref: "WSE-old" } });
+  assert.equal(switched.isError, undefined, JSON.stringify(switched));
+  assert.deepEqual(calls[6], ["selectForegroundExecution", "WSE-old"]);
+  await client.close();
+  await server.close();
 });
