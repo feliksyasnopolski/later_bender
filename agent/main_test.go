@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,58 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRestoredRunningExecutionBecomesLostWhenProcessDisappears(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.prepare("WS-12", "native", "WSOP-recovery", "workspace-hash"); err != nil {
+		t.Fatal(err)
+	}
+	ref := "WSE-12"
+	dir := s.executionDir(ref)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	e := &LocalExecution{
+		Execution: ref, Workspace: "WS-12", SpecHash: "execution-hash",
+		State: "running", PID: 99999999, ProcessGroup: 99999999,
+		StartedAt: time.Now().Add(-time.Minute), Stdout: filepath.Join(dir, "stdout"),
+		Stderr: filepath.Join(dir, "stderr"),
+	}
+	if err := os.WriteFile(e.Stdout, []byte("before restart\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicJSON(filepath.Join(dir, "metadata.json"), e, 0600); err != nil {
+		t.Fatal(err)
+	}
+	executionMu.Lock()
+	executions[ref] = e
+	executionMu.Unlock()
+	defer func() {
+		executionMu.Lock()
+		delete(executions, ref)
+		executionMu.Unlock()
+	}()
+
+	op := Operation{Type: "start_execution", Workspace: e.Workspace, Execution: ref, OperationID: "WSOP-execution-recovery", Executor: "native", SpecHash: e.SpecHash}
+	result, err := startNativeWithClient(context.Background(), &Client{}, s, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != "lost" || result.FinishedAt == nil {
+		t.Fatalf("reconciled execution = state %q, finished_at %v", result.State, result.FinishedAt)
+	}
+	var persisted LocalExecution
+	b, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.State != "lost" {
+		t.Fatalf("persisted state = %q, want lost", persisted.State)
+	}
+}
 
 func TestNativeExecutionCapturesOutputAndUsesStableIdentity(t *testing.T) {
 	s := Store{Dir: t.TempDir()}

@@ -525,6 +525,13 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 		if e.SpecHash != op.SpecHash || e.Workspace != op.Workspace {
 			return nil, errors.New("execution identity conflicts with existing spec")
 		}
+		e.mu.Lock()
+		if e.State == "running" && e.cmd == nil && !processIsAlive(e.PID) {
+			now := time.Now().UTC()
+			e.State, e.FinishedAt = "lost", &now
+			_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), e, 0600)
+		}
+		e.mu.Unlock()
 		return e, nil
 	}
 	w, err := s.loadWorkspace(op.Workspace)
