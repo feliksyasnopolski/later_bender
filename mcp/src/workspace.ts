@@ -425,9 +425,11 @@ async function workspaceOperation(
           const probe = probeResult?.execution || probeResult;
           if (probe?.state !== "exited" || probe?.exit_code !== 0) {
             const detail =
-              probe?.failure?.message ||
-              probe?.stderr?.data ||
-              "the execution environment could not start a process in that directory";
+              probe?.failure?.stage === "process_spawn"
+                ? "the directory does not exist or is not accessible to the execution user"
+                : probe?.failure?.message ||
+                  probe?.stderr?.data ||
+                  "the execution environment could not start a process in that directory";
             throw new ApiError(
               "path_not_found",
               422,
