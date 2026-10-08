@@ -525,3 +525,65 @@ RSpec.describe "Api API", type: :request do
     file
   end
 end
+
+RSpec.describe "Work context API", type: :request do
+  before do
+    @user = User.create!(username: "context-user", password: "password123")
+    @token, @raw_token = ApiToken.issue!(user: @user, name: "context test")
+    @project = @user.projects.create!(name: "Writing", slug: "writing", shorthand: "WR")
+    @task = @project.tasks.create!(title: "Context task", status: "ready")
+  end
+
+  it "starts ephemeral and task-connected contexts, replacing only the current context" do
+    get "/api/work-context", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_nil json_body["context"]
+
+    post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    ephemeral_id = json_body.dig("context", "id")
+    assert_nil json_body.dig("context", "task")
+
+    put "/api/work-context/scratchpad", params: { scratchpad: "compressed state" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "compressed state", json_body["scratchpad"]
+
+    post "/api/work-context", params: { task: @task.ref }.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    assert_equal @task.ref, json_body.dig("context", "task", "ref")
+    refute_equal ephemeral_id, json_body.dig("context", "id")
+
+    get "/api/work-context/scratchpad", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "", json_body["scratchpad"]
+    assert_equal 1, @user.work_contexts.current.count
+    assert_equal 2, @user.work_contexts.count
+  end
+
+  it "can attach a Task to an existing ephemeral context and finish it" do
+    post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
+    context_id = json_body.dig("context", "id")
+
+    post "/api/work-context/task", params: { task: @task.ref }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal @task.ref, json_body.dig("context", "task", "ref")
+    assert_equal context_id, json_body.dig("context", "id")
+
+    post "/api/work-context/finish", params: {}.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal false, json_body.dig("context", "current")
+
+    get "/api/work-context", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_nil json_body["context"]
+  end
+
+  it "does not allow a user to attach another user's Task" do
+    other = User.create!(username: "other-context-user", password: "password123")
+    other_project = other.projects.create!(name: "Other", slug: "other", shorthand: "OT")
+    other_task = other_project.tasks.create!(title: "Private", status: "ready")
+
+    post "/api/work-context", params: { task: other_task.ref }.to_json, headers: json_headers(@raw_token)
+    assert_response :not_found
+  end
+end

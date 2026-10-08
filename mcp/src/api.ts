@@ -115,6 +115,37 @@ export class LaterBenderApi {
     return body as T;
   }
 
+  getWorkContext() {
+    return this.request<{ context: unknown }>("/api/work-context");
+  }
+  startWorkContext(task?: string) {
+    return this.request<{ context: unknown }>(
+      "/api/work-context",
+      json("POST", task ? { task } : {}),
+    );
+  }
+  finishWorkContext() {
+    return this.request<{ context: unknown }>(
+      "/api/work-context/finish",
+      json("POST", {}),
+    );
+  }
+  attachWorkContextTask(task: string) {
+    return this.request<{ context: unknown }>(
+      "/api/work-context/task",
+      json("POST", { task }),
+    );
+  }
+  readScratchpad() {
+    return this.request<{ scratchpad: string }>("/api/work-context/scratchpad");
+  }
+  writeScratchpad(scratchpad: string) {
+    return this.request<{ scratchpad: string; updated_at: string }>(
+      "/api/work-context/scratchpad",
+      json("PUT", { scratchpad }),
+    );
+  }
+
   listProjects(input: { limit?: number; cursor?: string } = {}) {
     return this.request<{ projects: unknown[]; next_cursor: string | null }>(
       `/api/projects${query({ paginated: "true", limit: input.limit?.toString(), cursor: input.cursor })}`,

@@ -9,6 +9,7 @@ class User < ApplicationRecord
   has_many :credentials, dependent: :destroy, inverse_of: :user
   has_many :remote_agents, dependent: :destroy, inverse_of: :user
   has_many :remote_agent_enrollment_tokens, dependent: :destroy, inverse_of: :user
+  has_many :work_contexts, dependent: :destroy, inverse_of: :user
 
   validates :username, presence: true, length: { in: 1..80 }, uniqueness: { case_sensitive: false }
   validates :password, confirmation: true, length: { minimum: 8 }, allow_nil: true

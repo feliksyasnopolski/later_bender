@@ -370,11 +370,32 @@ test("tool failures use standard error content without schema-invalid structured
   assert.deepEqual(JSON.parse(result.content[0].text), { error: { code: "validation_failed", message: "Invalid cursor" } });
 });
 
+test("work context and scratchpad methods preserve their implicit current-context contract", async () => {
+  const { api, calls } = apiFor([
+    { status: 201, body: { context: { id: 7, task: null, current: true } } },
+    { status: 200, body: { scratchpad: "CURRENT: probe" } },
+    { status: 200, body: { scratchpad: "NEXT: test", updated_at: "2026-10-08T18:00:00Z" } },
+    { status: 200, body: { context: null } },
+  ]);
+  await api.startWorkContext();
+  await api.readScratchpad();
+  await api.writeScratchpad("NEXT: test");
+  await api.getWorkContext();
+  assert.deepEqual(calls.map((call) => [call.url, call.init.method]), [
+    ["https://example.test/laterbender/api/work-context", "POST"],
+    ["https://example.test/laterbender/api/work-context/scratchpad", undefined],
+    ["https://example.test/laterbender/api/work-context/scratchpad", "PUT"],
+    ["https://example.test/laterbender/api/work-context", undefined],
+  ]);
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), {});
+  assert.deepEqual(JSON.parse(String(calls[2].init.body)), { scratchpad: "NEXT: test" });
+});
+
 test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", ...workspaceToolNames].sort());
+  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "scratchpad_read", "scratchpad_write", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", "work_context_attach_task", "work_context_current", "work_context_finish", "work_context_start", ...workspaceToolNames].sort());
   assert.ok(tools.create_task.inputSchema);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", representation: "text", locator: { kind: "lines", start: 138, end: 152 } }]).success, true);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", locator: { kind: "bytes", start: 1, end: 2 } }]).success, false);

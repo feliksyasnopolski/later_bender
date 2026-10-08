@@ -1268,5 +1268,72 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
           ),
       ),
   );
+  server.registerTool(
+    "work_context_start",
+    {
+      description:
+        "Start a new current work context for the authenticated model user. Pass task to connect it to an existing Task; omit task for an ephemeral context. Starting a context replaces the user's previous current context but preserves it as history. This is working-state, not workflow orchestration.",
+      inputSchema: { task: z.string().min(1).optional() },
+      outputSchema: { context: z.unknown() },
+      annotations: createAnnotations,
+    },
+    ({ task }) => safe("context", () => api.startWorkContext(task)),
+  );
+  server.registerTool(
+    "work_context_current",
+    {
+      description:
+        "Return the authenticated model user's current work context, or null if none exists. The context is implicit for scratchpad operations; do not use it as a substitute for durable Tasks, Notes, or Files.",
+      inputSchema: {},
+      outputSchema: { context: z.unknown() },
+      annotations: readAnnotations,
+    },
+    () => safe("context", () => api.getWorkContext()),
+  );
+  server.registerTool(
+    "work_context_finish",
+    {
+      description:
+        "End the current work context. Its history remains stored, but it is no longer the current context.",
+      inputSchema: {},
+      outputSchema: { context: z.unknown() },
+      annotations: updateAnnotations,
+    },
+    () => safe("context", () => api.finishWorkContext()),
+  );
+  server.registerTool(
+    "work_context_attach_task",
+    {
+      description:
+        "Attach an existing Task to the current work context. Use this when an initially ephemeral investigation becomes actionable work.",
+      inputSchema: { task: z.string().min(1) },
+      outputSchema: { context: z.unknown() },
+      annotations: updateAnnotations,
+    },
+    ({ task }) => safe("context", () => api.attachWorkContextTask(task)),
+  );
+  server.registerTool(
+    "scratchpad_read",
+    {
+      description:
+        "Read the current model-only scratchpad. Scratchpad state is inaccessible to humans through the normal interface. It is exclusively for the model's working continuity; do not optimize it for human readability, explanation, or documentation. Optimize it for efficient continuation of the work. It may be stale, incomplete, speculative, or intentionally compressed; durable Tasks, Notes, Files, and current tool results remain authoritative.",
+      inputSchema: {},
+      outputSchema: { scratchpad: z.string() },
+      annotations: readAnnotations,
+    },
+    () => safe("scratchpad", () => api.readScratchpad()),
+  );
+  server.registerTool(
+    "scratchpad_write",
+    {
+      description:
+        "Replace the current model-only scratchpad as one atomic register. Do not write polished documentation; use whatever compressed state makes the next continuation efficient. An empty string clears it.",
+      inputSchema: { scratchpad: z.string() },
+      outputSchema: { scratchpad: z.string(), updated_at: timestamp },
+      annotations: updateAnnotations,
+    },
+    ({ scratchpad }) =>
+      safe("scratchpad", () => api.writeScratchpad(scratchpad)),
+  );
   registerWorkspaceTools(server, api);
 }
