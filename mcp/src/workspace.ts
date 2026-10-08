@@ -377,12 +377,9 @@ async function workspaceOperation(
           "transcript",
           {},
         );
-        const sessions = (transcript?.events || [])
-          .filter((event: any) => event.kind === "execution")
-          .map((event: any) => ({
-            sequence: event.sequence,
-            ...(event.payload || {}),
-          }));
+        const sessions = (transcript?.events || []).filter(
+          (event: any) => event.kind === "execution",
+        );
         return { workspace, sessions };
       }
       case "session_select": {
