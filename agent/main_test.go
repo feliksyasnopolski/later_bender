@@ -322,6 +322,21 @@ func TestRewriteNativePathsKeepsLogicalWorkspacePathsAgentOwned(t *testing.T) {
 	}
 }
 
+func TestExternalRootPreservesLiteralNativeCommandAndArgvPaths(t *testing.T) {
+	root := "/Users/felix/rails/later_bender"
+	command := "sed -n '1,20p' mcp/src'/Users/felix/rails/later_bender'.ts; printf ''/Users/felix/rails/later_bender' '/Users/felix/rails/later_bender/root'\\n'"
+	if got := nativeShellCommand(command, root, true); got != command {
+		t.Fatalf("external shell command was rewritten: %q", got)
+	}
+	arg := "'/Users/felix/rails/later_bender'/should-be-literal"
+	if got := nativeArgValue(arg, root, true); got != arg {
+		t.Fatalf("external argv path was rewritten: %q", got)
+	}
+	if got := nativeShellCommand("cat '/Users/felix/rails/later_bender'/input", root, false); got != "cat '"+root+"'/input" {
+		t.Fatalf("internal Workspace alias mapping changed: %q", got)
+	}
+}
+
 func TestStorePrepareIsIdempotentAndRejectsChangedSpec(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	a, err := s.prepare("WS-7", "native", "WSOP-1", "abc")

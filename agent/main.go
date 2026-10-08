@@ -572,7 +572,7 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 		if !ok {
 			return nil, errors.New("invalid shell invocation")
 		}
-		argv = []string{"/bin/bash", "-lc", rewriteShellNativePaths(command, executionRoot)}
+		argv = []string{"/bin/bash", "-lc", nativeShellCommand(command, executionRoot, w.ExternalRoot)}
 	case "argv":
 		values, ok := invocation["argv"].([]any)
 		if !ok || len(values) == 0 {
@@ -583,7 +583,7 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 			if !ok {
 				return nil, errors.New("invalid argv value")
 			}
-			argv = append(argv, rewriteNativePaths(item, executionRoot))
+			argv = append(argv, nativeArgValue(item, executionRoot, w.ExternalRoot))
 		}
 	default:
 		return nil, errors.New("invalid invocation kind")
@@ -953,6 +953,20 @@ func bytesContainsNul(value []byte) bool {
 		}
 	}
 	return false
+}
+
+func nativeShellCommand(command, root string, externalRoot bool) string {
+	if externalRoot {
+		return command
+	}
+	return rewriteShellNativePaths(command, root)
+}
+
+func nativeArgValue(value, root string, externalRoot bool) string {
+	if externalRoot {
+		return value
+	}
+	return rewriteNativePaths(value, root)
 }
 
 func rewriteNativePaths(value, root string) string {
