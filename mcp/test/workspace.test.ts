@@ -107,13 +107,14 @@ test("Workspace input schemas are object-shaped in the actual MCP tools/list res
   const listed = await client.listTools();
   const byName = Object.fromEntries(listed.tools.map((tool) => [tool.name, tool]));
 
-  for (const name of ["exec_workspace", "read_workspace_file", "read_workspace_transcript"]) {
+  for (const name of ["exec_workspace", "read_workspace_file", "read_workspace_transcript", "read_workspace_execution_output"]) {
     assert.equal(byName[name].inputSchema.type, "object");
     assert.ok(byName[name].inputSchema.properties);
   }
   assert.deepEqual(Object.keys(byName.exec_workspace.inputSchema.properties ?? {}).sort(), ["argv", "command", "cwd", "env", "interactive", "pty", "secret_env", "stdin", "timeout_seconds", "wait_seconds", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_file.inputSchema.properties ?? {}).sort(), ["cursor", "locator", "path", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_transcript.inputSchema.properties ?? {}).sort(), ["cursor", "from_sequence", "limit", "to_sequence", "workspace"].sort());
+  assert.deepEqual(Object.keys(byName.read_workspace_execution_output.inputSchema.properties ?? {}).sort(), ["cursor", "format", "ref", "stream", "wait_seconds"].sort());
   await client.close();
   await server.close();
 });
