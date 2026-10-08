@@ -418,22 +418,22 @@ async function workspaceOperation(
         if (requestedCwd) {
           const probeResult: any = await api.executeWorkspace({
             workspace,
-            cwd: requestedCwd,
-            command: "pwd",
+            argv: ["test", "-d", requestedCwd],
             timeout_seconds: 10,
           });
           const probe = probeResult?.execution || probeResult;
-          if (probe?.state !== "exited" || probe?.exit_code !== 0) {
-            const detail =
-              probe?.failure?.stage === "process_spawn"
-                ? "the directory does not exist or is not accessible to the execution user"
-                : probe?.failure?.message ||
-                  probe?.stderr?.data ||
-                  "the execution environment could not start a process in that directory";
+          if (probe?.state !== "exited") {
+            throw new ApiError(
+              "backend_unavailable",
+              503,
+              `Could not validate working directory '${requestedCwd}'`,
+            );
+          }
+          if (probe.exit_code !== 0) {
             throw new ApiError(
               "path_not_found",
               422,
-              `Cannot select working directory '${requestedCwd}': ${detail}`,
+              `Cannot select working directory '${requestedCwd}': the directory does not exist or is not accessible to the execution user`,
             );
           }
         }

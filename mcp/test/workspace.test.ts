@@ -236,7 +236,7 @@ test("stateful execution selection and PTY input work through MCP Client tools/c
     createWorkspace: async (payload: any) => { calls.push(["createWorkspace", payload]); return { ref: "WS-9" }; },
     selectExecutionContext: async (payload: any) => { calls.push(["selectExecutionContext", payload]); context = { context: { execution: { workspace: payload.workspace, cwd: payload.cwd, foreground: null } }, workspace: { ref: payload.workspace, cwd: payload.cwd } }; return context; },
     getWorkContext: async () => context,
-    executeWorkspace: async (payload: any) => { calls.push(["executeWorkspace", payload]); if (payload.command === "pwd" && payload.cwd === "/definitely/missing") return { ref: "WSE-probe-failed", state: "failed_to_start", exit_code: null, failure: { stage: "process_spawn", message: "fork/exec /bin/bash: no such file or directory" } }; if (payload.command === "pwd") return { ref: "WSE-probe", state: "exited", exit_code: 0 }; return { ref: "WSE-9", state: "running", workspace: payload.workspace, sequence: 1, invocation: { kind: "shell", command: payload.command }, cwd: payload.cwd, env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: null, exit_code: null, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "text", data: "", total_byte_size: 0, inline_complete: false }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: false } }; },
+    executeWorkspace: async (payload: any) => { calls.push(["executeWorkspace", payload]); if (payload.argv?.[0] === "test" && payload.argv?.[2] === "/definitely/missing") return { ref: "WSE-probe-failed", state: "exited", exit_code: 1 }; if (payload.argv?.[0] === "test") return { ref: "WSE-probe", state: "exited", exit_code: 0 }; return { ref: "WSE-9", state: "running", workspace: payload.workspace, sequence: 1, invocation: { kind: "shell", command: payload.command }, cwd: payload.cwd, env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: null, exit_code: null, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "text", data: "", total_byte_size: 0, inline_complete: false }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: false } }; },
     selectForegroundExecution: async (ref: string) => { calls.push(["selectForegroundExecution", ref]); context.context.execution.foreground = ref; return context; },
     sendWorkspaceExecutionInput: async (ref: string, data: string) => { calls.push(["sendWorkspaceExecutionInput", { ref, data }]); return { execution: ref, bytes_written: data.length }; },
     workspaceAction: async (ref: string, action: string, payload: any) => { calls.push(["workspaceAction", { ref, action, payload }]); return { events: [{ sequence: 4, kind: "execution", execution: "WSE-old", state: "running", workspace: ref }, { sequence: 5, kind: "file", ref: "F-1", workspace: ref }, { sequence: 6, kind: "execution", execution: "WSE-old", state: "exited", exit_code: 0, workspace: ref }, { sequence: 7, kind: "execution", execution: "WSE-current", state: "running", workspace: ref }] }; },
@@ -250,7 +250,7 @@ test("stateful execution selection and PTY input work through MCP Client tools/c
   const selected = await client.callTool({ name: "execution_select", arguments: { target: "RA-1", executor: "native", resource_path: "/Users/felix/rails/later_bender", cwd: "/Users/felix/rails/later_bender" } });
   assert.equal(selected.isError, undefined);
   assert.deepEqual(calls[0], ["createWorkspace", { label: undefined, target: "RA-1", executor: "native", resource_path: "/Users/felix/rails/later_bender", ttl_seconds: undefined }]);
-  assert.deepEqual(calls[1], ["executeWorkspace", { workspace: "WS-9", cwd: "/Users/felix/rails/later_bender", command: "pwd", timeout_seconds: 10 }]);
+  assert.deepEqual(calls[1], ["executeWorkspace", { workspace: "WS-9", argv: ["test", "-d", "/Users/felix/rails/later_bender"], timeout_seconds: 10 }]);
   assert.deepEqual(calls[2], ["selectExecutionContext", { workspace: "WS-9", cwd: "/Users/felix/rails/later_bender" }]);
 
   const started = await client.callTool({ name: "exec_workspace", arguments: { command: "python3 -i", pty: true } });
@@ -270,7 +270,7 @@ test("stateful execution selection and PTY input work through MCP Client tools/c
   const invalidSelection = await client.callTool({ name: "execution_select", arguments: { workspace: "WS-9", cwd: "/definitely/missing" } });
   assert.equal(invalidSelection.isError, true);
   assert.ok(JSON.stringify(invalidSelection).includes("Cannot select working directory"));
-  assert.ok(!JSON.stringify(invalidSelection).includes("/bin/bash"));
+  assert.ok(JSON.stringify(invalidSelection).includes("does not exist or is not accessible"));
   assert.equal(calls.filter(([name]) => name === "selectExecutionContext").length, 1);
   assert.equal(context.context.execution.cwd, "/Users/felix/rails/later_bender");
   await client.close();
