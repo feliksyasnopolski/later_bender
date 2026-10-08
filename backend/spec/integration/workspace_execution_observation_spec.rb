@@ -66,6 +66,30 @@ RSpec.describe "Workspace execution observation", type: :request do
     expect(third.fetch("stream_complete")).to be(true)
   end
 
+  it "waits for a short native output burst to settle before reading" do
+    controller = Api::WorkspacesController.new
+    execution_class = Class.new do
+      attr_accessor :stdout_data, :state, :ref
+      def reload = self
+    end
+    execution = execution_class.new
+    execution.stdout_data = ""
+    execution.state = "running"
+    execution.ref = "WSE-native-settle"
+    writer = Thread.new do
+      sleep 0.05
+      execution.stdout_data = "echo\n"
+      sleep 0.05
+      execution.stdout_data = "echo\nresult\n"
+    end
+
+    result = controller.send(:remote_output, execution, { "stream" => "stdout", "format" => "text", "cursor" => "0", "wait_seconds" => 1 })
+    writer.join
+    expect(result.fetch("data")).to eq("echo\nresult\n")
+    expect(result.fetch("next_cursor")).to eq("12")
+    expect(result.fetch("stream_complete")).to be(false)
+  end
+
   it "allocates compact public refs per user while keeping runner handles internal" do
     stub_runner
     post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)

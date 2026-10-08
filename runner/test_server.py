@@ -52,6 +52,25 @@ class RunnerUnitTest(unittest.TestCase):
             self.assertEqual(data.decode(), "".join(chunks))
             self.assertEqual([16 * 1024, 16 * 1024, len(data) - 32 * 1024], [len(chunk.encode()) for chunk in chunks])
 
+    def test_stream_waits_for_short_output_burst_to_settle(self):
+        import threading
+        import time
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "stdout")
+            row = {"handle": "WSE-settle", "output_dir": directory, "state": "running"}
+            def write_burst():
+                time.sleep(0.05)
+                path.write_bytes(b"echo\n")
+                time.sleep(0.05)
+                path.write_bytes(b"echo\nresult\n")
+            writer = threading.Thread(target=write_burst)
+            writer.start()
+            result = server.stream(row, "stdout", "0", "text", wait_seconds=1)
+            writer.join()
+            self.assertEqual("echo\nresult\n", result["data"])
+            self.assertEqual(len(b"echo\nresult\n"), result["chunk_byte_size"])
+            self.assertEqual(str(len(b"echo\nresult\n")), result["next_cursor"])
+
     def test_auto_uses_base64_for_invalid_utf8_without_nul(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)

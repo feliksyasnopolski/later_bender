@@ -32,6 +32,7 @@ NETWORK = os.environ.get("WORKSPACE_DOCKER_NETWORK", "none")
 DEFAULT_TTL_SECONDS = int(os.environ.get("WORKSPACE_DEFAULT_TTL_SECONDS", "86400"))
 REAPER_INTERVAL_SECONDS = int(os.environ.get("WORKSPACE_REAPER_INTERVAL_SECONDS", "60"))
 MAX_CHUNK = 16 * 1024
+OUTPUT_QUIET_PERIOD_SECONDS = 0.15
 lock = threading.RLock()
 BASELINE_ENV_NAMES = {}
 INTERACTIVE_PROCESSES = {}
@@ -157,9 +158,31 @@ def execution_state(row):
     return row
 
 
-def stream(row, name, cursor, format_name):
+def stream(row, name, cursor, format_name, wait_seconds=0):
     path = Path(row["output_dir"]) / name
     offset = int(cursor or 0)
+    try:
+        wait_seconds = float(wait_seconds or 0)
+    except (TypeError, ValueError):
+        raise ValueError("invalid_range") from None
+    if not 0 <= wait_seconds <= 5:
+        raise ValueError("invalid_range")
+    if wait_seconds:
+        deadline = time.monotonic() + wait_seconds
+        last_size = None
+        last_change = time.monotonic()
+        while True:
+            row = execution_state(row)
+            size = path.stat().st_size if path.exists() else 0
+            current = time.monotonic()
+            if size != last_size:
+                last_size = size
+                last_change = current
+            elif size > offset and current - last_change >= OUTPUT_QUIET_PERIOD_SECONDS:
+                break
+            if row["state"] != "running" or current >= deadline:
+                break
+            time.sleep(0.05)
     data = path.read_bytes() if path.exists() else b""
     chunk = data[offset:offset + MAX_CHUNK]
     next_offset = offset + len(chunk)
@@ -463,7 +486,7 @@ class Handler(BaseHTTPRequestHandler):
     def execution_action(self, handle, action, payload):
         with db() as connection: row = connection.execute("SELECT * FROM executions WHERE handle=?", (handle,)).fetchone()
         if not row: raise ValueError("execution_not_found")
-        if action == "output": self.send_json(200, stream(row, payload.get("stream", "stdout"), payload.get("cursor"), payload.get("format"))); return
+        if action == "output": self.send_json(200, stream(row, payload.get("stream", "stdout"), payload.get("cursor"), payload.get("format"), payload.get("wait_seconds", 0))); return
         if action == "input":
             data = payload.get("data")
             if not isinstance(data, str) or len(data.encode()) > 65536: raise ValueError("invalid_invocation")

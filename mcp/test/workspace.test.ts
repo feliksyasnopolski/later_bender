@@ -197,6 +197,31 @@ test("exec_workspace preserves invalid UTF-8 output as base64 through tools/call
   await server.close();
 });
 
+test("read_workspace_execution_output defaults to a bounded settle wait and allows immediate polling", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const calls: any[] = [];
+  const api = {
+    getWorkContext: async () => ({ context: { execution: { foreground: "WSE-output" } } }),
+    workspaceExecutionActionByRef: async (ref: string, action: string, input: Record<string, unknown>) => {
+      calls.push({ ref, action, input });
+      return { execution: ref, stream: input.stream, format: "text", data: "reply\n", chunk_byte_size: 6, next_cursor: "6", stream_complete: false, state: "running" };
+    },
+  } as unknown as LaterBenderApi;
+  registerWorkspaceTools(server, api);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  await client.callTool({ name: "read_workspace_execution_output", arguments: { stream: "stdout", cursor: "0" } });
+  assert.equal(calls[0].ref, "WSE-output");
+  assert.equal(calls[0].action, "output");
+  assert.equal(calls[0].input.wait_seconds, 1);
+  await client.callTool({ name: "read_workspace_execution_output", arguments: { stream: "stdout", cursor: "6", wait_seconds: 0 } });
+  assert.equal(calls[1].input.wait_seconds, 0);
+  await client.close();
+  await server.close();
+});
+
 function registeredExecSchema() {
   return tools().exec_workspace.inputSchema;
 }

@@ -545,7 +545,10 @@ async function workspaceOperation(
             422,
             "No execution ref or foreground execution selected",
           );
-        return api.workspaceExecutionActionByRef(ref, "output", input);
+        return api.workspaceExecutionActionByRef(ref, "output", {
+          ...input,
+          wait_seconds: input.wait_seconds ?? 1,
+        });
       }
       case "cancel_workspace_execution": {
         let ref = input.ref as string | undefined;
@@ -834,12 +837,13 @@ export function registerWorkspaceTools(
   server.registerTool(
     "read_workspace_execution_output",
     {
-      description: `Continue reading retained stdout or stderr from an opaque cursor. Each call returns the next bounded stream chunk; a cursor at the current end of a running stream is resumable and returns later appended bytes. next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`,
+      description: `Continue reading retained stdout or stderr from an opaque cursor. Reads wait up to 1 second by default for a short output burst to settle (150ms without new bytes); set wait_seconds to 0 for an immediate poll or up to 5 seconds for a longer wait. Each call returns the next bounded stream chunk; a cursor at the current end of a running stream is resumable. next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`,
       inputSchema: {
         ref: opaqueRef.optional(),
         stream: z.enum(["stdout", "stderr"]),
         format: z.enum(["auto", "text", "base64"]).optional(),
         cursor: z.string().optional(),
+        wait_seconds: z.number().min(0).max(5).optional(),
       },
       outputSchema: {
         execution: opaqueRef,

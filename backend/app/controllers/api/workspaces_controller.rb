@@ -5,6 +5,7 @@ module Api
     REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS = 6.5
     REMOTE_EXECUTION_OBSERVATION_WINDOW_SECONDS = 2.5
     REMOTE_OBSERVATION_INTERVAL_SECONDS = 0.1
+    OUTPUT_QUIET_PERIOD_SECONDS = 0.15
     before_action :set_workspace, only: %i[show destroy put_file read_file promote_file execute execution output input cancel transcript promote_transcript]
 
     def capabilities
@@ -290,9 +291,18 @@ module Api
     def remote_output(execution, payload)
       stream = payload["stream"].to_s
       raise WorkspaceRunnerClient::Unavailable.new("Invalid output stream", code: "invalid_range") unless %w[stdout stderr].include?(stream)
+      begin
+        wait_seconds = Float(payload["wait_seconds"].presence || 0)
+      rescue ArgumentError, TypeError
+        raise WorkspaceRunnerClient::Unavailable.new("Invalid output wait", code: "invalid_range")
+      end
+      raise WorkspaceRunnerClient::Unavailable.new("Invalid output wait", code: "invalid_range") unless wait_seconds.finite? && wait_seconds.between?(0.0, 5.0)
       bytes = execution.public_send("#{stream}_data").to_s.b
       offset = Integer(payload["cursor"].presence || 0)
       raise WorkspaceRunnerClient::Unavailable.new("Invalid output cursor", code: "invalid_cursor") if offset.negative? || offset > bytes.bytesize
+      wait_for_output_settle(execution, stream, offset, wait_seconds)
+      bytes = execution.public_send("#{stream}_data").to_s.b
+      raise WorkspaceRunnerClient::Unavailable.new("Invalid output cursor", code: "invalid_cursor") if offset > bytes.bytesize
       chunk = bytes.byteslice(offset, 16 * 1024) || "".b
       format = payload["format"].to_s
       format = "text" if format == "auto" && utf8_text?(chunk)
@@ -302,6 +312,28 @@ module Api
       { "execution" => execution.ref, "stream" => stream, "format" => format, "data" => encoded, "chunk_byte_size" => chunk.bytesize, "total_byte_size" => bytes.bytesize, "next_cursor" => terminal && offset + chunk.bytesize >= bytes.bytesize ? nil : (offset + chunk.bytesize).to_s, "stream_complete" => terminal && offset + chunk.bytesize >= bytes.bytesize, "state" => execution.state }
     rescue ArgumentError
       raise WorkspaceRunnerClient::Unavailable.new("Invalid output cursor", code: "invalid_cursor")
+    end
+
+    def wait_for_output_settle(execution, stream, offset, wait_seconds)
+      return if wait_seconds.zero?
+
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait_seconds
+      last_size = nil
+      last_change = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      loop do
+        execution.reload
+        size = execution.public_send("#{stream}_data").to_s.b.bytesize
+        current = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if size != last_size
+          last_size = size
+          last_change = current
+        elsif size > offset && current - last_change >= OUTPUT_QUIET_PERIOD_SECONDS
+          break
+        end
+        break if execution.state != "running" || current >= deadline
+
+        sleep 0.05
+      end
     end
 
     def utf8_text?(bytes)
