@@ -391,6 +391,25 @@ test("work context and scratchpad methods preserve their implicit current-contex
   assert.deepEqual(JSON.parse(String(calls[2].init.body)), { scratchpad: "NEXT: test" });
 });
 
+test("scratchpad tools return their backend object without an extra root wrapper", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api } = apiFor([
+    { status: 200, body: { scratchpad: "CURRENT: probe" } },
+    { status: 200, body: { scratchpad: "NEXT: test", updated_at: "2026-10-08T18:00:00Z" } },
+  ]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const read = await tools.scratchpad_read.handler({});
+  const write = await tools.scratchpad_write.handler({ scratchpad: "NEXT: test" });
+
+  assert.equal(read.structuredContent.scratchpad, "CURRENT: probe");
+  assert.equal(write.structuredContent.scratchpad, "NEXT: test");
+  assert.equal(write.structuredContent.updated_at, "2026-10-08T18:00:00Z");
+  assert.equal(typeof read.structuredContent.scratchpad, "string");
+  assert.equal(typeof write.structuredContent.scratchpad, "string");
+});
+
 test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));

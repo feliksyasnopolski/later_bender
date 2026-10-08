@@ -1321,7 +1321,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       outputSchema: { scratchpad: z.string() },
       annotations: readAnnotations,
     },
-    () => safe("scratchpad", () => api.readScratchpad()),
+    () => safeObject(() => api.readScratchpad()),
   );
   server.registerTool(
     "scratchpad_write",
@@ -1332,8 +1332,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       outputSchema: { scratchpad: z.string(), updated_at: timestamp },
       annotations: updateAnnotations,
     },
-    ({ scratchpad }) =>
-      safe("scratchpad", () => api.writeScratchpad(scratchpad)),
+    ({ scratchpad }) => safeObject(() => api.writeScratchpad(scratchpad)),
   );
   registerWorkspaceTools(server, api);
 }
