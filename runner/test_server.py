@@ -33,6 +33,25 @@ class RunnerUnitTest(unittest.TestCase):
             self.assertEqual(3, result["total_byte_size"])
             self.assertTrue(result["stream_complete"])
 
+    def test_stream_chunks_are_bounded_and_resumable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            data = ("abcdefgh" * 4100).encode()
+            Path(directory, "stdout").write_bytes(data)
+            row = {"handle": "WSE-chunks", "output_dir": directory, "state": "exited"}
+            chunks = []
+            cursor = None
+            while True:
+                result = server.stream(row, "stdout", cursor, "text")
+                chunks.append(result["data"])
+                cursor = result["next_cursor"]
+                if cursor is None:
+                    self.assertTrue(result["stream_complete"])
+                    break
+                self.assertFalse(result["stream_complete"])
+                self.assertLessEqual(result["chunk_byte_size"], 16 * 1024)
+            self.assertEqual(data.decode(), "".join(chunks))
+            self.assertEqual([16 * 1024, 16 * 1024, len(data) - 32 * 1024], [len(chunk.encode()) for chunk in chunks])
+
     def test_auto_uses_base64_for_invalid_utf8_without_nul(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)

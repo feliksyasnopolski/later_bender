@@ -44,6 +44,28 @@ RSpec.describe "Workspace execution observation", type: :request do
     assert_match(/\AWS-\d+\z/, Workspace.last.ref)
   end
 
+  it "bounds native execution output chunks and advances byte cursors" do
+    controller = Api::WorkspacesController.new
+    bytes = "x" * (32 * 1024 + 17)
+    execution = Struct.new(:stdout_data, :state, :ref).new(bytes, "exited", "WSE-native-output")
+
+    first = controller.send(:remote_output, execution, { "stream" => "stdout", "format" => "text" })
+    expect(first.fetch("data").bytesize).to eq(16 * 1024)
+    expect(first.fetch("chunk_byte_size")).to eq(16 * 1024)
+    expect(first.fetch("next_cursor")).to eq((16 * 1024).to_s)
+    expect(first.fetch("stream_complete")).to be(false)
+
+    second = controller.send(:remote_output, execution, { "stream" => "stdout", "format" => "text", "cursor" => first.fetch("next_cursor") })
+    expect(second.fetch("data").bytesize).to eq(16 * 1024)
+    expect(second.fetch("next_cursor")).to eq((32 * 1024).to_s)
+    expect(second.fetch("stream_complete")).to be(false)
+
+    third = controller.send(:remote_output, execution, { "stream" => "stdout", "format" => "text", "cursor" => second.fetch("next_cursor") })
+    expect(third.fetch("data")).to eq("x" * 17)
+    expect(third.fetch("next_cursor")).to be_nil
+    expect(third.fetch("stream_complete")).to be(true)
+  end
+
   it "allocates compact public refs per user while keeping runner handles internal" do
     stub_runner
     post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
