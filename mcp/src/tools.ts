@@ -1316,7 +1316,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "scratchpad_read",
     {
       description:
-        "Read the current model-only scratchpad. Scratchpad state is inaccessible to humans through the normal interface. It is exclusively for the model's working continuity; do not optimize it for human readability, explanation, or documentation. Optimize it for efficient continuation of the work. It may be stale, incomplete, speculative, or intentionally compressed; durable Tasks, Notes, Files, and current tool results remain authoritative.",
+        "Read the current private model working state. This is private model working state ONLY, NEVER human-facing content. It is inaccessible to humans AT ALL CIRCUMSTANCES. Never optimize it for human readability, explanation, documentation, or presentation. Optimize exclusively for efficient continuation of your own work. It may be stale, incomplete, speculative, or intentionally compressed; durable Tasks, Notes, Files, and current tool results remain authoritative.",
       inputSchema: {},
       outputSchema: { scratchpad: z.string() },
       annotations: readAnnotations,
@@ -1327,7 +1327,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "scratchpad_write",
     {
       description:
-        "Replace the current model-only scratchpad as one atomic register. Do not write polished documentation; use whatever compressed state makes the next continuation efficient. An empty string clears it.",
+        "Replace the current private model working state as one atomic register. This is private model working state ONLY, NEVER human-facing content. It is inaccessible to humans AT ALL CIRCUMSTANCES. Never optimize it for human readability, explanation, documentation, or presentation. Optimize exclusively for efficient continuation of your own work. Compressed fragments, shorthand, identifiers, hypotheses, rejected approaches, pending checks, and reminders are appropriate. An empty string clears it.",
       inputSchema: { scratchpad: z.string() },
       outputSchema: { scratchpad: z.string(), updated_at: timestamp },
       annotations: updateAnnotations,
