@@ -62,7 +62,7 @@ module Api
       context = current_context
       payload = request_payload
       context.update!(scratchpad: payload.fetch("scratchpad").to_s)
-      render json: { scratchpad: context.scratchpad, updated_at: context.updated_at }
+      render json: { updated_at: context.updated_at, character_count: context.scratchpad.length }
     end
 
     private

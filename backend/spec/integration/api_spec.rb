@@ -546,7 +546,9 @@ RSpec.describe "Work context API", type: :request do
 
     put "/api/work-context/scratchpad", params: { scratchpad: "compressed state" }.to_json, headers: json_headers(@raw_token)
     assert_response :success
-    assert_equal "compressed state", json_body["scratchpad"]
+    assert_equal 16, json_body["character_count"]
+    assert json_body.key?("updated_at")
+    assert_equal %w[character_count updated_at], json_body.keys.sort
 
     post "/api/work-context", params: { task: @task.ref }.to_json, headers: json_headers(@raw_token)
     assert_response :created

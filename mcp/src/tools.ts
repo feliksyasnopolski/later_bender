@@ -1329,7 +1329,10 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       description:
         "Replace the current private model working state as one atomic register. This is private model working state ONLY, NEVER human-facing content. It is inaccessible to humans AT ALL CIRCUMSTANCES. Never optimize it for human readability, explanation, documentation, or presentation. Optimize exclusively for efficient continuation of your own work. Compressed fragments, shorthand, identifiers, hypotheses, rejected approaches, pending checks, and reminders are appropriate. An empty string clears it.",
       inputSchema: { scratchpad: z.string() },
-      outputSchema: { scratchpad: z.string(), updated_at: timestamp },
+      outputSchema: {
+        updated_at: timestamp,
+        character_count: z.number().int().nonnegative(),
+      },
       annotations: updateAnnotations,
     },
     ({ scratchpad }) => safeObject(() => api.writeScratchpad(scratchpad)),

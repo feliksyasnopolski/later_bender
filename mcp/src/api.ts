@@ -152,7 +152,7 @@ export class LaterBenderApi {
     return this.request<{ scratchpad: string }>("/api/work-context/scratchpad");
   }
   writeScratchpad(scratchpad: string) {
-    return this.request<{ scratchpad: string; updated_at: string }>(
+    return this.request<{ updated_at: string; character_count: number }>(
       "/api/work-context/scratchpad",
       json("PUT", { scratchpad }),
     );

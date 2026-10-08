@@ -374,7 +374,7 @@ test("work context and scratchpad methods preserve their implicit current-contex
   const { api, calls } = apiFor([
     { status: 201, body: { context: { id: 7, task: null, current: true } } },
     { status: 200, body: { scratchpad: "CURRENT: probe" } },
-    { status: 200, body: { scratchpad: "NEXT: test", updated_at: "2026-10-08T18:00:00Z" } },
+    { status: 200, body: { updated_at: "2026-10-08T18:00:00Z", character_count: 10 } },
     { status: 200, body: { context: null } },
   ]);
   await api.startWorkContext();
@@ -395,7 +395,7 @@ test("scratchpad tools return their backend object without an extra root wrapper
   const server = new McpServer({ name: "test", version: "1" });
   const { api } = apiFor([
     { status: 200, body: { scratchpad: "CURRENT: probe" } },
-    { status: 200, body: { scratchpad: "NEXT: test", updated_at: "2026-10-08T18:00:00Z" } },
+    { status: 200, body: { updated_at: "2026-10-08T18:00:00Z", character_count: 10 } },
   ]);
   registerTools(server, api);
   const tools = (server as any)._registeredTools as Record<string, any>;
@@ -404,10 +404,10 @@ test("scratchpad tools return their backend object without an extra root wrapper
   const write = await tools.scratchpad_write.handler({ scratchpad: "NEXT: test" });
 
   assert.equal(read.structuredContent.scratchpad, "CURRENT: probe");
-  assert.equal(write.structuredContent.scratchpad, "NEXT: test");
+  assert.deepEqual(Object.keys(write.structuredContent).sort(), ["character_count", "updated_at"]);
+  assert.equal(write.structuredContent.character_count, 10);
   assert.equal(write.structuredContent.updated_at, "2026-10-08T18:00:00Z");
   assert.equal(typeof read.structuredContent.scratchpad, "string");
-  assert.equal(typeof write.structuredContent.scratchpad, "string");
 });
 
 test("registers exactly the v1 tools with schemas", () => {
