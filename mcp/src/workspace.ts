@@ -377,8 +377,16 @@ async function workspaceOperation(
           "transcript",
           {},
         );
-        const sessions = (transcript?.events || []).filter(
-          (event: any) => event.kind === "execution",
+        const latestByExecution = new Map<string, any>();
+        for (const event of transcript?.events || []) {
+          if (event.kind !== "execution" || !event.execution) continue;
+          const previous = latestByExecution.get(event.execution);
+          if (!previous || event.sequence > previous.sequence) {
+            latestByExecution.set(event.execution, event);
+          }
+        }
+        const sessions = [...latestByExecution.values()].sort(
+          (left, right) => right.sequence - left.sequence,
         );
         return { workspace, sessions };
       }

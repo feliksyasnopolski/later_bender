@@ -239,7 +239,7 @@ test("stateful execution selection and PTY input work through MCP Client tools/c
     executeWorkspace: async (payload: any) => { calls.push(["executeWorkspace", payload]); return { ref: "WSE-9", state: "running", workspace: payload.workspace, sequence: 1, invocation: { kind: "shell", command: payload.command }, cwd: payload.cwd, env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: null, exit_code: null, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "text", data: "", total_byte_size: 0, inline_complete: false }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: false } }; },
     selectForegroundExecution: async (ref: string) => { calls.push(["selectForegroundExecution", ref]); context.context.execution.foreground = ref; return context; },
     sendWorkspaceExecutionInput: async (ref: string, data: string) => { calls.push(["sendWorkspaceExecutionInput", { ref, data }]); return { execution: ref, bytes_written: data.length }; },
-    workspaceAction: async (ref: string, action: string, payload: any) => { calls.push(["workspaceAction", { ref, action, payload }]); return { events: [{ sequence: 4, kind: "execution", execution: "WSE-old", state: "running", workspace: ref }, { sequence: 5, kind: "file", ref: "F-1", workspace: ref }] }; },
+    workspaceAction: async (ref: string, action: string, payload: any) => { calls.push(["workspaceAction", { ref, action, payload }]); return { events: [{ sequence: 4, kind: "execution", execution: "WSE-old", state: "running", workspace: ref }, { sequence: 5, kind: "file", ref: "F-1", workspace: ref }, { sequence: 6, kind: "execution", execution: "WSE-old", state: "exited", exit_code: 0, workspace: ref }, { sequence: 7, kind: "execution", execution: "WSE-current", state: "running", workspace: ref }] }; },
   } as unknown as LaterBenderApi;
   registerWorkspaceTools(server, api);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -262,7 +262,7 @@ test("stateful execution selection and PTY input work through MCP Client tools/c
   const sessions = await client.callTool({ name: "execution_sessions", arguments: {} });
   assert.equal(sessions.isError, undefined, JSON.stringify(sessions));
   assert.deepEqual(calls[5], ["workspaceAction", { ref: "WS-9", action: "transcript", payload: {} }]);
-  assert.equal((sessions as any).structuredContent.sessions[0].execution, "WSE-old");
+  assert.deepEqual((sessions as any).structuredContent.sessions.map((s: any) => [s.execution, s.state]), [["WSE-current", "running"], ["WSE-old", "exited"]]);
   const switched = await client.callTool({ name: "session_select", arguments: { ref: "WSE-old" } });
   assert.equal(switched.isError, undefined, JSON.stringify(switched));
   assert.deepEqual(calls[6], ["selectForegroundExecution", "WSE-old"]);
