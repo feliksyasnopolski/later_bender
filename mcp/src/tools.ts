@@ -1317,7 +1317,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       outputSchema: { context: z.unknown() },
       annotations: createAnnotations,
     },
-    ({ task }) => safe("context", () => api.startWorkContext(task)),
+    ({ task }) => safeObject(() => api.startWorkContext(task)),
   );
   server.registerTool(
     "work_context_current",
@@ -1328,7 +1328,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       outputSchema: { context: z.unknown() },
       annotations: readAnnotations,
     },
-    () => safe("context", () => api.getWorkContext()),
+    () => safeObject(() => api.getWorkContext()),
   );
   server.registerTool(
     "work_context_finish",
@@ -1339,7 +1339,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
     },
-    () => safe("context", () => api.finishWorkContext()),
+    () => safeObject(() => api.finishWorkContext()),
   );
   server.registerTool(
     "work_context_attach_task",
@@ -1350,7 +1350,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
     },
-    ({ task }) => safe("context", () => api.attachWorkContextTask(task)),
+    ({ task }) => safeObject(() => api.attachWorkContextTask(task)),
   );
   server.registerTool(
     "scratchpad_read",

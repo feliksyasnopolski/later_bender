@@ -391,6 +391,24 @@ test("work context and scratchpad methods preserve their implicit current-contex
   assert.deepEqual(JSON.parse(String(calls[2].init.body)), { scratchpad: "NEXT: test" });
 });
 
+test("work context tools preserve the backend context object without double-wrapping", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const context = { id: 17, current: true, state: "current" };
+  const { api } = apiFor([
+    { status: 201, body: { context } },
+    { status: 200, body: { context } },
+    { status: 200, body: { context: { ...context, state: "finished", current: false } } },
+    { status: 200, body: { context: { ...context, task: { ref: "WR-1", title: "Task" } } } },
+  ]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  assert.deepEqual((await tools.work_context_start.handler({})).structuredContent, { context });
+  assert.deepEqual((await tools.work_context_current.handler({})).structuredContent, { context });
+  assert.deepEqual((await tools.work_context_finish.handler({})).structuredContent, { context: { ...context, state: "finished", current: false } });
+  assert.deepEqual((await tools.work_context_attach_task.handler({ task: "WR-1" })).structuredContent, { context: { ...context, task: { ref: "WR-1", title: "Task" } } });
+});
+
 test("work context discovery, inspection, and selection use stable context IDs", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api, calls } = apiFor([
