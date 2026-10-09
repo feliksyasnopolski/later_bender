@@ -631,6 +631,81 @@ RSpec.describe "Work context API", type: :request do
     assert_equal 1, @user.work_contexts.current.count
   end
 
+  it "isolates current contexts and scratchpads by API token while keeping data user-owned" do
+    post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
+    first_id = json_body.dig("context", "id")
+    put "/api/work-context/scratchpad", params: { scratchpad: "actor one" }.to_json, headers: json_headers(@raw_token)
+
+    second_token, second_raw_token = ApiToken.issue!(user: @user, name: "second model client")
+    get "/api/work-context", headers: json_headers(second_raw_token)
+    assert_response :success
+    assert_nil json_body["context"]
+
+    post "/api/work-context", params: {}.to_json, headers: json_headers(second_raw_token)
+    second_id = json_body.dig("context", "id")
+    refute_equal first_id, second_id
+    put "/api/work-context/scratchpad", params: { scratchpad: "actor two" }.to_json, headers: json_headers(second_raw_token)
+
+    get "/api/work-context/scratchpad", headers: json_headers(@raw_token)
+    assert_equal "actor one", json_body["scratchpad"]
+    get "/api/work-context/scratchpad", headers: json_headers(second_raw_token)
+    assert_equal "actor two", json_body["scratchpad"]
+
+    post "/api/work-context/select", params: { id: second_id }.to_json, headers: json_headers(@raw_token)
+    assert_response :not_found
+    assert_equal 2, @user.work_contexts.current.count
+
+    @token.revoke!
+    replacement, replacement_raw = ApiToken.issue!(user: @user, name: "rotated model client")
+    get "/api/work-context", headers: json_headers(replacement_raw)
+    assert_response :success
+    assert_nil json_body["context"]
+    assert WorkContext.exists?(first_id), "revoking a token must not delete its context"
+    refute_equal @token.id, replacement.id
+    assert_nil second_token.reload.revoked_at
+  end
+
+  it "shares state across tokens for one OAuth application but isolates separate applications" do
+    first_app = Doorkeeper::Application.create!(name: "Model client one", redirect_uri: "https://client.example/callback", confidential: false, scopes: "mcp")
+    second_app = Doorkeeper::Application.create!(name: "Model client two", redirect_uri: "https://client.example/callback", confidential: false, scopes: "mcp")
+    first_oauth = Doorkeeper::AccessToken.create!(application: first_app, resource_owner_id: @user.id, scopes: "mcp", expires_in: 30.days.to_i)
+    same_app_oauth = Doorkeeper::AccessToken.create!(application: first_app, resource_owner_id: @user.id, scopes: "mcp", expires_in: 30.days.to_i)
+    second_oauth = Doorkeeper::AccessToken.create!(application: second_app, resource_owner_id: @user.id, scopes: "mcp", expires_in: 30.days.to_i)
+
+    post "/api/work-context", params: {}.to_json, headers: json_headers(first_oauth.token)
+    first_id = json_body.dig("context", "id")
+    put "/api/work-context/scratchpad", params: { scratchpad: "same OAuth actor" }.to_json, headers: json_headers(first_oauth.token)
+    get "/api/work-context/scratchpad", headers: json_headers(same_app_oauth.token)
+    assert_response :success
+    assert_equal "same OAuth actor", json_body["scratchpad"]
+
+    get "/api/work-context", headers: json_headers(second_oauth.token)
+    assert_response :success
+    assert_nil json_body["context"]
+    post "/api/work-context", params: {}.to_json, headers: json_headers(second_oauth.token)
+    second_id = json_body.dig("context", "id")
+    refute_equal first_id, second_id
+    put "/api/work-context/scratchpad", params: { scratchpad: "different OAuth actor" }.to_json, headers: json_headers(second_oauth.token)
+
+    get "/api/work-context/scratchpad", headers: json_headers(first_oauth.token)
+    assert_equal "same OAuth actor", json_body["scratchpad"]
+    get "/api/work-context/scratchpad", headers: json_headers(second_oauth.token)
+    assert_equal "different OAuth actor", json_body["scratchpad"]
+  end
+
+  it "claims the pre-isolation current context for the first actor that resumes it" do
+    legacy = @user.work_contexts.create!(scratchpad: "legacy continuity")
+    get "/api/work-context", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal legacy.id, json_body.dig("context", "id")
+    assert_equal "api-token:#{@token.id}", legacy.reload.actor_key
+
+    _replacement, replacement_raw = ApiToken.issue!(user: @user, name: "new actor")
+    get "/api/work-context", headers: json_headers(replacement_raw)
+    assert_response :success
+    assert_nil json_body["context"]
+  end
+
   it "distinguishes finishing from switching away and allows explicit reopening" do
     post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
     context_id = json_body.dig("context", "id")

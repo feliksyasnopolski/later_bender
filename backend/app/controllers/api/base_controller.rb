@@ -18,6 +18,14 @@ module Api
 
     attr_reader :current_user, :current_api_token, :current_oauth_token
 
+    def current_actor_key
+      return "api-token:#{current_api_token.id}" if current_api_token
+      return "oauth-application:#{current_oauth_token.application_id}" if current_oauth_token&.application_id.present?
+      return "oauth-token:#{current_oauth_token.id}" if current_oauth_token
+
+      raise "An authenticated actor is required"
+    end
+
     private
 
     def authenticate_user!

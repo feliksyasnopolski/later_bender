@@ -6,6 +6,7 @@ class WorkContext < ApplicationRecord
   validate :task_belongs_to_user
 
   scope :current, -> { where(ended_at: nil, finished_at: nil) }
+  scope :for_actor, ->(actor_key) { where(actor_key: actor_key) }
   scope :recent, -> { includes(:task).order(id: :desc) }
 
   def current?

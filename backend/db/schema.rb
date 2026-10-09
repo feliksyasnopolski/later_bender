@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_09_094500) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_09_103000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -385,6 +385,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_09_094500) do
   end
 
   create_table "work_contexts", force: :cascade do |t|
+    t.string "actor_key"
     t.datetime "created_at", null: false
     t.datetime "ended_at"
     t.string "execution_cwd"
@@ -396,9 +397,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_09_094500) do
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
     t.index ["task_id"], name: "index_work_contexts_on_task_id"
+    t.index ["user_id", "actor_key"], name: "index_work_contexts_on_current_user_and_actor", unique: true, where: "((ended_at IS NULL) AND (actor_key IS NOT NULL))"
     t.index ["user_id", "ended_at"], name: "index_work_contexts_on_user_id_and_ended_at"
     t.index ["user_id", "finished_at"], name: "index_work_contexts_on_user_id_and_finished_at"
-    t.index ["user_id"], name: "index_work_contexts_on_current_user", unique: true, where: "(ended_at IS NULL)"
     t.index ["user_id"], name: "index_work_contexts_on_user_id"
   end
 

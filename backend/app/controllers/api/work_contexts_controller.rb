@@ -1,7 +1,8 @@
 module Api
   class WorkContextsController < BaseController
     def current
-      context = current_user.work_contexts.current.includes(:task).first
+      context = nil
+      current_user.with_lock { context = current_context_or_adopt_legacy }
       render json: context_json(context)
     end
 
@@ -31,17 +32,18 @@ module Api
       payload = request_payload
       task = resolve_task(payload["task"])
       current_user.with_lock do
-        current_user.work_contexts.current.update_all(ended_at: Time.current, updated_at: Time.current)
-        @context = current_user.work_contexts.create!(task: task, scratchpad: "")
+        actor_contexts.current.update_all(ended_at: Time.current, updated_at: Time.current)
+        @context = current_user.work_contexts.create!(task: task, scratchpad: "", actor_key: current_actor_key)
       end
       render json: context_json(@context), status: :created
     end
 
     def select
-      selected = current_user.work_contexts.find(params.fetch(:id))
+      selected = nil
       current_user.with_lock do
-        current_user.work_contexts.current.where.not(id: selected.id).update_all(ended_at: Time.current, updated_at: Time.current)
-        selected.update!(ended_at: nil, finished_at: nil)
+        selected = current_user.work_contexts.where(actor_key: [ nil, current_actor_key ]).find(params.fetch(:id))
+        actor_contexts.current.where.not(id: selected.id).update_all(ended_at: Time.current, updated_at: Time.current)
+        selected.update!(actor_key: current_actor_key, ended_at: nil, finished_at: nil)
       end
       render json: context_json(selected.reload)
     rescue KeyError, ArgumentError, TypeError
@@ -75,7 +77,7 @@ module Api
       context = nil
       cwd = nil
       current_user.with_lock do
-        context = current_user.work_contexts.current.first || current_user.work_contexts.create!(scratchpad: "")
+        context = current_context_or_adopt_legacy || current_user.work_contexts.create!(scratchpad: "", actor_key: current_actor_key)
         cwd = payload["cwd"].presence || (context.execution_workspace_ref == workspace.ref ? context.execution_cwd : nil) || workspace.workspace_root
         raise ArgumentError, "cwd must be a non-empty path" unless cwd.is_a?(String) && cwd.present?
         changed = context.execution_workspace_ref != workspace.ref
@@ -101,7 +103,8 @@ module Api
     end
 
     def scratchpad
-      context = current_context
+      context = nil
+      current_user.with_lock { context = current_context_or_adopt_legacy || raise(ActiveRecord::RecordNotFound) }
       render json: { scratchpad: context.scratchpad }
     end
 
@@ -117,8 +120,24 @@ module Api
 
     private
 
+    def actor_contexts
+      current_user.work_contexts.where(actor_key: current_actor_key)
+    end
+
+    # Existing contexts predate actor isolation. The first actor to resume the
+    # legacy current context claims it; subsequent actors cannot see it as current.
+    # This preserves continuity across the migration without sharing new state.
+    def current_context_or_adopt_legacy
+      context = actor_contexts.current.first
+      return context if context
+
+      legacy = current_user.work_contexts.where(actor_key: nil).current.first
+      legacy&.update!(actor_key: current_actor_key)
+      legacy
+    end
+
     def current_context
-      current_user.work_contexts.current.first || raise(ActiveRecord::RecordNotFound)
+      current_context_or_adopt_legacy || raise(ActiveRecord::RecordNotFound)
     end
 
     def resolve_task(ref)

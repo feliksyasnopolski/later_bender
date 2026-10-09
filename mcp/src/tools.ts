@@ -1301,7 +1301,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_select",
     {
       description:
-        "Select/resume one of your existing work contexts by ID. The previously selected context becomes inactive, not finished; the selected context's scratchpad and execution selection become current again. Selecting a finished context reopens it. Selection is currently shared by all interactions authenticated as this user.",
+        "Select/resume one of this actor’s work contexts by ID, or claim an unassigned pre-isolation context. The previously selected context becomes inactive, not finished; the selected context's scratchpad and execution selection become current again. Selecting a finished context reopens it. Selection is isolated by authenticated actor: OAuth clients share state within the same registered application, while each API token has its own state. Different actors under the same user do not share a current-context pointer.",
       inputSchema: { id: z.number().int().positive() },
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
@@ -1312,7 +1312,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_start",
     {
       description:
-        "Start a new current work context for the authenticated model user. Pass task to connect it to an existing Task; omit task for an ephemeral context. The previous context becomes inactive, not finished, and can later be selected again. This is working-state, not workflow orchestration.",
+        "Start a new current work context for this authenticated actor (OAuth application or API token). Pass task to connect it to an existing Task; omit task for an ephemeral context. The previous context becomes inactive, not finished, and can later be selected again. This is working-state, not workflow orchestration.",
       inputSchema: { task: z.string().min(1).optional() },
       outputSchema: { context: z.unknown() },
       annotations: createAnnotations,
@@ -1323,7 +1323,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_current",
     {
       description:
-        "Return the authenticated model user's current work context, or null if none exists. The context is implicit for scratchpad operations; do not use it as a substitute for durable Tasks, Notes, or Files.",
+        "Return this authenticated actor's current work context, or null if none exists. The context is implicit for scratchpad operations; do not use it as a substitute for durable Tasks, Notes, or Files.",
       inputSchema: {},
       outputSchema: { context: z.unknown() },
       annotations: readAnnotations,
@@ -1334,7 +1334,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_finish",
     {
       description:
-        "Mark the current work context finished and deselect it. Its history and scratchpad remain stored; work_context_select can explicitly reopen it later.",
+        "Mark this actor’s current work context finished and deselect it. Its history and scratchpad remain stored; work_context_select can explicitly reopen it later.",
       inputSchema: {},
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
@@ -1345,7 +1345,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_attach_task",
     {
       description:
-        "Attach an existing Task to the current work context. Use this when an initially ephemeral investigation becomes actionable work.",
+        "Attach an existing Task to this actor’s current work context. Use this when an initially ephemeral investigation becomes actionable work.",
       inputSchema: { task: z.string().min(1) },
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
