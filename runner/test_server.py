@@ -2,6 +2,9 @@ import base64
 import json
 import tempfile
 import unittest
+import threading
+import urllib.error
+import urllib.request
 import sys
 from pathlib import Path
 
@@ -10,6 +13,29 @@ import server
 
 
 class RunnerUnitTest(unittest.TestCase):
+    def test_health_endpoint_is_unauthenticated_but_other_get_routes_stay_protected(self):
+        old_token = server.TOKEN
+        server.TOKEN = "test-token"
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{httpd.server_address[1]}"
+        try:
+            with urllib.request.urlopen(f"{base}/health", timeout=2) as response:
+                self.assertEqual(200, response.status)
+                self.assertEqual({"ok": True}, json.loads(response.read()))
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(f"{base}/capabilities", timeout=2)
+            self.assertEqual(401, error.exception.code)
+            request = urllib.request.Request(f"{base}/capabilities", headers={"Authorization": "Bearer test-token"})
+            with urllib.request.urlopen(request, timeout=2) as response:
+                self.assertEqual(200, response.status)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+            server.TOKEN = old_token
+
     def test_limits_reject_requirements_above_offering(self):
         old = server.os.environ.get("WORKSPACE_DEFAULT_PIDS")
         server.os.environ["WORKSPACE_DEFAULT_PIDS"] = "4"

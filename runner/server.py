@@ -328,8 +328,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self):
-        if not self.authorized(): return
         path = [unquote(part) for part in urlparse(self.path).path.split("/") if part]
+        # Liveness probes must not need the application bearer token. Keep this
+        # response deliberately minimal; all operational routes remain protected.
+        if path == ["health"]:
+            self.send_json(200, {"ok": True})
+            return
+        if not self.authorized(): return
         try:
             if path == ["capabilities"]:
                 default_limits = limits({})
