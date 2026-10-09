@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_08_210000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_09_094500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -389,6 +389,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_08_210000) do
     t.datetime "ended_at"
     t.string "execution_cwd"
     t.string "execution_workspace_ref"
+    t.datetime "finished_at"
     t.string "foreground_execution_ref"
     t.text "scratchpad", default: "", null: false
     t.bigint "task_id"
@@ -396,6 +397,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_08_210000) do
     t.bigint "user_id", null: false
     t.index ["task_id"], name: "index_work_contexts_on_task_id"
     t.index ["user_id", "ended_at"], name: "index_work_contexts_on_user_id_and_ended_at"
+    t.index ["user_id", "finished_at"], name: "index_work_contexts_on_user_id_and_finished_at"
     t.index ["user_id"], name: "index_work_contexts_on_current_user", unique: true, where: "(ended_at IS NULL)"
     t.index ["user_id"], name: "index_work_contexts_on_user_id"
   end

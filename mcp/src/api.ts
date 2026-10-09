@@ -118,6 +118,20 @@ export class LaterBenderApi {
   getWorkContext() {
     return this.request<{ context: unknown }>("/api/work-context");
   }
+  listWorkContexts(input: { limit?: number; beforeId?: number } = {}) {
+    return this.request<{ contexts: unknown[]; next_before_id: number | null }>(
+      `/api/work-contexts${query({ limit: input.limit?.toString(), before_id: input.beforeId?.toString() })}`,
+    );
+  }
+  getWorkContextById(id: number) {
+    return this.request<{ context: unknown }>(`/api/work-contexts/${id}`);
+  }
+  selectWorkContext(id: number) {
+    return this.request<{ context: unknown }>(
+      "/api/work-context/select",
+      json("POST", { id }),
+    );
+  }
   startWorkContext(task?: string) {
     return this.request<{ context: unknown }>(
       "/api/work-context",

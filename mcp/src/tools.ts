@@ -1269,10 +1269,50 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       ),
   );
   server.registerTool(
+    "work_context_list",
+    {
+      description:
+        "List recent work contexts, newest first, including inactive and finished contexts. Returns stable numeric IDs, associated Task, lifecycle state, and execution-selection metadata. Use next_before_id as before_id to page older history.",
+      inputSchema: {
+        limit: z.number().int().min(1).max(100).optional(),
+        before_id: z.number().int().positive().optional(),
+      },
+      outputSchema: {
+        contexts: z.array(z.unknown()),
+        next_before_id: z.number().int().positive().nullable(),
+      },
+      annotations: readAnnotations,
+    },
+    ({ limit, before_id }) =>
+      safeObject(() => api.listWorkContexts({ limit, beforeId: before_id })),
+  );
+  server.registerTool(
+    "work_context_get",
+    {
+      description:
+        "Inspect one of your own work contexts by its stable numeric ID, whether current, inactive, or finished. This does not change the selected context.",
+      inputSchema: { id: z.number().int().positive() },
+      outputSchema: { context: z.unknown() },
+      annotations: readAnnotations,
+    },
+    ({ id }) => safeObject(() => api.getWorkContextById(id)),
+  );
+  server.registerTool(
+    "work_context_select",
+    {
+      description:
+        "Select/resume one of your existing work contexts by ID. The previously selected context becomes inactive, not finished; the selected context's scratchpad and execution selection become current again. Selecting a finished context reopens it. Selection is currently shared by all interactions authenticated as this user.",
+      inputSchema: { id: z.number().int().positive() },
+      outputSchema: { context: z.unknown() },
+      annotations: updateAnnotations,
+    },
+    ({ id }) => safeObject(() => api.selectWorkContext(id)),
+  );
+  server.registerTool(
     "work_context_start",
     {
       description:
-        "Start a new current work context for the authenticated model user. Pass task to connect it to an existing Task; omit task for an ephemeral context. Starting a context replaces the user's previous current context but preserves it as history. This is working-state, not workflow orchestration.",
+        "Start a new current work context for the authenticated model user. Pass task to connect it to an existing Task; omit task for an ephemeral context. The previous context becomes inactive, not finished, and can later be selected again. This is working-state, not workflow orchestration.",
       inputSchema: { task: z.string().min(1).optional() },
       outputSchema: { context: z.unknown() },
       annotations: createAnnotations,
@@ -1294,7 +1334,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_finish",
     {
       description:
-        "End the current work context. Its history remains stored, but it is no longer the current context.",
+        "Mark the current work context finished and deselect it. Its history and scratchpad remain stored; work_context_select can explicitly reopen it later.",
       inputSchema: {},
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,

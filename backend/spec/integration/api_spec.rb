@@ -580,6 +580,88 @@ RSpec.describe "Work context API", type: :request do
     assert_nil json_body["context"]
   end
 
+  it "lists and inspects only the user's contexts with stable IDs and lifecycle metadata" do
+    post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
+    first_id = json_body.dig("context", "id")
+    put "/api/work-context/scratchpad", params: { scratchpad: "A: preserve this" }.to_json, headers: json_headers(@raw_token)
+
+    post "/api/work-context", params: { task: @task.ref }.to_json, headers: json_headers(@raw_token)
+    second_id = json_body.dig("context", "id")
+
+    get "/api/work-contexts", params: { limit: 1 }, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal [ second_id ], json_body.fetch("contexts").map { |context| context.fetch("id") }
+    assert_equal second_id, json_body.fetch("next_before_id")
+
+    get "/api/work-contexts", params: { limit: 1, before_id: second_id }, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal [ first_id ], json_body.fetch("contexts").map { |context| context.fetch("id") }
+    assert_nil json_body.fetch("next_before_id")
+    assert_equal "inactive", json_body.dig("contexts", 0, "state")
+
+    get "/api/work-contexts/#{first_id}", headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal first_id, json_body.dig("context", "id")
+    assert_equal "A: preserve this", WorkContext.find(first_id).scratchpad
+    assert_equal "inactive", json_body.dig("context", "state")
+  end
+
+  it "switches A to B and back without losing scratchpad or execution selection" do
+    post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
+    first_id = json_body.dig("context", "id")
+    put "/api/work-context/scratchpad", params: { scratchpad: "A: exact continuity" }.to_json, headers: json_headers(@raw_token)
+    WorkContext.find(first_id).update!(execution_workspace_ref: "WS-continuity", execution_cwd: "/repo", foreground_execution_ref: "WSE-continuity")
+
+    post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
+    second_id = json_body.dig("context", "id")
+    put "/api/work-context/scratchpad", params: { scratchpad: "B: separate state" }.to_json, headers: json_headers(@raw_token)
+
+    post "/api/work-context/select", params: { id: first_id }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal first_id, json_body.dig("context", "id")
+    assert_equal "current", json_body.dig("context", "state")
+    assert_equal({ "workspace" => "WS-continuity", "cwd" => "/repo", "foreground" => "WSE-continuity" }, json_body.dig("context", "execution"))
+    get "/api/work-context/scratchpad", headers: json_headers(@raw_token)
+    assert_equal "A: exact continuity", json_body.fetch("scratchpad")
+
+    post "/api/work-context/select", params: { id: second_id }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    get "/api/work-context/scratchpad", headers: json_headers(@raw_token)
+    assert_equal "B: separate state", json_body.fetch("scratchpad")
+    assert_equal 1, @user.work_contexts.current.count
+  end
+
+  it "distinguishes finishing from switching away and allows explicit reopening" do
+    post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
+    context_id = json_body.dig("context", "id")
+    post "/api/work-context/finish", params: {}.to_json, headers: json_headers(@raw_token)
+    assert_equal "finished", json_body.dig("context", "state")
+    expect(json_body.dig("context", "finished_at")).not_to be_nil
+
+    post "/api/work-context/select", params: { id: context_id }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal "current", json_body.dig("context", "state")
+    assert_nil json_body.dig("context", "finished_at")
+  end
+
+  it "does not expose or select another user's context" do
+    post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
+    context_id = json_body.dig("context", "id")
+    other = User.create!(username: "other-context-user", password: "password123")
+    _other_token, other_raw_token = ApiToken.issue!(user: other, name: "other context test")
+
+    get "/api/work-contexts/#{context_id}", headers: json_headers(other_raw_token)
+    assert_response :not_found
+    post "/api/work-context/select", params: { id: context_id }.to_json, headers: json_headers(other_raw_token)
+    assert_response :not_found
+  end
+
+  it "validates context history pagination" do
+    get "/api/work-contexts", params: { limit: 0 }, headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    assert_equal "validation_failed", json_body.dig("error", "code")
+  end
+
   it "does not allow a user to attach another user's Task" do
     other = User.create!(username: "other-context-user", password: "password123")
     other_project = other.projects.create!(name: "Other", slug: "other", shorthand: "OT")

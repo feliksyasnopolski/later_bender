@@ -1672,6 +1672,97 @@ paths:
             schema:
               type: object
               additionalProperties: true
+  "/api/work-contexts":
+    get:
+      summary: api/work_contexts#index
+      tags:
+      - Work_contexts
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+  "/api/work-contexts/{id}":
+    get:
+      summary: api/work_contexts#show
+      tags:
+      - Work_contexts
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '404':
+          description: owned resource not found
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+  "/api/work-context/select":
+    post:
+      summary: api/work_contexts#select
+      tags:
+      - Work_contexts
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
   "/api/work-context/finish":
     post:
       summary: api/work_contexts#finish

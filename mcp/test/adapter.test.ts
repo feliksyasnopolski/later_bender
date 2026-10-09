@@ -391,6 +391,30 @@ test("work context and scratchpad methods preserve their implicit current-contex
   assert.deepEqual(JSON.parse(String(calls[2].init.body)), { scratchpad: "NEXT: test" });
 });
 
+test("work context discovery, inspection, and selection use stable context IDs", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api, calls } = apiFor([
+    { status: 200, body: { contexts: [{ id: 8, state: "inactive" }], next_before_id: 8 } },
+    { status: 200, body: { context: { id: 8, state: "inactive" } } },
+    { status: 200, body: { context: { id: 8, state: "current" } } },
+  ]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+
+  const listed = await tools.work_context_list.handler({ limit: 5, before_id: 12 });
+  const inspected = await tools.work_context_get.handler({ id: 8 });
+  const selected = await tools.work_context_select.handler({ id: 8 });
+
+  assert.deepEqual(listed.structuredContent, { contexts: [{ id: 8, state: "inactive" }], next_before_id: 8 });
+  assert.deepEqual(inspected.structuredContent, { context: { id: 8, state: "inactive" } });
+  assert.deepEqual(selected.structuredContent, { context: { id: 8, state: "current" } });
+  assert.deepEqual(calls.map((call) => [call.url, call.init.method, call.init.body]), [
+    ["https://example.test/laterbender/api/work-contexts?limit=5&before_id=12", undefined, undefined],
+    ["https://example.test/laterbender/api/work-contexts/8", undefined, undefined],
+    ["https://example.test/laterbender/api/work-context/select", "POST", JSON.stringify({ id: 8 })],
+  ]);
+});
+
 test("scratchpad tools return their backend object without an extra root wrapper", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api } = apiFor([
@@ -414,7 +438,7 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "scratchpad_read", "scratchpad_write", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", "work_context_attach_task", "work_context_current", "work_context_finish", "work_context_start", ...workspaceToolNames].sort());
+  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "scratchpad_read", "scratchpad_write", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", "work_context_attach_task", "work_context_current", "work_context_finish", "work_context_get", "work_context_list", "work_context_select", "work_context_start", ...workspaceToolNames].sort());
   assert.ok(tools.create_task.inputSchema);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", representation: "text", locator: { kind: "lines", start: 138, end: 152 } }]).success, true);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", locator: { kind: "bytes", start: 1, end: 2 } }]).success, false);
