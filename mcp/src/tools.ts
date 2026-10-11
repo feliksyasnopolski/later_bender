@@ -341,11 +341,13 @@ const failure = (error: unknown) => {
   };
 };
 const safe = (root: string, fn: () => Promise<unknown>) =>
-  fn()
+  Promise.resolve()
+    .then(fn)
     .then((data) => result(root, data))
     .catch(failure);
 const safeObject = (fn: () => Promise<Record<string, unknown>>) =>
-  fn()
+  Promise.resolve()
+    .then(fn)
     .then((data) => ({
       content: [{ type: "text" as const, text: JSON.stringify(data) }],
       structuredContent: data,
@@ -1301,7 +1303,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_select",
     {
       description:
-        "Explicitly resume a work context by ID. This does not change a shared current-context pointer. The returned context ID is the selector for scratchpad, execution selection, and foreground-process operations; pass that context_id on each such call. Selecting a finished context reopens it.",
+        "Explicitly resume a work context by ID and bind it to this ChatGPT conversation. This transfers any existing conversation binding away from that context. Selecting a finished context reopens it. Other context-sensitive tools in this conversation can then omit context_id.",
       inputSchema: { id: z.number().int().positive() },
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
@@ -1312,7 +1314,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_start",
     {
       description:
-        "Start a new independent work context. Multiple contexts may remain active concurrently, including within the same OAuth client. Pass task to connect it to an existing Task; omit task for an ephemeral context. Use the returned numeric context.id explicitly in scratchpad and execution tools. This is working-state, not workflow orchestration.",
+        "Start a new independent work context and bind it to this ChatGPT conversation when openai/session metadata is available. Multiple contexts may remain active concurrently under the same OAuth client. Pass task to connect it to an existing Task; omit task for an ephemeral context. Context-sensitive tools automatically resolve the conversation's selected context. Clients without conversation metadata must use the returned context.id explicitly. This is working-state, not workflow orchestration.",
       inputSchema: { task: z.string().min(1).optional() },
       outputSchema: { context: z.unknown() },
       annotations: createAnnotations,
@@ -1323,7 +1325,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_current",
     {
       description:
-        "Compatibility lookup for the sole active work context. If multiple contexts are active, this returns context_selection_required instead of guessing. Prefer work_context_list/start/get and pass the chosen context.id explicitly to context-sensitive tools. Do not use as a substitute for durable Tasks, Notes, or Files.",
+        "Return the work context bound to this ChatGPT conversation. Returns null when this conversation has no binding. Clients without ChatGPT conversation metadata cannot use implicit current-context lookup: use work_context_list, explicitly select a context, and pass context_id to context-sensitive tools. Never guess from an actor-global pointer. Do not use as a substitute for durable Tasks, Notes, or Files.",
       inputSchema: {},
       outputSchema: { context: z.unknown() },
       annotations: readAnnotations,
@@ -1334,8 +1336,8 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_finish",
     {
       description:
-        "Mark the specified work context finished. Its history and scratchpad remain stored; work_context_select can explicitly reopen it later.",
-      inputSchema: { context_id: z.number().int().positive() },
+        "Finish this conversation's selected work context; ChatGPT resolves it from openai/session metadata. Pass context_id for an explicit override or when using a client without conversation metadata. Its history and scratchpad remain stored; work_context_select can explicitly reopen it later.",
+      inputSchema: { context_id: z.number().int().positive().optional() },
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
     },
@@ -1345,9 +1347,9 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_attach_task",
     {
       description:
-        "Attach an existing Task to the explicitly selected work context. Use this when an initially ephemeral investigation becomes actionable work.",
+        "Attach an existing Task to this conversation's selected work context; ChatGPT resolves it from openai/session metadata. Pass context_id for an explicit override or when using a client without conversation metadata. Use this when an initially ephemeral investigation becomes actionable work.",
       inputSchema: {
-        context_id: z.number().int().positive(),
+        context_id: z.number().int().positive().optional(),
         task: z.string().min(1),
       },
       outputSchema: { context: z.unknown() },
@@ -1360,8 +1362,8 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "scratchpad_read",
     {
       description:
-        "Read the private model working state for the explicitly selected context. Always pass the context_id returned by work_context_start/get/list; this prevents cross-conversation state mixing. This is private model working state, optimized for continuation rather than human-facing content. It may be stale or speculative; durable Tasks, Notes, Files, and current tool results remain authoritative.",
-      inputSchema: { context_id: z.number().int().positive() },
+        "Read the private model working state for this conversation's selected context; ChatGPT normally resolves it via openai/session metadata. Pass context_id only for an explicit override or when using a client without conversation metadata. This is private model working state, optimized for efficient continuation rather than human-facing content. It may be stale or speculative; durable Tasks, Notes, Files, and current tool results remain authoritative.",
+      inputSchema: { context_id: z.number().int().positive().optional() },
       outputSchema: { scratchpad: z.string() },
       annotations: readAnnotations,
     },
@@ -1371,9 +1373,9 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "scratchpad_write",
     {
       description:
-        "Replace the current private model working state as one atomic register. This is private model working state ONLY, NEVER human-facing content. It is inaccessible to humans AT ALL CIRCUMSTANCES. Never optimize it for human readability, explanation, documentation, or presentation. Optimize exclusively for efficient continuation of your own work. Compressed fragments, shorthand, identifiers, hypotheses, rejected approaches, pending checks, and reminders are appropriate. An empty string clears it.",
+        "Replace the private model working state for this conversation's selected context as one atomic register; ChatGPT normally resolves it via openai/session metadata. Pass context_id only for an explicit override or when using a client without conversation metadata. This is private model working state ONLY, NEVER human-facing content. Optimize exclusively for efficient continuation. An empty string clears it.",
       inputSchema: {
-        context_id: z.number().int().positive(),
+        context_id: z.number().int().positive().optional(),
         scratchpad: z.string(),
       },
       outputSchema: {

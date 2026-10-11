@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_11_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_12_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -384,6 +384,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_11_190000) do
     t.index "lower((username)::text)", name: "index_users_on_lower_username", unique: true
   end
 
+  create_table "work_context_bindings", force: :cascade do |t|
+    t.string "actor_key", null: false
+    t.string "conversation_key", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.bigint "work_context_id", null: false
+    t.index ["user_id", "actor_key", "conversation_key"], name: "index_work_context_bindings_on_conversation", unique: true
+    t.index ["user_id", "actor_key", "work_context_id"], name: "index_work_context_bindings_on_context", unique: true
+    t.index ["user_id"], name: "index_work_context_bindings_on_user_id"
+  end
+
   create_table "work_contexts", force: :cascade do |t|
     t.string "actor_key"
     t.datetime "created_at", null: false
@@ -510,6 +522,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_11_190000) do
   add_foreign_key "task_tags", "tasks"
   add_foreign_key "tasks", "projects"
   add_foreign_key "totp_credentials", "users"
+  add_foreign_key "work_context_bindings", "users"
+  add_foreign_key "work_context_bindings", "work_contexts"
   add_foreign_key "work_contexts", "tasks", on_delete: :nullify
   add_foreign_key "work_contexts", "users"
   add_foreign_key "workspace_events", "workspaces"

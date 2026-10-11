@@ -1,4 +1,4 @@
-import express, { type Request, type RequestHandler } from "express";
+import express, { type RequestHandler } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -10,7 +10,6 @@ import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { LaterBenderApi } from "./api.js";
 import { registerTools } from "./tools.js";
-import { registerRequestDiagnosticTool } from "./request-diagnostic.js";
 
 const resourceUrl = new URL(
   process.env.MCP_RESOURCE_URL ||
@@ -51,21 +50,15 @@ async function verifyAccessToken(token: string): Promise<AuthInfo> {
   };
 }
 
-type RawBodyRequest = Request & { rawBody?: Buffer };
-
 export function createApp(
-  apiFactory: (token: string) => LaterBenderApi = (token) =>
-    new LaterBenderApi(apiBaseUrl, token),
+  apiFactory: (token: string, conversationId?: string) => LaterBenderApi = (
+    token,
+    conversationId,
+  ) => new LaterBenderApi(apiBaseUrl, token, fetch, undefined, conversationId),
   tokenVerifier: (token: string) => Promise<AuthInfo> = verifyAccessToken,
 ) {
   const app = express();
-  app.use(
-    express.json({
-      verify: (request, _response, buffer) => {
-        (request as RawBodyRequest).rawBody = Buffer.from(buffer);
-      },
-    }),
-  );
+  app.use(express.json());
   const metadata = {
     issuer: issuerOrigin,
     authorization_endpoint: new URL("/oauth/authorize", issuerOrigin).href,
@@ -94,11 +87,17 @@ export function createApp(
       { name: "later-bender", version: "0.1.0" },
       {
         instructions:
-          "Later Bender stores explicit durable user state. Tasks are actionable work. Notes are durable non-actionable context such as ideas, decisions, findings, hypotheses, possible directions, constraints, observations, and discussion results. Projectless Notes are user-level durable memory; Project Notes belong to one project. Use search_memory for recall when the location is unknown or may be either a Task or Note. Use list_tasks/list_notes to browse a known scope with structured filters. Search and list results are summaries; use get_task/get_note for complete content. When a Task synthesizes existing Notes, attach materially relevant Notes with related_note_ids. Work contexts are explicit model working state: multiple contexts may be active concurrently, even under one OAuth client. After work_context_start/list/get/select, use the returned context.id as context_id for every scratchpad and execution-selection/foreground/session operation. Never assume a global current context; work_context_current is compatibility-only and returns context_selection_required if ambiguous. Do not omit context_id from context-sensitive tools.",
+          "Later Bender stores explicit durable user state. Tasks are actionable work. Notes are durable non-actionable context such as ideas, decisions, findings, hypotheses, possible directions, constraints, observations, and discussion results. Projectless Notes are user-level durable memory; Project Notes belong to one project. Use search_memory for recall when the location is unknown or may be either a Task or Note. Use list_tasks/list_notes to browse a known scope with structured filters. Search and list results are summaries; use get_task/get_note for complete content. When a Task synthesizes existing Notes, attach materially relevant Notes with related_note_ids. Work contexts are selected per ChatGPT conversation using its host-provided openai/session metadata, scoped to the authenticated actor. work_context_start binds the new context to this conversation; work_context_select explicitly resumes and transfers the binding to this conversation. Normal ChatGPT calls can omit context_id on context-sensitive tools, which resolve the conversation's selected context. Passing context_id explicitly is an intentional override; explicit IDs remain required for clients without conversation metadata. The conversation identifier is not authorization. If no selected context exists for this conversation, start one or select one; never guess from contexts owned by other conversations.",
       },
     );
-    registerTools(server, apiFactory(request.auth!.token));
-    registerRequestDiagnosticTool(server, request as RawBodyRequest);
+    const meta = request.body?.params?._meta;
+    const conversationId =
+      meta &&
+      typeof meta["openai/session"] === "string" &&
+      meta["openai/session"].length > 0
+        ? meta["openai/session"]
+        : undefined;
+    registerTools(server, apiFactory(request.auth!.token, conversationId));
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

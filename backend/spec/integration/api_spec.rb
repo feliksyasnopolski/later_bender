@@ -534,6 +534,82 @@ RSpec.describe "Work context API", type: :request do
     @task = @project.tasks.create!(title: "Context task", status: "ready")
   end
 
+  it "binds implicit contexts per conversation and transfers an explicitly selected context" do
+    conversation_a = Digest::SHA256.hexdigest("chat-A")
+    conversation_b = Digest::SHA256.hexdigest("chat-B")
+
+    post "/api/work-context", params: { conversation_key: conversation_a }.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    context_a = json_body.dig("context", "id")
+    put "/api/work-context/scratchpad", params: { conversation_key: conversation_a, scratchpad: "scratchpad A" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+
+    workspace_a = @user.workspaces.create!(state: "ready", environment: "linux", architecture: "arm64", os_name: "Linux", os_version: "test", shell: "/bin/bash", workspace_root: "/workspace", last_activity_at: Time.current)
+    execution_a = workspace_a.workspace_executions.create!(ref: "WSE-context-A", sequence: 1, state: "running", started_at: Time.current, stdout_handle: "stdout-A", stderr_handle: "stderr-A")
+    post "/api/work-context/execution", params: { conversation_key: conversation_a, workspace: workspace_a.ref, cwd: "/repo/A" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    post "/api/work-context/execution/foreground", params: { conversation_key: conversation_a, execution: execution_a.ref }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+
+    post "/api/work-context", params: { task: @task.ref, conversation_key: conversation_b }.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    context_b = json_body.dig("context", "id")
+    refute_equal context_a, context_b
+    put "/api/work-context/scratchpad", params: { conversation_key: conversation_b, scratchpad: "scratchpad B" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+
+    workspace_b = @user.workspaces.create!(state: "ready", environment: "linux", architecture: "arm64", os_name: "Linux", os_version: "test", shell: "/bin/bash", workspace_root: "/workspace", last_activity_at: Time.current)
+    execution_b = workspace_b.workspace_executions.create!(ref: "WSE-context-B", sequence: 1, state: "running", started_at: Time.current, stdout_handle: "stdout-B", stderr_handle: "stderr-B")
+    post "/api/work-context/execution", params: { conversation_key: conversation_b, workspace: workspace_b.ref, cwd: "/repo/B" }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    post "/api/work-context/execution/foreground", params: { conversation_key: conversation_b, execution: execution_b.ref }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+
+    get "/api/work-context", params: { conversation_key: conversation_a }, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal context_a, json_body.dig("context", "id")
+    get "/api/work-context", params: { conversation_key: conversation_b }, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal context_b, json_body.dig("context", "id")
+    get "/api/work-context/scratchpad", params: { conversation_key: conversation_a }, headers: json_headers(@raw_token)
+    assert_equal "scratchpad A", json_body.fetch("scratchpad")
+    get "/api/work-context/scratchpad", params: { conversation_key: conversation_b }, headers: json_headers(@raw_token)
+    assert_equal "scratchpad B", json_body.fetch("scratchpad")
+    get "/api/work-context", params: { conversation_key: conversation_a }, headers: json_headers(@raw_token)
+    assert_equal({ "workspace" => workspace_a.ref, "cwd" => "/repo/A", "foreground" => execution_a.ref }, json_body.dig("context", "execution"))
+    get "/api/work-context", params: { conversation_key: conversation_b }, headers: json_headers(@raw_token)
+    assert_equal({ "workspace" => workspace_b.ref, "cwd" => "/repo/B", "foreground" => execution_b.ref }, json_body.dig("context", "execution"))
+
+    # Re-selecting Context A in Conversation B is an explicit handoff. The old
+    # Conversation A binding is removed rather than silently sharing the context.
+    post "/api/work-context/select", params: { id: context_a, conversation_key: conversation_b }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal context_a, json_body.dig("context", "id")
+    get "/api/work-context", params: { conversation_key: conversation_a }, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_nil json_body["context"]
+    get "/api/work-context", params: { conversation_key: conversation_b }, headers: json_headers(@raw_token)
+    assert_equal context_a, json_body.dig("context", "id")
+    get "/api/work-context/scratchpad", params: { conversation_key: conversation_a }, headers: json_headers(@raw_token)
+    assert_response :conflict
+    assert_equal "context_selection_required", json_body.dig("error", "code")
+    get "/api/work-context/scratchpad", params: { conversation_key: conversation_b }, headers: json_headers(@raw_token)
+    assert_equal "scratchpad A", json_body.fetch("scratchpad")
+
+    _other_token, other_raw_token = ApiToken.issue!(user: @user, name: "another actor")
+    get "/api/work-context", params: { conversation_key: conversation_b }, headers: json_headers(other_raw_token)
+    assert_response :success
+    assert_nil json_body["context"]
+
+    post "/api/work-context/finish", params: { conversation_key: conversation_b }.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal context_a, json_body.dig("context", "id")
+    assert_equal "finished", json_body.dig("context", "state")
+    get "/api/work-context", params: { conversation_key: conversation_b }, headers: json_headers(@raw_token)
+    assert_nil json_body["context"]
+    assert_equal 0, @user.work_context_bindings.where(actor_key: "api-token:#{@token.id}").count
+  end
+
   it "keeps concurrently active contexts independent and requires explicit selection when ambiguous" do
     post "/api/work-context", params: {}.to_json, headers: json_headers(@raw_token)
     assert_response :created
@@ -630,8 +706,8 @@ RSpec.describe "Work context API", type: :request do
 
     _second_token, second_raw_token = ApiToken.issue!(user: @user, name: "second model client")
     get "/api/work-context", headers: json_headers(second_raw_token)
-    assert_response :success
-    assert_nil json_body["context"]
+    assert_response :conflict
+    assert_equal "context_selection_required", json_body.dig("error", "code")
 
     post "/api/work-context", params: {}.to_json, headers: json_headers(second_raw_token)
     second_id = json_body.dig("context", "id")
@@ -660,23 +736,28 @@ RSpec.describe "Work context API", type: :request do
     assert_equal "same OAuth actor", json_body["scratchpad"]
 
     get "/api/work-context", headers: json_headers(second_oauth.token)
-    assert_response :success
-    assert_nil json_body["context"]
+    assert_response :conflict
+    assert_equal "context_selection_required", json_body.dig("error", "code")
     get "/api/work-context/scratchpad", params: { context_id: first_id }, headers: json_headers(second_oauth.token)
     assert_response :not_found
   end
 
-  it "claims one pre-isolation context for the first actor that resumes it" do
+  it "requires explicit selection for legacy contexts when conversation metadata is absent" do
     legacy = @user.work_contexts.create!(scratchpad: "legacy continuity")
     get "/api/work-context", headers: json_headers(@raw_token)
+    assert_response :conflict
+    assert_equal "context_selection_required", json_body.dig("error", "code")
+    assert_nil legacy.reload.actor_key
+
+    post "/api/work-context/select", params: { id: legacy.id }.to_json, headers: json_headers(@raw_token)
     assert_response :success
     assert_equal legacy.id, json_body.dig("context", "id")
     assert_equal "api-token:#{@token.id}", legacy.reload.actor_key
 
     _replacement, replacement_raw = ApiToken.issue!(user: @user, name: "new actor")
     get "/api/work-context", headers: json_headers(replacement_raw)
-    assert_response :success
-    assert_nil json_body["context"]
+    assert_response :conflict
+    assert_equal "context_selection_required", json_body.dig("error", "code")
   end
 
   it "distinguishes finishing from explicit reopening" do

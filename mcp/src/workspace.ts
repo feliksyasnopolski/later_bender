@@ -151,7 +151,7 @@ const execution = z.object({
 });
 const transcriptInvocation = invocation;
 const execCommonInput = {
-  context_id: z.number().int().positive(),
+  context_id: z.number().int().positive().optional(),
   workspace: opaqueRef.optional(),
   cwd: z.string().optional(),
   pty: z.boolean().optional(),
@@ -396,6 +396,12 @@ async function workspaceOperation(
         let workspace = input.workspace as string | undefined;
         if (!workspace) {
           const current: any = await api.getWorkContext(input.context_id);
+          if (!current?.context && input.context_id === undefined)
+            throw new ApiError(
+              "context_selection_required",
+              409,
+              "No work context is selected for this conversation; call work_context_start or work_context_select first.",
+            );
           workspace = current?.context?.execution?.workspace;
         }
         if (!workspace)
@@ -427,9 +433,16 @@ async function workspaceOperation(
         return api.selectForegroundExecution(ref, input.context_id);
       }
       case "execution_select": {
-        // Validate the context before creating a Workspace, so a stale/foreign
-        // context ID cannot leave an orphaned Workspace behind.
-        await api.getWorkContext(input.context_id);
+        // Resolve and validate the conversation's context before allocating a
+        // Workspace, so missing/foreign context cannot leave an orphan behind.
+        const current: any = await api.getWorkContext(input.context_id);
+        if (!current?.context)
+          throw new ApiError(
+            "context_selection_required",
+            409,
+            "No work context is selected for this conversation; call work_context_start or work_context_select first.",
+          );
+        const contextId = input.context_id ?? Number(current.context.id);
         let workspace = input.workspace as string | undefined;
         if (!workspace) {
           if (!input.target)
@@ -474,7 +487,7 @@ async function workspaceOperation(
         }
         return api.selectExecutionContext({
           workspace,
-          context_id: input.context_id,
+          context_id: contextId,
           ...(requestedCwd ? { cwd: requestedCwd } : {}),
         });
       }
@@ -484,32 +497,28 @@ async function workspaceOperation(
           context_id: _contextId,
           ...executionInput
         } = input;
-        if ((input.pty || input.interactive) && !input.context_id) {
-          throw new ApiError(
-            "validation_failed",
-            422,
-            "context_id is required for PTY/interactive execution so its foreground session is recorded in the right context",
-          );
-        }
-        let payload = { ...executionInput };
-        if (!payload.workspace) {
-          if (!input.context_id) {
+        const payload = { ...executionInput };
+        let contextId = input.context_id as number | undefined;
+        if (!payload.workspace || input.pty || input.interactive) {
+          const current: any = await api.getWorkContext(contextId);
+          if (!current?.context)
             throw new ApiError(
-              "validation_failed",
-              422,
-              "context_id is required when using the selected Workspace; call execution_select first",
+              "context_selection_required",
+              409,
+              "No work context is selected for this conversation; call work_context_start or work_context_select first.",
             );
+          contextId ??= Number(current.context.id);
+          if (!payload.workspace) {
+            const selected = current.context.execution;
+            if (!selected?.workspace)
+              throw new ApiError(
+                "validation_failed",
+                422,
+                "No execution environment selected; call execution_select first",
+              );
+            payload.workspace = selected.workspace;
+            if (!payload.cwd) payload.cwd = selected.cwd;
           }
-          const current: any = await api.getWorkContext(input.context_id);
-          const selected = current?.context?.execution;
-          if (!selected?.workspace)
-            throw new ApiError(
-              "validation_failed",
-              422,
-              "No execution environment selected; call execution_select first",
-            );
-          payload.workspace = selected.workspace;
-          if (!payload.cwd) payload.cwd = selected.cwd;
         }
         const result: any = await api.executeWorkspace(payload);
         let started = result?.execution || result;
@@ -518,14 +527,13 @@ async function workspaceOperation(
           started?.ref &&
           started.state === "running"
         ) {
-          if (!input.context_id) {
+          if (!contextId)
             throw new ApiError(
-              "validation_failed",
-              422,
-              "context_id is required for PTY/interactive execution so its foreground session is recorded in the right context",
+              "context_selection_required",
+              409,
+              "A selected work context is required to track the foreground execution.",
             );
-          }
-          await api.selectForegroundExecution(started.ref, input.context_id);
+          await api.selectForegroundExecution(started.ref, contextId);
         } else if (started?.state === "running") {
           started = await waitForExecution(
             api,
@@ -539,6 +547,12 @@ async function workspaceOperation(
         let ref = input.ref as string | undefined;
         if (!ref) {
           const current: any = await api.getWorkContext(input.context_id);
+          if (!current?.context && input.context_id === undefined)
+            throw new ApiError(
+              "context_selection_required",
+              409,
+              "No work context is selected for this conversation; call work_context_start or work_context_select first.",
+            );
           ref = current?.context?.execution?.foreground;
         }
         if (!ref)
@@ -553,6 +567,12 @@ async function workspaceOperation(
         let ref = input.ref as string | undefined;
         if (!ref) {
           const current: any = await api.getWorkContext(input.context_id);
+          if (!current?.context && input.context_id === undefined)
+            throw new ApiError(
+              "context_selection_required",
+              409,
+              "No work context is selected for this conversation; call work_context_start or work_context_select first.",
+            );
           ref = current?.context?.execution?.foreground;
         }
         if (!ref)
@@ -567,6 +587,12 @@ async function workspaceOperation(
         let ref = input.ref as string | undefined;
         if (!ref) {
           const current: any = await api.getWorkContext(input.context_id);
+          if (!current?.context && input.context_id === undefined)
+            throw new ApiError(
+              "context_selection_required",
+              409,
+              "No work context is selected for this conversation; call work_context_start or work_context_select first.",
+            );
           ref = current?.context?.execution?.foreground;
         }
         if (!ref)
@@ -575,7 +601,7 @@ async function workspaceOperation(
             422,
             "No execution ref or foreground execution selected",
           );
-        const { context_id: _contextId, ...outputInput } = input;
+        const { context_id: _contextId, ref: _ref, ...outputInput } = input;
         return api.workspaceExecutionActionByRef(ref, "output", {
           ...outputInput,
           wait_seconds: input.wait_seconds ?? 1,
@@ -585,6 +611,12 @@ async function workspaceOperation(
         let ref = input.ref as string | undefined;
         if (!ref) {
           const current: any = await api.getWorkContext(input.context_id);
+          if (!current?.context && input.context_id === undefined)
+            throw new ApiError(
+              "context_selection_required",
+              409,
+              "No work context is selected for this conversation; call work_context_start or work_context_select first.",
+            );
           ref = current?.context?.execution?.foreground;
         }
         if (!ref)
@@ -661,7 +693,7 @@ const overwrite = {
   openWorldHint: false,
 };
 const workspaceFailure =
-  "Expected failures use stable error codes, including workspace_not_found, workspace_not_ready, workspace_unavailable, capability_unavailable, workspace_quota_exceeded, target_not_found, executor_unsupported, file_not_found, path_invalid, path_not_found, path_exists, path_not_file, not_text, execution_not_found, execution_not_running, invalid_range, invalid_cursor, and invalid_invocation.";
+  "Expected failures use stable error codes, including context_selection_required when no ChatGPT conversation context is bound, workspace_not_found, workspace_not_ready, workspace_unavailable, capability_unavailable, workspace_quota_exceeded, target_not_found, executor_unsupported, file_not_found, path_invalid, path_not_found, path_exists, path_not_file, not_text, execution_not_found, execution_not_running, invalid_range, invalid_cursor, and invalid_invocation.";
 
 export const workspaceToolNames = [
   "get_workspace_capabilities",
@@ -860,7 +892,7 @@ export function registerWorkspaceTools(
     {
       description: `Fetch the current full projection of an execution by its opaque WSE- reference. The execution ref is unambiguous, and authorization remains authenticated-user scoped. ${workspaceFailure}`,
       inputSchema: {
-        context_id: z.number().int().positive(),
+        context_id: z.number().int().positive().optional(),
         ref: opaqueRef.optional(),
       },
       outputSchema: { execution },
@@ -873,7 +905,7 @@ export function registerWorkspaceTools(
     {
       description: `Continue reading retained stdout or stderr from an opaque cursor. Reads wait up to 1 second by default for a short output burst to settle (150ms without new bytes); set wait_seconds to 0 for an immediate poll or up to 5 seconds for a longer wait. Each call returns the next bounded stream chunk; a cursor at the current end of a running stream is resumable. next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`,
       inputSchema: {
-        context_id: z.number().int().positive(),
+        context_id: z.number().int().positive().optional(),
         ref: opaqueRef.optional(),
         stream: z.enum(["stdout", "stderr"]),
         format: z.enum(["auto", "text", "base64"]).optional(),
@@ -899,7 +931,7 @@ export function registerWorkspaceTools(
     {
       description: `Terminate the whole process group belonging to an execution. Cancellation is idempotent: an already-terminal execution returns its existing terminal projection. ${workspaceFailure}`,
       inputSchema: {
-        context_id: z.number().int().positive(),
+        context_id: z.number().int().positive().optional(),
         ref: opaqueRef.optional(),
       },
       outputSchema: { execution },
@@ -943,9 +975,9 @@ export function registerWorkspaceTools(
     "execution_select",
     {
       description:
-        "Select the current execution environment and working directory for this work context. Reuse an existing Workspace with workspace, or acquire one on target; resource_path selects an existing directory on a native Remote Agent without copying or owning that directory. Selection persists across calls. Native execution uses the agent OS user's real authority and is not a sandbox. Existing sessions remain bound to their original Workspace.",
+        "Select the execution environment and working directory for this conversation's bound work context; ChatGPT resolves it from openai/session metadata. Pass context_id for an explicit override or when using a client without conversation metadata. Reuse an existing Workspace with workspace, or acquire one on target; resource_path selects an existing directory on a native Remote Agent without copying or owning that directory. Selection persists across calls. Native execution uses the agent OS user's real authority and is not a sandbox. Existing sessions remain bound to their original Workspace.",
       inputSchema: {
-        context_id: z.number().int().positive(),
+        context_id: z.number().int().positive().optional(),
         workspace: opaqueRef.optional(),
         target: z.string().optional(),
         executor: z.enum(["native", "docker"]).optional(),
@@ -963,8 +995,8 @@ export function registerWorkspaceTools(
     "execution_current",
     {
       description:
-        "Inspect the specified work context's selected execution Workspace, working directory, and foreground process. Use this when starting a new chat or recovering after interruption; do not assume the previous selection is relevant.",
-      inputSchema: { context_id: z.number().int().positive() },
+        "Inspect this conversation's bound work context's execution Workspace, working directory, and foreground process. ChatGPT resolves it from openai/session metadata; pass context_id for an explicit override or when using a client without conversation metadata. A new conversation starts with no binding until work_context_start or work_context_select is called.",
+      inputSchema: { context_id: z.number().int().positive().optional() },
       outputSchema: { context: z.unknown() },
       annotations: readOnly,
     },
@@ -974,9 +1006,9 @@ export function registerWorkspaceTools(
     "send_workspace_execution_input",
     {
       description:
-        "Send UTF-8 bytes to a persistent interactive process. Omit ref to use the current foreground execution. Include newline explicitly when the program should receive Enter; this is not command execution. Native Remote Agent and hosted Workspace PTY/pipe sessions; maximum 64 KiB per call.",
+        "Send UTF-8 bytes to a persistent interactive process. Omit ref to use the foreground execution recorded by this conversation's selected context; ChatGPT resolves it from openai/session metadata. Pass context_id for an explicit override or when using a client without conversation metadata. Include newline explicitly when the program should receive Enter; this is not command execution. Native Remote Agent and hosted Workspace PTY/pipe sessions; maximum 64 KiB per call.",
       inputSchema: {
-        context_id: z.number().int().positive(),
+        context_id: z.number().int().positive().optional(),
         ref: opaqueRef.optional(),
         data: z.string().max(65536),
       },
@@ -994,7 +1026,7 @@ export function registerWorkspaceTools(
       description:
         "List the executions recorded for the Workspace selected in the specified context so you can rediscover and switch between long-running processes after interruption. Optionally pass workspace to inspect another Workspace without changing the current selection.",
       inputSchema: {
-        context_id: z.number().int().positive(),
+        context_id: z.number().int().positive().optional(),
         workspace: opaqueRef.optional(),
       },
       outputSchema: { workspace: opaqueRef, sessions: z.array(z.unknown()) },
@@ -1006,8 +1038,11 @@ export function registerWorkspaceTools(
     "session_select",
     {
       description:
-        "Make an existing execution the foreground process for subsequent input, status, output, and cancellation calls. The execution must belong to the currently selected Workspace; switching execution environments does not retarget an existing session.",
-      inputSchema: { context_id: z.number().int().positive(), ref: opaqueRef },
+        "Make an existing execution the foreground process for subsequent input, status, output, and cancellation calls. ChatGPT resolves the selected context from openai/session metadata; pass context_id for an explicit override or when using a client without conversation metadata. The execution must belong to the currently selected Workspace; switching execution environments does not retarget an existing session.",
+      inputSchema: {
+        context_id: z.number().int().positive().optional(),
+        ref: opaqueRef,
+      },
       outputSchema: { context: z.unknown() },
       annotations: create,
     },

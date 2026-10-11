@@ -15,6 +15,23 @@ test("registers exactly the frozen Workspace tool surface", () => {
   assert.deepEqual(Object.keys(tools()).sort(), [...workspaceToolNames].sort());
 });
 
+test("conversation-scoped execution tools allow omitted context_id", () => {
+  const registered = tools();
+  for (const name of [
+    "execution_current",
+    "execution_sessions",
+    "execution_select",
+    "exec_workspace",
+    "session_select",
+    "send_workspace_execution_input",
+    "get_workspace_execution",
+    "read_workspace_execution_output",
+    "cancel_workspace_execution",
+  ]) {
+    assert.equal(registered[name].inputSchema.shape.context_id.isOptional(), true, `${name}.context_id`);
+  }
+});
+
 test("Workspace schemas keep capability and resource identifiers open", () => {
   const registered = tools();
   assert.deepEqual(Object.keys(registered.get_workspace_capabilities.inputSchema.shape), []);

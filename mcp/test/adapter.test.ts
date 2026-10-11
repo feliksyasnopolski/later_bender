@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
@@ -12,13 +13,13 @@ async function railsSearchFixture() {
   return JSON.parse(await readFile(fileURLToPath(new URL("../../test/fixtures/rails_search_response.json", import.meta.url)), "utf8"));
 }
 
-function apiFor(responses: Array<{ status: number; body: unknown }>, publicBaseUrl?: string) {
+function apiFor(responses: Array<{ status: number; body: unknown }>, publicBaseUrl?: string, conversationId?: string) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const api = new LaterBenderApi("https://example.test/laterbender", "secret", async (url, init) => {
     calls.push({ url: String(url), init });
     const response = responses.shift()!;
     return new Response(JSON.stringify(response.body), { status: response.status, headers: { "content-type": "application/json" } });
-  }, publicBaseUrl);
+  }, publicBaseUrl, conversationId);
   return { api, calls };
 }
 
@@ -353,7 +354,7 @@ test("preserves Rails validation failures and distinguishes auth/backend errors"
   await assert.rejects(validation.api.createProject({ name: "" }), (error: unknown) => error instanceof ApiError && error.code === "validation_failed" && error.details?.title?.[0] === "can't be blank");
   const unauthorized = apiFor([{ status: 401, body: { error: "Authentication required" } }]);
   await assert.rejects(unauthorized.api.listProjects(), (error: unknown) => error instanceof ApiError && error.code === "unauthorized");
-  const ambiguous = apiFor([{ status: 409, body: { error: { code: "context_selection_required", message: "Pass context_id explicitly" } } }]);
+  const ambiguous = apiFor([{ status: 409, body: { error: { code: "context_selection_required", message: "Pass context_id explicitly" } } }], undefined, "v1/ambiguous-test-session");
   await assert.rejects(ambiguous.api.getWorkContext(), (error: unknown) => error instanceof ApiError && error.code === "context_selection_required");
   const unavailable = new LaterBenderApi("https://example.test", "secret", async () => { throw new Error("offline"); });
   await assert.rejects(unavailable.listProjects(), (error: unknown) => error instanceof ApiError && error.code === "backend_unavailable");
@@ -372,13 +373,15 @@ test("tool failures use standard error content without schema-invalid structured
   assert.deepEqual(JSON.parse(result.content[0].text), { error: { code: "validation_failed", message: "Invalid cursor" } });
 });
 
-test("work context and scratchpad methods use an explicit context ID", async () => {
+test("work context methods use the conversation binding unless context_id is explicit", async () => {
+  const conversationId = "v1/session-key-for-api-test";
+  const conversationKey = createHash("sha256").update(conversationId).digest("hex");
   const { api, calls } = apiFor([
     { status: 201, body: { context: { id: 7, task: null, current: true } } },
     { status: 200, body: { scratchpad: "CURRENT: probe" } },
     { status: 200, body: { updated_at: "2026-10-08T18:00:00Z", character_count: 10 } },
     { status: 200, body: { context: null } },
-  ]);
+  ], undefined, conversationId);
   await api.startWorkContext();
   await api.readScratchpad(7);
   await api.writeScratchpad(7, "NEXT: test");
@@ -387,10 +390,24 @@ test("work context and scratchpad methods use an explicit context ID", async () 
     ["https://example.test/laterbender/api/work-context", "POST"],
     ["https://example.test/laterbender/api/work-context/scratchpad?context_id=7", undefined],
     ["https://example.test/laterbender/api/work-context/scratchpad", "PUT"],
-    ["https://example.test/laterbender/api/work-context", undefined],
+    [`https://example.test/laterbender/api/work-context?conversation_key=${conversationKey}`, undefined],
   ]);
-  assert.deepEqual(JSON.parse(String(calls[0].init.body)), {});
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { conversation_key: conversationKey });
   assert.deepEqual(JSON.parse(String(calls[2].init.body)), { context_id: 7, scratchpad: "NEXT: test" });
+  assert.ok(!JSON.stringify(calls).includes(conversationId));
+});
+
+test("implicit context resolution fails closed when the client provides no conversation metadata", async () => {
+  const { api, calls } = apiFor([]);
+  assert.throws(() => api.getWorkContext(), (error: unknown) => error instanceof ApiError && error.code === "context_selection_required");
+  assert.throws(() => api.readScratchpad(), (error: unknown) => error instanceof ApiError && error.code === "context_selection_required");
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+  const result = await tools.work_context_current.handler({});
+  assert.equal(result.isError, true);
+  assert.ok(result.content[0].text.includes("context_selection_required"));
+  assert.equal(calls.length, 0);
 });
 
 test("work context tools preserve the backend context object without double-wrapping", async () => {
@@ -401,7 +418,7 @@ test("work context tools preserve the backend context object without double-wrap
     { status: 200, body: { context } },
     { status: 200, body: { context: { ...context, state: "finished", current: false } } },
     { status: 200, body: { context: { ...context, task: { ref: "WR-1", title: "Task" } } } },
-  ]);
+  ], undefined, "v1/work-context-tool-test");
   registerTools(server, api);
   const tools = (server as any)._registeredTools as Record<string, any>;
 

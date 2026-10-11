@@ -1,6 +1,7 @@
 class WorkContext < ApplicationRecord
   belongs_to :user
   belongs_to :task, optional: true
+  has_one :work_context_binding, dependent: :destroy, inverse_of: :work_context
 
   validates :scratchpad, length: { maximum: 1.megabyte }
   validate :task_belongs_to_user

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 export type ApiErrorCode =
   | "unauthorized"
   | "not_found"
@@ -58,6 +59,8 @@ export type FileEgress = {
 export type Page<T> = { items: T[]; next_cursor: string | null };
 
 export class LaterBenderApi {
+  private readonly conversationKey?: string;
+
   constructor(
     private readonly baseUrl = process.env.LATER_BENDER_API_BASE_URL,
     private readonly token?: string,
@@ -66,10 +69,32 @@ export class LaterBenderApi {
       .LATER_BENDER_PUBLIC_API_BASE_URL ||
       process.env.LATER_BENDER_OAUTH_ISSUER ||
       baseUrl,
+    conversationId?: string,
   ) {
     if (!baseUrl) throw new Error("LATER_BENDER_API_BASE_URL is required");
     if (!publicBaseUrl)
       throw new Error("LATER_BENDER_PUBLIC_API_BASE_URL is required");
+    this.conversationKey = conversationId
+      ? createHash("sha256").update(conversationId).digest("hex")
+      : undefined;
+  }
+
+  private contextSelector(contextId?: number): Record<string, string> {
+    if (contextId !== undefined) return { context_id: contextId.toString() };
+    if (this.conversationKey) return { conversation_key: this.conversationKey };
+    throw new ApiError(
+      "context_selection_required",
+      409,
+      "This client supplied no ChatGPT conversation identity; pass context_id explicitly.",
+    );
+  }
+
+  private conversationPayload(
+    payload: Record<string, unknown>,
+  ): Record<string, unknown> {
+    return this.conversationKey
+      ? { ...payload, conversation_key: this.conversationKey }
+      : payload;
   }
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -121,7 +146,7 @@ export class LaterBenderApi {
 
   getWorkContext(contextId?: number) {
     return this.request<{ context: unknown }>(
-      `/api/work-context${query({ context_id: contextId?.toString() })}`,
+      `/api/work-context${query(this.contextSelector(contextId))}`,
     );
   }
   listWorkContexts(input: { limit?: number; beforeId?: number } = {}) {
@@ -135,50 +160,76 @@ export class LaterBenderApi {
   selectWorkContext(id: number) {
     return this.request<{ context: unknown }>(
       "/api/work-context/select",
-      json("POST", { id }),
+      json("POST", this.conversationPayload({ id })),
     );
   }
   startWorkContext(task?: string) {
     return this.request<{ context: unknown }>(
       "/api/work-context",
-      json("POST", task ? { task } : {}),
+      json("POST", this.conversationPayload(task ? { task } : {})),
     );
   }
   selectExecutionContext(
-    payload: Record<string, unknown> & { context_id: number },
+    payload: Record<string, unknown> & { context_id?: number },
   ) {
+    const body =
+      payload.context_id !== undefined
+        ? payload
+        : this.conversationPayload(payload);
+    if (payload.context_id === undefined && !this.conversationKey)
+      throw new ApiError(
+        "context_selection_required",
+        409,
+        "Pass context_id explicitly when conversation metadata is unavailable.",
+      );
     return this.request<Record<string, unknown>>(
       "/api/work-context/execution",
-      json("POST", payload),
+      json("POST", body),
     );
   }
-  selectForegroundExecution(execution: string, contextId: number) {
+  selectForegroundExecution(execution: string, contextId?: number) {
+    const body =
+      contextId !== undefined
+        ? { execution, context_id: contextId }
+        : { execution, ...this.contextSelector() };
     return this.request<Record<string, unknown>>(
       "/api/work-context/execution/foreground",
-      json("POST", { execution, context_id: contextId }),
+      json("POST", body),
     );
   }
-  finishWorkContext(contextId: number) {
+  finishWorkContext(contextId?: number) {
+    const body =
+      contextId !== undefined
+        ? { context_id: contextId }
+        : this.contextSelector();
     return this.request<{ context: unknown }>(
       "/api/work-context/finish",
-      json("POST", { context_id: contextId }),
+      json("POST", body),
     );
   }
-  attachWorkContextTask(contextId: number, task: string) {
+  attachWorkContextTask(contextId: number | undefined, task: string) {
+    const body =
+      contextId !== undefined
+        ? { context_id: contextId, task }
+        : { ...this.contextSelector(), task };
     return this.request<{ context: unknown }>(
       "/api/work-context/task",
-      json("POST", { context_id: contextId, task }),
+      json("POST", body),
     );
   }
-  readScratchpad(contextId: number) {
+  readScratchpad(contextId?: number) {
     return this.request<{ scratchpad: string }>(
-      `/api/work-context/scratchpad${query({ context_id: contextId.toString() })}`,
+      `/api/work-context/scratchpad${query(this.contextSelector(contextId))}`,
     );
   }
-  writeScratchpad(contextId: number, scratchpad: string) {
+  writeScratchpad(contextId: number | undefined, scratchpad: string) {
+    const body =
+      contextId !== undefined
+        ? { context_id: contextId, scratchpad }
+        : { ...this.contextSelector(), scratchpad };
     return this.request<{ updated_at: string; character_count: number }>(
       "/api/work-context/scratchpad",
-      json("PUT", { context_id: contextId, scratchpad }),
+      json("PUT", body),
     );
   }
 
