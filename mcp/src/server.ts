@@ -1,4 +1,4 @@
-import express, { type RequestHandler } from "express";
+import express, { type Request, type RequestHandler } from "express";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -10,6 +10,7 @@ import { InvalidTokenError } from "@modelcontextprotocol/sdk/server/auth/errors.
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { LaterBenderApi } from "./api.js";
 import { registerTools } from "./tools.js";
+import { registerRequestDiagnosticTool } from "./request-diagnostic.js";
 
 const resourceUrl = new URL(
   process.env.MCP_RESOURCE_URL ||
@@ -50,12 +51,21 @@ async function verifyAccessToken(token: string): Promise<AuthInfo> {
   };
 }
 
+type RawBodyRequest = Request & { rawBody?: Buffer };
+
 export function createApp(
   apiFactory: (token: string) => LaterBenderApi = (token) =>
     new LaterBenderApi(apiBaseUrl, token),
+  tokenVerifier: (token: string) => Promise<AuthInfo> = verifyAccessToken,
 ) {
   const app = express();
-  app.use(express.json());
+  app.use(
+    express.json({
+      verify: (request, _response, buffer) => {
+        (request as RawBodyRequest).rawBody = Buffer.from(buffer);
+      },
+    }),
+  );
   const metadata = {
     issuer: issuerOrigin,
     authorization_endpoint: new URL("/oauth/authorize", issuerOrigin).href,
@@ -76,7 +86,7 @@ export function createApp(
     }),
   );
   const auth = requireBearerAuth({
-    verifier: { verifyAccessToken },
+    verifier: { verifyAccessToken: tokenVerifier },
     resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceUrl),
   }) as RequestHandler;
   app.all("/mcp", auth, async (request, response) => {
@@ -88,6 +98,7 @@ export function createApp(
       },
     );
     registerTools(server, apiFactory(request.auth!.token));
+    registerRequestDiagnosticTool(server, request as RawBodyRequest);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
