@@ -604,6 +604,7 @@ async function workspaceOperation(
         const { context_id: _contextId, ref: _ref, ...outputInput } = input;
         return api.workspaceExecutionActionByRef(ref, "output", {
           ...outputInput,
+          format: input.format ?? "auto",
           wait_seconds: input.wait_seconds ?? 1,
         });
       }
@@ -880,7 +881,7 @@ export function registerWorkspaceTools(
   server.registerTool(
     "exec_workspace",
     {
-      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is a general-purpose execution surface for real engineering work, including normal tooling, filesystem work, package installation, and outbound network use when those capabilities are available. The selected Workspace target and environment are authoritative. Waits up to 8 seconds for ordinary commands to finish, returning the latest execution state and output; set wait_seconds to 0 for immediate return or 0–20 seconds to choose the wait window. A command still running returns its execution ref and current output. Set pty=true for a persistent terminal or interactive=true for a persistent stdin pipe; interactive sessions return immediately and become foreground. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
+      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is a general-purpose execution surface for engineering work, including normal tooling, filesystem work, package installation, and outbound internet access when available. The selected Workspace target and environment are authoritative. Ordinary commands wait up to 8 seconds by default and return the latest state/output; set wait_seconds to 0 for immediate return or up to 20 seconds to wait longer. For a persistent terminal such as a Python REPL, use pty=true; use interactive=true for a persistent stdin pipe when a TTY is not needed. Persistent sessions become the foreground execution for this conversation. Continue interacting with that process using send_workspace_execution_input and read_workspace_execution_output without passing ref or context_id; the selected conversation context resolves the foreground process. Use session_select only when deliberately switching to another existing execution. Output previews automatically return readable UTF-8 text or base64 for binary data. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
       inputSchema: execInput,
       outputSchema: { execution },
       annotations: execute,
@@ -903,12 +904,12 @@ export function registerWorkspaceTools(
   server.registerTool(
     "read_workspace_execution_output",
     {
-      description: `Continue reading retained stdout or stderr from an opaque cursor. Reads wait up to 1 second by default for a short output burst to settle (150ms without new bytes); set wait_seconds to 0 for an immediate poll or up to 5 seconds for a longer wait. Each call returns the next bounded stream chunk; a cursor at the current end of a running stream is resumable. next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`,
+      description: `Read the next chunk of retained stdout or stderr. For the normal interactive-session workflow, omit ref to read from the foreground execution selected for this conversation; omit context_id too unless you need an explicit context override. On the first read, omit cursor to start at byte 0; on every subsequent read, pass the previous response's next_cursor to avoid replaying output. Use format=auto (the default): valid UTF-8 text is returned as text and binary/non-text data as base64. Override with format=text only when you explicitly want text decoding, or format=base64 when you need byte-preserving output. Reads wait up to 1 second by default for a short output burst to settle; use wait_seconds=0 for immediate polling or up to 5 seconds for a longer wait. Each call returns a bounded chunk. A cursor at the end of a running stream is resumable; next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`,
       inputSchema: {
         context_id: z.number().int().positive().optional(),
         ref: opaqueRef.optional(),
         stream: z.enum(["stdout", "stderr"]),
-        format: z.enum(["auto", "text", "base64"]).optional(),
+        format: z.enum(["auto", "text", "base64"]).default("auto"),
         cursor: z.string().optional(),
         wait_seconds: z.number().min(0).max(5).optional(),
       },
@@ -1006,7 +1007,7 @@ export function registerWorkspaceTools(
     "send_workspace_execution_input",
     {
       description:
-        "Send UTF-8 bytes to a persistent interactive process. Omit ref to use the foreground execution recorded by this conversation's selected context; ChatGPT resolves it from openai/session metadata. Pass context_id for an explicit override or when using a client without conversation metadata. Include newline explicitly when the program should receive Enter; this is not command execution. Native Remote Agent and hosted Workspace PTY/pipe sessions; maximum 64 KiB per call.",
+        "Send UTF-8 input to a running persistent process; this sends bytes to the process and does not execute a shell command. For normal interactive-session use, omit ref and context_id: input goes to the foreground execution selected for this conversation. Pass ref only to target a specific execution deliberately, or context_id for an explicit context override/client without conversation metadata. Include a newline when the program should receive Enter. Use this after exec_workspace starts a persistent PTY or interactive pipe; maximum 64 KiB per call.",
       inputSchema: {
         context_id: z.number().int().positive().optional(),
         ref: opaqueRef.optional(),

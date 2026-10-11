@@ -66,6 +66,20 @@ RSpec.describe "Workspace execution observation", type: :request do
     expect(third.fetch("stream_complete")).to be(true)
   end
 
+  it "auto-detects text and binary output when format is omitted" do
+    controller = Api::WorkspacesController.new
+    text_execution = Struct.new(:stdout_data, :state, :ref).new("hello from REPL\n", "exited", "WSE-auto-text")
+    text_result = controller.send(:remote_output, text_execution, { "stream" => "stdout" })
+    expect(text_result.fetch("format")).to eq("text")
+    expect(text_result.fetch("data")).to eq("hello from REPL\n")
+
+    binary = "\xFF\x00\x10".b
+    binary_execution = Struct.new(:stdout_data, :state, :ref).new(binary, "exited", "WSE-auto-binary")
+    binary_result = controller.send(:remote_output, binary_execution, { "stream" => "stdout" })
+    expect(binary_result.fetch("format")).to eq("base64")
+    expect(binary_result.fetch("data")).to eq(Base64.strict_encode64(binary))
+  end
+
   it "waits for a short native output burst to settle before reading" do
     controller = Api::WorkspacesController.new
     execution_class = Class.new do

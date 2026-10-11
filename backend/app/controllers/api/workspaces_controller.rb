@@ -304,7 +304,7 @@ module Api
       bytes = execution.public_send("#{stream}_data").to_s.b
       raise WorkspaceRunnerClient::Unavailable.new("Invalid output cursor", code: "invalid_cursor") if offset > bytes.bytesize
       chunk = bytes.byteslice(offset, 16 * 1024) || "".b
-      format = payload["format"].to_s
+      format = payload["format"].presence || "auto"
       format = "text" if format == "auto" && utf8_text?(chunk)
       format = "base64" unless %w[text base64].include?(format)
       encoded = format == "text" ? chunk.force_encoding(Encoding::UTF_8).scrub : Base64.strict_encode64(chunk)
