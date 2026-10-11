@@ -65,11 +65,11 @@ test("Workspace schemas keep capability and resource identifiers open", () => {
 
 test("execution input requires exactly shell or direct argv", () => {
   const schema = registeredExecSchema();
-  assert.equal(schema.safeParse({ workspace: "WS-1", command: "echo hi" }).success, true);
-  assert.equal(schema.safeParse({ workspace: "WS-1", argv: ["printf", "hi"] }).success, true);
-  assert.equal(schema.safeParse({ workspace: "WS-1" }).success, false);
-  assert.equal(schema.safeParse({ workspace: "WS-1", command: "echo hi", argv: ["echo", "hi"] }).success, false);
-  assert.equal(schema.safeParse({ workspace: "WS-1", argv: [] }).success, false);
+  assert.equal(schema.safeParse({ context_id: 42, workspace: "WS-1", command: "echo hi" }).success, true);
+  assert.equal(schema.safeParse({ context_id: 42, workspace: "WS-1", argv: ["printf", "hi"] }).success, true);
+  assert.equal(schema.safeParse({ context_id: 42, workspace: "WS-1" }).success, false);
+  assert.equal(schema.safeParse({ context_id: 42, workspace: "WS-1", command: "echo hi", argv: ["echo", "hi"] }).success, false);
+  assert.equal(schema.safeParse({ context_id: 42, workspace: "WS-1", argv: [] }).success, false);
 });
 
 test("boundary operations expose stable result contracts and scaffold availability", async () => {
@@ -111,10 +111,10 @@ test("Workspace input schemas are object-shaped in the actual MCP tools/list res
     assert.equal(byName[name].inputSchema.type, "object");
     assert.ok(byName[name].inputSchema.properties);
   }
-  assert.deepEqual(Object.keys(byName.exec_workspace.inputSchema.properties ?? {}).sort(), ["argv", "command", "cwd", "env", "interactive", "pty", "secret_env", "stdin", "timeout_seconds", "wait_seconds", "workspace"].sort());
+  assert.deepEqual(Object.keys(byName.exec_workspace.inputSchema.properties ?? {}).sort(), ["argv", "command", "context_id", "cwd", "env", "interactive", "pty", "secret_env", "stdin", "timeout_seconds", "wait_seconds", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_file.inputSchema.properties ?? {}).sort(), ["cursor", "locator", "path", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_transcript.inputSchema.properties ?? {}).sort(), ["cursor", "from_sequence", "limit", "to_sequence", "workspace"].sort());
-  assert.deepEqual(Object.keys(byName.read_workspace_execution_output.inputSchema.properties ?? {}).sort(), ["cursor", "format", "ref", "stream", "wait_seconds"].sort());
+  assert.deepEqual(Object.keys(byName.read_workspace_execution_output.inputSchema.properties ?? {}).sort(), ["context_id", "cursor", "format", "ref", "stream", "wait_seconds"].sort());
   await client.close();
   await server.close();
 });
@@ -148,13 +148,13 @@ test("exec_workspace publishes terminal and running projections through tools/ca
   const client = new Client({ name: "test-client", version: "1" });
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  const terminal = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "short" } });
-  const running = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "long", wait_seconds: 0 } });
+  const terminal = await client.callTool({ name: "exec_workspace", arguments: { context_id: 42, workspace: "WS-1", command: "short" } });
+  const running = await client.callTool({ name: "exec_workspace", arguments: { context_id: 42, workspace: "WS-1", command: "long", wait_seconds: 0 } });
   assert.equal((terminal.structuredContent as any).execution.state, "exited");
   assert.equal((terminal.structuredContent as any).execution.stdout.data, "out");
   assert.equal((terminal.structuredContent as any).execution.stderr.data, "err");
   assert.equal((running.structuredContent as any).execution.state, "running");
-  const timeout = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "sleep 2", timeout_seconds: 1 } });
+  const timeout = await client.callTool({ name: "exec_workspace", arguments: { context_id: 42, workspace: "WS-1", command: "sleep 2", timeout_seconds: 1 } });
   assert.equal((timeout.structuredContent as any).execution.state, "timed_out");
   assert.equal((timeout.structuredContent as any).execution.requested_timeout_seconds, 1);
   await client.close();
@@ -174,7 +174,7 @@ test("exec_workspace waits for ordinary commands and returns the terminal projec
   const client = new Client({ name: "test-client", version: "1" });
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  const result = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "short-delay", wait_seconds: 2 } });
+  const result = await client.callTool({ name: "exec_workspace", arguments: { context_id: 42, workspace: "WS-1", command: "short-delay", wait_seconds: 2 } });
   assert.equal((result.structuredContent as any).execution.state, "exited");
   assert.equal((result.structuredContent as any).execution.stdout.data, "complete");
   assert.equal(polls, 1);
@@ -190,7 +190,7 @@ test("exec_workspace preserves invalid UTF-8 output as base64 through tools/call
   const client = new Client({ name: "test-client", version: "1" });
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  const result = await client.callTool({ name: "exec_workspace", arguments: { workspace: "WS-1", command: "binary" } });
+  const result = await client.callTool({ name: "exec_workspace", arguments: { context_id: 42, workspace: "WS-1", command: "binary" } });
   assert.equal((result.structuredContent as any).execution.stdout.format, "base64");
   assert.equal((result.structuredContent as any).execution.stdout.data, "/0FCQw==");
   assert.equal((result.structuredContent as any).execution.stdout.total_byte_size, 4);
@@ -213,11 +213,11 @@ test("read_workspace_execution_output defaults to a bounded settle wait and allo
   const client = new Client({ name: "test-client", version: "1" });
   await server.connect(serverTransport);
   await client.connect(clientTransport);
-  await client.callTool({ name: "read_workspace_execution_output", arguments: { stream: "stdout", cursor: "0" } });
+  await client.callTool({ name: "read_workspace_execution_output", arguments: { context_id: 42, stream: "stdout", cursor: "0" } });
   assert.equal(calls[0].ref, "WSE-output");
   assert.equal(calls[0].action, "output");
   assert.equal(calls[0].input.wait_seconds, 1);
-  await client.callTool({ name: "read_workspace_execution_output", arguments: { stream: "stdout", cursor: "6", wait_seconds: 0 } });
+  await client.callTool({ name: "read_workspace_execution_output", arguments: { context_id: 42, stream: "stdout", cursor: "6", wait_seconds: 0 } });
   assert.equal(calls[1].input.wait_seconds, 0);
   await client.close();
   await server.close();
@@ -294,27 +294,27 @@ test("stateful execution selection and PTY input work through MCP Client tools/c
   await server.connect(serverTransport);
   await client.connect(clientTransport);
 
-  const selected = await client.callTool({ name: "execution_select", arguments: { target: "RA-1", executor: "native", resource_path: "/Users/felix/rails/later_bender", cwd: "/Users/felix/rails/later_bender" } });
+  const selected = await client.callTool({ name: "execution_select", arguments: { context_id: 42, target: "RA-1", executor: "native", resource_path: "/Users/felix/rails/later_bender", cwd: "/Users/felix/rails/later_bender" } });
   assert.equal(selected.isError, undefined);
   assert.deepEqual(calls[0], ["createWorkspace", { label: undefined, target: "RA-1", executor: "native", resource_path: "/Users/felix/rails/later_bender", ttl_seconds: undefined }]);
   assert.deepEqual(calls[1], ["executeWorkspace", { workspace: "WS-9", argv: ["test", "-d", "/Users/felix/rails/later_bender"], timeout_seconds: 10 }]);
-  assert.deepEqual(calls[2], ["selectExecutionContext", { workspace: "WS-9", cwd: "/Users/felix/rails/later_bender" }]);
+  assert.deepEqual(calls[2], ["selectExecutionContext", { workspace: "WS-9", context_id: 42, cwd: "/Users/felix/rails/later_bender" }]);
 
-  const started = await client.callTool({ name: "exec_workspace", arguments: { command: "python3 -i", pty: true } });
+  const started = await client.callTool({ name: "exec_workspace", arguments: { context_id: 42, command: "python3 -i", pty: true } });
   assert.equal(started.isError, undefined);
   assert.deepEqual(calls[3], ["executeWorkspace", { command: "python3 -i", pty: true, workspace: "WS-9", cwd: "/Users/felix/rails/later_bender" }]);
   assert.deepEqual(calls[4], ["selectForegroundExecution", "WSE-9"]);
-  const sent = await client.callTool({ name: "send_workspace_execution_input", arguments: { data: "print(1 + 1)" + String.fromCharCode(10) } });
+  const sent = await client.callTool({ name: "send_workspace_execution_input", arguments: { context_id: 42, data: "print(1 + 1)" + String.fromCharCode(10) } });
   assert.equal(sent.isError, undefined, JSON.stringify(sent));
   assert.deepEqual(calls[5], ["sendWorkspaceExecutionInput", { ref: "WSE-9", data: "print(1 + 1)" + String.fromCharCode(10) }]);
-  const sessions = await client.callTool({ name: "execution_sessions", arguments: {} });
+  const sessions = await client.callTool({ name: "execution_sessions", arguments: { context_id: 42 } });
   assert.equal(sessions.isError, undefined, JSON.stringify(sessions));
   assert.deepEqual(calls[6], ["workspaceAction", { ref: "WS-9", action: "transcript", payload: {} }]);
   assert.deepEqual((sessions as any).structuredContent.sessions.map((s: any) => [s.execution, s.state]), [["WSE-current", "running"], ["WSE-old", "exited"]]);
-  const switched = await client.callTool({ name: "session_select", arguments: { ref: "WSE-old" } });
+  const switched = await client.callTool({ name: "session_select", arguments: { context_id: 42, ref: "WSE-old" } });
   assert.equal(switched.isError, undefined, JSON.stringify(switched));
   assert.deepEqual(calls[7], ["selectForegroundExecution", "WSE-old"]);
-  const invalidSelection = await client.callTool({ name: "execution_select", arguments: { workspace: "WS-9", cwd: "/definitely/missing" } });
+  const invalidSelection = await client.callTool({ name: "execution_select", arguments: { context_id: 42, workspace: "WS-9", cwd: "/definitely/missing" } });
   assert.equal(invalidSelection.isError, true);
   assert.ok(JSON.stringify(invalidSelection).includes("Cannot select working directory"));
   assert.ok(JSON.stringify(invalidSelection).includes("does not exist or is not accessible"));

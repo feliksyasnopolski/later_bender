@@ -353,6 +353,8 @@ test("preserves Rails validation failures and distinguishes auth/backend errors"
   await assert.rejects(validation.api.createProject({ name: "" }), (error: unknown) => error instanceof ApiError && error.code === "validation_failed" && error.details?.title?.[0] === "can't be blank");
   const unauthorized = apiFor([{ status: 401, body: { error: "Authentication required" } }]);
   await assert.rejects(unauthorized.api.listProjects(), (error: unknown) => error instanceof ApiError && error.code === "unauthorized");
+  const ambiguous = apiFor([{ status: 409, body: { error: { code: "context_selection_required", message: "Pass context_id explicitly" } } }]);
+  await assert.rejects(ambiguous.api.getWorkContext(), (error: unknown) => error instanceof ApiError && error.code === "context_selection_required");
   const unavailable = new LaterBenderApi("https://example.test", "secret", async () => { throw new Error("offline"); });
   await assert.rejects(unavailable.listProjects(), (error: unknown) => error instanceof ApiError && error.code === "backend_unavailable");
 });
@@ -370,7 +372,7 @@ test("tool failures use standard error content without schema-invalid structured
   assert.deepEqual(JSON.parse(result.content[0].text), { error: { code: "validation_failed", message: "Invalid cursor" } });
 });
 
-test("work context and scratchpad methods preserve their implicit current-context contract", async () => {
+test("work context and scratchpad methods use an explicit context ID", async () => {
   const { api, calls } = apiFor([
     { status: 201, body: { context: { id: 7, task: null, current: true } } },
     { status: 200, body: { scratchpad: "CURRENT: probe" } },
@@ -378,17 +380,17 @@ test("work context and scratchpad methods preserve their implicit current-contex
     { status: 200, body: { context: null } },
   ]);
   await api.startWorkContext();
-  await api.readScratchpad();
-  await api.writeScratchpad("NEXT: test");
+  await api.readScratchpad(7);
+  await api.writeScratchpad(7, "NEXT: test");
   await api.getWorkContext();
   assert.deepEqual(calls.map((call) => [call.url, call.init.method]), [
     ["https://example.test/laterbender/api/work-context", "POST"],
-    ["https://example.test/laterbender/api/work-context/scratchpad", undefined],
+    ["https://example.test/laterbender/api/work-context/scratchpad?context_id=7", undefined],
     ["https://example.test/laterbender/api/work-context/scratchpad", "PUT"],
     ["https://example.test/laterbender/api/work-context", undefined],
   ]);
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), {});
-  assert.deepEqual(JSON.parse(String(calls[2].init.body)), { scratchpad: "NEXT: test" });
+  assert.deepEqual(JSON.parse(String(calls[2].init.body)), { context_id: 7, scratchpad: "NEXT: test" });
 });
 
 test("work context tools preserve the backend context object without double-wrapping", async () => {
@@ -405,8 +407,8 @@ test("work context tools preserve the backend context object without double-wrap
 
   assert.deepEqual((await tools.work_context_start.handler({})).structuredContent, { context });
   assert.deepEqual((await tools.work_context_current.handler({})).structuredContent, { context });
-  assert.deepEqual((await tools.work_context_finish.handler({})).structuredContent, { context: { ...context, state: "finished", current: false } });
-  assert.deepEqual((await tools.work_context_attach_task.handler({ task: "WR-1" })).structuredContent, { context: { ...context, task: { ref: "WR-1", title: "Task" } } });
+  assert.deepEqual((await tools.work_context_finish.handler({ context_id: 17 })).structuredContent, { context: { ...context, state: "finished", current: false } });
+  assert.deepEqual((await tools.work_context_attach_task.handler({ context_id: 17, task: "WR-1" })).structuredContent, { context: { ...context, task: { ref: "WR-1", title: "Task" } } });
 });
 
 test("work context discovery, inspection, and selection use stable context IDs", async () => {
@@ -442,8 +444,8 @@ test("scratchpad tools return their backend object without an extra root wrapper
   registerTools(server, api);
   const tools = (server as any)._registeredTools as Record<string, any>;
 
-  const read = await tools.scratchpad_read.handler({});
-  const write = await tools.scratchpad_write.handler({ scratchpad: "NEXT: test" });
+  const read = await tools.scratchpad_read.handler({ context_id: 17 });
+  const write = await tools.scratchpad_write.handler({ context_id: 17, scratchpad: "NEXT: test" });
 
   assert.equal(read.structuredContent.scratchpad, "CURRENT: probe");
   assert.deepEqual(Object.keys(write.structuredContent).sort(), ["character_count", "updated_at"]);

@@ -151,6 +151,7 @@ const execution = z.object({
 });
 const transcriptInvocation = invocation;
 const execCommonInput = {
+  context_id: z.number().int().positive(),
   workspace: opaqueRef.optional(),
   cwd: z.string().optional(),
   pty: z.boolean().optional(),
@@ -390,11 +391,11 @@ async function workspaceOperation(
       case "promote_workspace_file":
         return api.workspaceAction(input.workspace, "file-promote", input);
       case "execution_current":
-        return api.getWorkContext();
+        return api.getWorkContext(input.context_id);
       case "execution_sessions": {
         let workspace = input.workspace as string | undefined;
         if (!workspace) {
-          const current: any = await api.getWorkContext();
+          const current: any = await api.getWorkContext(input.context_id);
           workspace = current?.context?.execution?.workspace;
         }
         if (!workspace)
@@ -423,9 +424,12 @@ async function workspaceOperation(
       }
       case "session_select": {
         const ref = input.ref as string;
-        return api.selectForegroundExecution(ref);
+        return api.selectForegroundExecution(ref, input.context_id);
       }
       case "execution_select": {
+        // Validate the context before creating a Workspace, so a stale/foreign
+        // context ID cannot leave an orphaned Workspace behind.
+        await api.getWorkContext(input.context_id);
         let workspace = input.workspace as string | undefined;
         if (!workspace) {
           if (!input.target)
@@ -470,14 +474,33 @@ async function workspaceOperation(
         }
         return api.selectExecutionContext({
           workspace,
+          context_id: input.context_id,
           ...(requestedCwd ? { cwd: requestedCwd } : {}),
         });
       }
       case "exec_workspace": {
-        const { wait_seconds: _waitSeconds, ...executionInput } = input;
+        const {
+          wait_seconds: _waitSeconds,
+          context_id: _contextId,
+          ...executionInput
+        } = input;
+        if ((input.pty || input.interactive) && !input.context_id) {
+          throw new ApiError(
+            "validation_failed",
+            422,
+            "context_id is required for PTY/interactive execution so its foreground session is recorded in the right context",
+          );
+        }
         let payload = { ...executionInput };
         if (!payload.workspace) {
-          const current: any = await api.getWorkContext();
+          if (!input.context_id) {
+            throw new ApiError(
+              "validation_failed",
+              422,
+              "context_id is required when using the selected Workspace; call execution_select first",
+            );
+          }
+          const current: any = await api.getWorkContext(input.context_id);
           const selected = current?.context?.execution;
           if (!selected?.workspace)
             throw new ApiError(
@@ -495,7 +518,14 @@ async function workspaceOperation(
           started?.ref &&
           started.state === "running"
         ) {
-          await api.selectForegroundExecution(started.ref);
+          if (!input.context_id) {
+            throw new ApiError(
+              "validation_failed",
+              422,
+              "context_id is required for PTY/interactive execution so its foreground session is recorded in the right context",
+            );
+          }
+          await api.selectForegroundExecution(started.ref, input.context_id);
         } else if (started?.state === "running") {
           started = await waitForExecution(
             api,
@@ -508,7 +538,7 @@ async function workspaceOperation(
       case "send_workspace_execution_input": {
         let ref = input.ref as string | undefined;
         if (!ref) {
-          const current: any = await api.getWorkContext();
+          const current: any = await api.getWorkContext(input.context_id);
           ref = current?.context?.execution?.foreground;
         }
         if (!ref)
@@ -522,7 +552,7 @@ async function workspaceOperation(
       case "get_workspace_execution": {
         let ref = input.ref as string | undefined;
         if (!ref) {
-          const current: any = await api.getWorkContext();
+          const current: any = await api.getWorkContext(input.context_id);
           ref = current?.context?.execution?.foreground;
         }
         if (!ref)
@@ -536,7 +566,7 @@ async function workspaceOperation(
       case "read_workspace_execution_output": {
         let ref = input.ref as string | undefined;
         if (!ref) {
-          const current: any = await api.getWorkContext();
+          const current: any = await api.getWorkContext(input.context_id);
           ref = current?.context?.execution?.foreground;
         }
         if (!ref)
@@ -545,15 +575,16 @@ async function workspaceOperation(
             422,
             "No execution ref or foreground execution selected",
           );
+        const { context_id: _contextId, ...outputInput } = input;
         return api.workspaceExecutionActionByRef(ref, "output", {
-          ...input,
+          ...outputInput,
           wait_seconds: input.wait_seconds ?? 1,
         });
       }
       case "cancel_workspace_execution": {
         let ref = input.ref as string | undefined;
         if (!ref) {
-          const current: any = await api.getWorkContext();
+          const current: any = await api.getWorkContext(input.context_id);
           ref = current?.context?.execution?.foreground;
         }
         if (!ref)
@@ -828,7 +859,10 @@ export function registerWorkspaceTools(
     "get_workspace_execution",
     {
       description: `Fetch the current full projection of an execution by its opaque WSE- reference. The execution ref is unambiguous, and authorization remains authenticated-user scoped. ${workspaceFailure}`,
-      inputSchema: { ref: opaqueRef.optional() },
+      inputSchema: {
+        context_id: z.number().int().positive(),
+        ref: opaqueRef.optional(),
+      },
       outputSchema: { execution },
       annotations: readOnly,
     },
@@ -839,6 +873,7 @@ export function registerWorkspaceTools(
     {
       description: `Continue reading retained stdout or stderr from an opaque cursor. Reads wait up to 1 second by default for a short output burst to settle (150ms without new bytes); set wait_seconds to 0 for an immediate poll or up to 5 seconds for a longer wait. Each call returns the next bounded stream chunk; a cursor at the current end of a running stream is resumable. next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`,
       inputSchema: {
+        context_id: z.number().int().positive(),
         ref: opaqueRef.optional(),
         stream: z.enum(["stdout", "stderr"]),
         format: z.enum(["auto", "text", "base64"]).optional(),
@@ -863,7 +898,10 @@ export function registerWorkspaceTools(
     "cancel_workspace_execution",
     {
       description: `Terminate the whole process group belonging to an execution. Cancellation is idempotent: an already-terminal execution returns its existing terminal projection. ${workspaceFailure}`,
-      inputSchema: { ref: opaqueRef.optional() },
+      inputSchema: {
+        context_id: z.number().int().positive(),
+        ref: opaqueRef.optional(),
+      },
       outputSchema: { execution },
       annotations: destroy,
     },
@@ -907,6 +945,7 @@ export function registerWorkspaceTools(
       description:
         "Select the current execution environment and working directory for this work context. Reuse an existing Workspace with workspace, or acquire one on target; resource_path selects an existing directory on a native Remote Agent without copying or owning that directory. Selection persists across calls. Native execution uses the agent OS user's real authority and is not a sandbox. Existing sessions remain bound to their original Workspace.",
       inputSchema: {
+        context_id: z.number().int().positive(),
         workspace: opaqueRef.optional(),
         target: z.string().optional(),
         executor: z.enum(["native", "docker"]).optional(),
@@ -924,8 +963,8 @@ export function registerWorkspaceTools(
     "execution_current",
     {
       description:
-        "Inspect the current work context's selected execution Workspace, working directory, and foreground process. Use this when starting a new chat or recovering after interruption; do not assume the previous selection is relevant.",
-      inputSchema: {},
+        "Inspect the specified work context's selected execution Workspace, working directory, and foreground process. Use this when starting a new chat or recovering after interruption; do not assume the previous selection is relevant.",
+      inputSchema: { context_id: z.number().int().positive() },
       outputSchema: { context: z.unknown() },
       annotations: readOnly,
     },
@@ -936,7 +975,11 @@ export function registerWorkspaceTools(
     {
       description:
         "Send UTF-8 bytes to a persistent interactive process. Omit ref to use the current foreground execution. Include newline explicitly when the program should receive Enter; this is not command execution. Native Remote Agent and hosted Workspace PTY/pipe sessions; maximum 64 KiB per call.",
-      inputSchema: { ref: opaqueRef.optional(), data: z.string().max(65536) },
+      inputSchema: {
+        context_id: z.number().int().positive(),
+        ref: opaqueRef.optional(),
+        data: z.string().max(65536),
+      },
       outputSchema: {
         execution: opaqueRef,
         bytes_written: z.number().int().nonnegative(),
@@ -949,8 +992,11 @@ export function registerWorkspaceTools(
     "execution_sessions",
     {
       description:
-        "List the executions recorded for the selected Workspace so you can rediscover and switch between long-running processes after interruption. Optionally pass workspace to inspect another Workspace without changing the current selection.",
-      inputSchema: { workspace: opaqueRef.optional() },
+        "List the executions recorded for the Workspace selected in the specified context so you can rediscover and switch between long-running processes after interruption. Optionally pass workspace to inspect another Workspace without changing the current selection.",
+      inputSchema: {
+        context_id: z.number().int().positive(),
+        workspace: opaqueRef.optional(),
+      },
       outputSchema: { workspace: opaqueRef, sessions: z.array(z.unknown()) },
       annotations: readOnly,
     },
@@ -961,7 +1007,7 @@ export function registerWorkspaceTools(
     {
       description:
         "Make an existing execution the foreground process for subsequent input, status, output, and cancellation calls. The execution must belong to the currently selected Workspace; switching execution environments does not retarget an existing session.",
-      inputSchema: { ref: opaqueRef },
+      inputSchema: { context_id: z.number().int().positive(), ref: opaqueRef },
       outputSchema: { context: z.unknown() },
       annotations: create,
     },

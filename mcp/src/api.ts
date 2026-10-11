@@ -30,6 +30,7 @@ export type ApiErrorCode =
   | "credential_not_found"
   | "credential_conflict"
   | "credential_injection_failed"
+  | "context_selection_required"
   | "target_not_found"
   | "executor_unsupported";
 
@@ -99,11 +100,14 @@ export class LaterBenderApi {
           ? "unauthorized"
           : response.status === 404
             ? "not_found"
-            : response.status === 422 && typeof error?.code === "string"
-              ? error.code
-              : response.status === 422
-                ? "validation_failed"
-                : "backend_unavailable";
+            : response.status === 409 &&
+                error?.code === "context_selection_required"
+              ? "context_selection_required"
+              : response.status === 422 && typeof error?.code === "string"
+                ? error.code
+                : response.status === 422
+                  ? "validation_failed"
+                  : "backend_unavailable";
       throw new ApiError(
         code,
         response.status,
@@ -115,8 +119,10 @@ export class LaterBenderApi {
     return body as T;
   }
 
-  getWorkContext() {
-    return this.request<{ context: unknown }>("/api/work-context");
+  getWorkContext(contextId?: number) {
+    return this.request<{ context: unknown }>(
+      `/api/work-context${query({ context_id: contextId?.toString() })}`,
+    );
   }
   listWorkContexts(input: { limit?: number; beforeId?: number } = {}) {
     return this.request<{ contexts: unknown[]; next_before_id: number | null }>(
@@ -138,37 +144,41 @@ export class LaterBenderApi {
       json("POST", task ? { task } : {}),
     );
   }
-  selectExecutionContext(payload: Record<string, unknown>) {
+  selectExecutionContext(
+    payload: Record<string, unknown> & { context_id: number },
+  ) {
     return this.request<Record<string, unknown>>(
       "/api/work-context/execution",
       json("POST", payload),
     );
   }
-  selectForegroundExecution(execution: string) {
+  selectForegroundExecution(execution: string, contextId: number) {
     return this.request<Record<string, unknown>>(
       "/api/work-context/execution/foreground",
-      json("POST", { execution }),
+      json("POST", { execution, context_id: contextId }),
     );
   }
-  finishWorkContext() {
+  finishWorkContext(contextId: number) {
     return this.request<{ context: unknown }>(
       "/api/work-context/finish",
-      json("POST", {}),
+      json("POST", { context_id: contextId }),
     );
   }
-  attachWorkContextTask(task: string) {
+  attachWorkContextTask(contextId: number, task: string) {
     return this.request<{ context: unknown }>(
       "/api/work-context/task",
-      json("POST", { task }),
+      json("POST", { context_id: contextId, task }),
     );
   }
-  readScratchpad() {
-    return this.request<{ scratchpad: string }>("/api/work-context/scratchpad");
+  readScratchpad(contextId: number) {
+    return this.request<{ scratchpad: string }>(
+      `/api/work-context/scratchpad${query({ context_id: contextId.toString() })}`,
+    );
   }
-  writeScratchpad(scratchpad: string) {
+  writeScratchpad(contextId: number, scratchpad: string) {
     return this.request<{ updated_at: string; character_count: number }>(
       "/api/work-context/scratchpad",
-      json("PUT", { scratchpad }),
+      json("PUT", { context_id: contextId, scratchpad }),
     );
   }
 

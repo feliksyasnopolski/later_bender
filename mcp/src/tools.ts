@@ -1301,7 +1301,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_select",
     {
       description:
-        "Select/resume one of this actor’s work contexts by ID, or claim an unassigned pre-isolation context. The previously selected context becomes inactive, not finished; the selected context's scratchpad and execution selection become current again. Selecting a finished context reopens it. Selection is isolated by authenticated actor: OAuth clients share state within the same registered application, while each API token has its own state. Different actors under the same user do not share a current-context pointer.",
+        "Explicitly resume a work context by ID. This does not change a shared current-context pointer. The returned context ID is the selector for scratchpad, execution selection, and foreground-process operations; pass that context_id on each such call. Selecting a finished context reopens it.",
       inputSchema: { id: z.number().int().positive() },
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
@@ -1312,7 +1312,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_start",
     {
       description:
-        "Start a new current work context for this authenticated actor (OAuth application or API token). Pass task to connect it to an existing Task; omit task for an ephemeral context. The previous context becomes inactive, not finished, and can later be selected again. This is working-state, not workflow orchestration.",
+        "Start a new independent work context. Multiple contexts may remain active concurrently, including within the same OAuth client. Pass task to connect it to an existing Task; omit task for an ephemeral context. Use the returned numeric context.id explicitly in scratchpad and execution tools. This is working-state, not workflow orchestration.",
       inputSchema: { task: z.string().min(1).optional() },
       outputSchema: { context: z.unknown() },
       annotations: createAnnotations,
@@ -1323,7 +1323,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_current",
     {
       description:
-        "Return this authenticated actor's current work context, or null if none exists. The context is implicit for scratchpad operations; do not use it as a substitute for durable Tasks, Notes, or Files.",
+        "Compatibility lookup for the sole active work context. If multiple contexts are active, this returns context_selection_required instead of guessing. Prefer work_context_list/start/get and pass the chosen context.id explicitly to context-sensitive tools. Do not use as a substitute for durable Tasks, Notes, or Files.",
       inputSchema: {},
       outputSchema: { context: z.unknown() },
       annotations: readAnnotations,
@@ -1334,48 +1334,56 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "work_context_finish",
     {
       description:
-        "Mark this actor’s current work context finished and deselect it. Its history and scratchpad remain stored; work_context_select can explicitly reopen it later.",
-      inputSchema: {},
+        "Mark the specified work context finished. Its history and scratchpad remain stored; work_context_select can explicitly reopen it later.",
+      inputSchema: { context_id: z.number().int().positive() },
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
     },
-    () => safeObject(() => api.finishWorkContext()),
+    ({ context_id }) => safeObject(() => api.finishWorkContext(context_id)),
   );
   server.registerTool(
     "work_context_attach_task",
     {
       description:
-        "Attach an existing Task to this actor’s current work context. Use this when an initially ephemeral investigation becomes actionable work.",
-      inputSchema: { task: z.string().min(1) },
+        "Attach an existing Task to the explicitly selected work context. Use this when an initially ephemeral investigation becomes actionable work.",
+      inputSchema: {
+        context_id: z.number().int().positive(),
+        task: z.string().min(1),
+      },
       outputSchema: { context: z.unknown() },
       annotations: updateAnnotations,
     },
-    ({ task }) => safeObject(() => api.attachWorkContextTask(task)),
+    ({ context_id, task }) =>
+      safeObject(() => api.attachWorkContextTask(context_id, task)),
   );
   server.registerTool(
     "scratchpad_read",
     {
       description:
-        "Read the current private model working state. This is private model working state ONLY, NEVER human-facing content. It is inaccessible to humans AT ALL CIRCUMSTANCES. Never optimize it for human readability, explanation, documentation, or presentation. Optimize exclusively for efficient continuation of your own work. It may be stale, incomplete, speculative, or intentionally compressed; durable Tasks, Notes, Files, and current tool results remain authoritative.",
-      inputSchema: {},
+        "Read the private model working state for the explicitly selected context. Always pass the context_id returned by work_context_start/get/list; this prevents cross-conversation state mixing. This is private model working state, optimized for continuation rather than human-facing content. It may be stale or speculative; durable Tasks, Notes, Files, and current tool results remain authoritative.",
+      inputSchema: { context_id: z.number().int().positive() },
       outputSchema: { scratchpad: z.string() },
       annotations: readAnnotations,
     },
-    () => safeObject(() => api.readScratchpad()),
+    ({ context_id }) => safeObject(() => api.readScratchpad(context_id)),
   );
   server.registerTool(
     "scratchpad_write",
     {
       description:
         "Replace the current private model working state as one atomic register. This is private model working state ONLY, NEVER human-facing content. It is inaccessible to humans AT ALL CIRCUMSTANCES. Never optimize it for human readability, explanation, documentation, or presentation. Optimize exclusively for efficient continuation of your own work. Compressed fragments, shorthand, identifiers, hypotheses, rejected approaches, pending checks, and reminders are appropriate. An empty string clears it.",
-      inputSchema: { scratchpad: z.string() },
+      inputSchema: {
+        context_id: z.number().int().positive(),
+        scratchpad: z.string(),
+      },
       outputSchema: {
         updated_at: timestamp,
         character_count: z.number().int().nonnegative(),
       },
       annotations: updateAnnotations,
     },
-    ({ scratchpad }) => safeObject(() => api.writeScratchpad(scratchpad)),
+    ({ context_id, scratchpad }) =>
+      safeObject(() => api.writeScratchpad(context_id, scratchpad)),
   );
   registerWorkspaceTools(server, api);
 }
