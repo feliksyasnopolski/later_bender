@@ -609,22 +609,12 @@ async function workspaceOperation(
         });
       }
       case "cancel_workspace_execution": {
-        let ref = input.ref as string | undefined;
-        if (!ref) {
-          const current: any = await api.getWorkContext(input.context_id);
-          if (!current?.context && input.context_id === undefined)
-            throw new ApiError(
-              "context_selection_required",
-              409,
-              "No work context is selected for this conversation; call work_context_start or work_context_select first.",
-            );
-          ref = current?.context?.execution?.foreground;
-        }
+        const ref = input.ref as string | undefined;
         if (!ref)
           throw new ApiError(
             "validation_failed",
             422,
-            "No execution ref or foreground execution selected",
+            "An explicit execution ref is required for cancellation; implicit foreground cancellation is disabled.",
           );
         return api.workspaceExecutionActionByRef(ref, "cancel");
       }
@@ -693,9 +683,6 @@ const overwrite = {
   idempotentHint: false,
   openWorldHint: false,
 };
-const workspaceFailure =
-  "Expected failures use stable error codes, including context_selection_required when no ChatGPT conversation context is bound, workspace_not_found, workspace_not_ready, workspace_unavailable, capability_unavailable, workspace_quota_exceeded, target_not_found, executor_unsupported, file_not_found, path_invalid, path_not_found, path_exists, path_not_file, not_text, execution_not_found, execution_not_running, invalid_range, invalid_cursor, and invalid_invocation.";
-
 export const workspaceToolNames = [
   "get_workspace_capabilities",
   "list_workspace_targets",
@@ -726,7 +713,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "get_workspace_capabilities",
     {
-      description: `Discover the environments, architectures, operating system, shell, resource limits, and useful execution capabilities available for a Workspace. Capability maps include current keys such as internet, gpu, and nested_virtualization while allowing new capability names; capability_definitions explains every advertised capability for model use. Identifiers are open strings and no infrastructure implementation details are exposed. ${workspaceFailure}`,
+      description:
+        "Discover the environments, architectures, operating system, shell, resource limits, and useful execution capabilities available for a Workspace. Capability maps include current keys such as internet, gpu, and nested_virtualization while allowing new capability names; capability_definitions explains every advertised capability for model use. Identifiers are open strings and no infrastructure implementation details are exposed. This read-only discovery call does not require a selected work context.",
       inputSchema: {},
       outputSchema: {
         default_environment: z.string(),
@@ -742,7 +730,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "list_workspace_targets",
     {
-      description: `List the logical execution targets available for Workspace placement. Results expose only compact effective runtime facts useful to the model; provider connection, session, journal, and container identities are omitted. ${workspaceFailure}`,
+      description:
+        "List the logical execution targets available for Workspace placement. Results expose only compact effective runtime facts useful to the model; provider connection, session, journal, and container identities are omitted. This read-only discovery call does not require a selected work context.",
       inputSchema: {},
       outputSchema: { targets: z.array(workspaceTarget) },
       annotations: readOnly,
@@ -753,7 +742,7 @@ export function registerWorkspaceTools(
   server.registerTool(
     "create_workspace",
     {
-      description: `Create a transient Workspace using optional minimum resource requirements and capability requirements. Every required capability must resolve true for the selected offering; otherwise return capability_unavailable. An empty object requests the normal useful default; requirements are minimums, not exact operator configuration, and are never silently substituted. ${workspaceFailure}`,
+      description: `Create a transient Workspace using optional minimum resource requirements and capability requirements. Every required capability must resolve true for the selected offering; otherwise the request fails with capability_unavailable. An empty object requests the normal useful default; requirements are minimums, not exact operator configuration, and are never silently substituted. Target selection, executor support, or credential failures may return target_not_found, workspace_unavailable, executor_unsupported, credential_not_found, credential_conflict, or credential_injection_failed.`,
       inputSchema: {
         label: z.string().optional(),
         resource_path: z.string().optional(),
@@ -777,7 +766,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "list_workspaces",
     {
-      description: `List the authenticated user's surviving transient Workspaces after a chat or connector refresh. Results are compact summaries and pagination uses an opaque cursor. ${workspaceFailure}`,
+      description:
+        "List the authenticated user's surviving transient Workspaces after a chat or connector refresh. Results are compact summaries and pagination uses an opaque cursor. This operation does not depend on the conversation's selected foreground execution.",
       inputSchema: {
         state: workspaceState.optional(),
         limit: z.number().int().positive().max(100).optional(),
@@ -794,7 +784,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "get_workspace",
     {
-      description: `Fetch the full resolved projection of one Workspace by its opaque WS- reference. Destroyed or expired Workspaces resolve as not found. ${workspaceFailure}`,
+      description:
+        "Fetch the full resolved projection of one Workspace by its opaque WS- reference. An unknown, expired, or inaccessible Workspace returns not_found.",
       inputSchema: { ref: opaqueRef },
       outputSchema: { workspace },
       annotations: readOnly,
@@ -804,7 +795,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "destroy_workspace",
     {
-      description: `Destroy the entire transient Workspace, including its executions, filesystem, and transcript. The operation itself expresses destructive intent; there is no force option. ${workspaceFailure}`,
+      description:
+        "Destroy the entire transient Workspace, including its executions, filesystem, and transcript. The operation itself expresses destructive intent; there is no force option. An unknown or inaccessible Workspace returns not_found.",
       inputSchema: { ref: opaqueRef },
       outputSchema: {
         ref: opaqueRef,
@@ -819,7 +811,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "put_file_in_workspace",
     {
-      description: `Copy exact canonical Later Bender File bytes into a Workspace at a Workspace-relative path. If path is omitted, the canonical filename is used at /workspace root. Paths cannot escape /workspace and the import is recorded in the transcript. ${workspaceFailure}`,
+      description:
+        "Copy exact canonical Later Bender File bytes into a Workspace at a Workspace-relative path. If path is omitted, the canonical filename is used at /workspace root. Paths cannot escape /workspace and the import is recorded in the transcript. Unknown Workspace or File references return not_found; invalid or conflicting destination paths return path-specific errors.",
       inputSchema: {
         workspace: opaqueRef,
         file: opaqueRef,
@@ -840,7 +833,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "read_workspace_file",
     {
-      description: `Read a bounded text-ish generated file using Workspace-relative paths and an optional line locator or continuation cursor. Locator and cursor are mutually exclusive. Without either, return an initial chunk and continuation metadata. This is not a generic binary transport; non-text content returns not_text. ${workspaceFailure}`,
+      description:
+        "Read a bounded text-ish generated file using Workspace-relative paths and an optional line locator or continuation cursor. Locator and cursor are mutually exclusive. Without either, return an initial chunk and continuation metadata. This is not a generic binary transport; non-text content returns not_text. Missing paths return path_not_found or path_not_file; invalid ranges and cursors return invalid_range and invalid_cursor, respectively.",
       inputSchema: readWorkspaceFileInput,
       outputSchema: {
         workspace: opaqueRef,
@@ -864,7 +858,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "promote_workspace_file",
     {
-      description: `Promote one Workspace-relative artifact into a normal immutable canonical Later Bender File. Promotion is explicit and becomes a transcript event. ${workspaceFailure}`,
+      description:
+        "Promote one Workspace-relative artifact into a normal immutable canonical Later Bender File. Promotion is explicit and becomes a transcript event. Unknown Workspaces return not_found; missing artifacts or invalid promotion metadata return the corresponding path or validation error.",
       inputSchema: {
         workspace: opaqueRef,
         path: z.string(),
@@ -881,7 +876,7 @@ export function registerWorkspaceTools(
   server.registerTool(
     "exec_workspace",
     {
-      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is a general-purpose execution surface for engineering work, including normal tooling, filesystem work, package installation, and outbound internet access when available. The selected Workspace target and environment are authoritative. Ordinary commands wait up to 8 seconds by default and return the latest state/output; set wait_seconds to 0 for immediate return or up to 20 seconds to wait longer. For a persistent terminal such as a Python REPL, use pty=true; use interactive=true for a persistent stdin pipe when a TTY is not needed. Persistent sessions become the foreground execution for this conversation. Continue interacting with that process using send_workspace_execution_input and read_workspace_execution_output without passing ref or context_id; the selected conversation context resolves the foreground process. Use session_select only when deliberately switching to another existing execution. Output previews automatically return readable UTF-8 text or base64 for binary data. secret_env values are injected but never recorded; only names are retained. ${workspaceFailure}`,
+      description: `Execute one command in a Workspace using exactly one invocation form: shell command run with /bin/bash -lc, or direct argv without shell interpretation. Workspace is a general-purpose execution surface for engineering work, including normal tooling, filesystem work, package installation, and outbound internet access when available. The selected Workspace target and environment are authoritative. Ordinary commands wait up to 8 seconds by default and return the latest state/output; set wait_seconds to 0 for immediate return or up to 20 seconds to wait longer. For a persistent terminal such as a Python REPL, use pty=true; use interactive=true for a persistent stdin pipe when a TTY is not needed. Persistent sessions become the foreground execution for this conversation. Continue interacting with that process using send_workspace_execution_input and read_workspace_execution_output without passing ref or context_id; the selected conversation context resolves the foreground process. Use session_select only when deliberately switching to another existing execution. Output previews automatically return readable UTF-8 text or base64 for binary data. secret_env values are injected but never recorded; only names are retained. A workspace that is not ready or a remote target that is offline returns workspace_not_ready or workspace_unavailable; an invalid command specification returns invalid_invocation. Starting a persistent process without a resolvable work context returns context_selection_required.`,
       inputSchema: execInput,
       outputSchema: { execution },
       annotations: execute,
@@ -891,7 +886,7 @@ export function registerWorkspaceTools(
   server.registerTool(
     "get_workspace_execution",
     {
-      description: `Fetch the current full projection of an execution by its opaque WSE- reference. The execution ref is unambiguous, and authorization remains authenticated-user scoped. ${workspaceFailure}`,
+      description: `Fetch the current full projection of an execution by its opaque WSE- reference. Omit ref to inspect the foreground execution selected for this conversation; pass ref to inspect a specific execution regardless of foreground selection. Pass context_id only to override the conversation's selected work context. If ref is omitted, a selected work context is required and that context must have a foreground execution. Errors include context_selection_required when no context can be resolved, validation_failed when no foreground execution is selected, and not_found for an unknown execution ref.`,
       inputSchema: {
         context_id: z.number().int().positive().optional(),
         ref: opaqueRef.optional(),
@@ -904,7 +899,7 @@ export function registerWorkspaceTools(
   server.registerTool(
     "read_workspace_execution_output",
     {
-      description: `Read the next chunk of retained stdout or stderr. For the normal interactive-session workflow, omit ref to read from the foreground execution selected for this conversation; omit context_id too unless you need an explicit context override. On the first read, omit cursor to start at byte 0; on every subsequent read, pass the previous response's next_cursor to avoid replaying output. Use format=auto (the default): valid UTF-8 text is returned as text and binary/non-text data as base64. Override with format=text only when you explicitly want text decoding, or format=base64 when you need byte-preserving output. Reads wait up to 1 second by default for a short output burst to settle; use wait_seconds=0 for immediate polling or up to 5 seconds for a longer wait. Each call returns a bounded chunk. A cursor at the end of a running stream is resumable; next_cursor becomes null only after terminal stream end is consumed. ${workspaceFailure}`,
+      description: `Read the next chunk of retained stdout or stderr. For the normal interactive-session workflow, omit ref to read from the foreground execution selected for this conversation; omit context_id too unless you need an explicit context override. On the first read, omit cursor to start at byte 0; on every subsequent read, pass the previous response's next_cursor to avoid replaying output. Use format=auto (the default): valid UTF-8 text is returned as text and binary/non-text data as base64. Override with format=text only when you explicitly want text decoding, or format=base64 when you need byte-preserving output. Reads wait up to 1 second by default for a short output burst to settle; use wait_seconds=0 for immediate polling or up to 5 seconds for a longer wait. Each call returns a bounded chunk. A cursor at the end of a running stream is resumable; next_cursor becomes null only after terminal stream end is consumed. An omitted ref requires a selected work context with a foreground execution; errors include context_selection_required, validation_failed, not_found, invalid_range, and invalid_cursor for an invalid cursor position.`,
       inputSchema: {
         context_id: z.number().int().positive().optional(),
         ref: opaqueRef.optional(),
@@ -930,11 +925,9 @@ export function registerWorkspaceTools(
   server.registerTool(
     "cancel_workspace_execution",
     {
-      description: `Terminate the whole process group belonging to an execution. Cancellation is idempotent: an already-terminal execution returns its existing terminal projection. ${workspaceFailure}`,
-      inputSchema: {
-        context_id: z.number().int().positive().optional(),
-        ref: opaqueRef.optional(),
-      },
+      description:
+        "Cancel the execution identified by an explicit WSE- ref, terminating its whole process group. An explicit ref is required; this operation deliberately does not resolve or cancel the foreground execution implicitly. Cancellation is idempotent: an already-terminal execution returns its existing terminal projection. An unknown execution returns not_found.",
+      inputSchema: { ref: opaqueRef },
       outputSchema: { execution },
       annotations: destroy,
     },
@@ -944,7 +937,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "read_workspace_transcript",
     {
-      description: `Read the ordered transient Workspace activity ledger, including creation, File imports, executions, and promotions. Sequence numbers are monotonic per Workspace; use either sequence bounds or a continuation cursor, not both. The transcript also provides execution discovery after chat migration. ${workspaceFailure}`,
+      description:
+        "Read the ordered transient Workspace activity ledger, including creation, File imports, executions, and promotions. Sequence numbers are monotonic per Workspace; use either sequence bounds or a continuation cursor, not both. The transcript also provides execution discovery after chat migration. An unknown Workspace returns not_found.",
       inputSchema: readWorkspaceTranscriptInput,
       outputSchema: {
         workspace: opaqueRef,
@@ -958,7 +952,8 @@ export function registerWorkspaceTools(
   server.registerTool(
     "promote_workspace_transcript",
     {
-      description: `Promote a selected Workspace transcript range, or the transcript through the current point when no range is supplied, into a plain UTF-8 Markdown canonical Later Bender File. It includes complete retained stdout/stderr and never secret environment values. ${workspaceFailure}`,
+      description:
+        "Promote a selected Workspace transcript range, or the transcript through the current point when no range is supplied, into a plain UTF-8 Markdown canonical Later Bender File. It includes complete retained stdout/stderr and never secret environment values. An unknown Workspace returns not_found; a missing or invalid project returns not_found or validation_failed.",
       inputSchema: {
         workspace: opaqueRef,
         project: z.string(),

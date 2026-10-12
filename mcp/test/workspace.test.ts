@@ -26,7 +26,6 @@ test("conversation-scoped execution tools allow omitted context_id", () => {
     "send_workspace_execution_input",
     "get_workspace_execution",
     "read_workspace_execution_output",
-    "cancel_workspace_execution",
   ]) {
     assert.equal(registered[name].inputSchema.shape.context_id.isOptional(), true, `${name}.context_id`);
   }
@@ -102,7 +101,17 @@ test("boundary operations expose stable result contracts and scaffold availabili
   assert.equal(registered.read_workspace_execution_output.inputSchema.shape.stream.safeParse("stdin").success, false);
   assert.equal(registered.read_workspace_execution_output.inputSchema.shape.format.safeParse(undefined).data, "auto");
   assert.match(registered.read_workspace_execution_output.description, /omit ref.*foreground execution/i);
+  assert.match(registered.get_workspace_execution.description, /omit ref.*foreground execution/i);
   assert.match(registered.read_workspace_execution_output.description, /format=auto.*default/i);
+  assert.equal(registered.cancel_workspace_execution.inputSchema.shape.ref.isOptional(), false);
+  assert.equal(registered.cancel_workspace_execution.inputSchema.shape.context_id, undefined);
+  assert.match(registered.cancel_workspace_execution.description, /explicit ref is required/i);
+  assert.match(registered.cancel_workspace_execution.description, /does not resolve or cancel the foreground execution implicitly/i);
+  assert.doesNotMatch(registered.get_workspace_capabilities.description, /context_selection_required|workspace_not_ready|invalid_cursor/i);
+  assert.doesNotMatch(registered.list_workspace_targets.description, /context_selection_required|workspace_not_ready|invalid_cursor/i);
+  for (const tool of Object.values(registered)) {
+    assert.doesNotMatch(tool.description, /Expected failures use stable error codes, including/i);
+  }
   assert.match(registered.send_workspace_execution_input.description, /omit ref and context_id/i);
   assert.match(registered.exec_workspace.description, /persistent terminal.*Python REPL/i);
   assert.match(registered.exec_workspace.description, /without passing ref or context_id/i);
@@ -117,6 +126,40 @@ test("boundary operations expose stable result contracts and scaffold availabili
   const result = await registered.exec_workspace.handler({ workspace: "WS-1", command: "true" });
   assert.equal(result.isError, true);
   assert.deepEqual(JSON.parse(result.content[0].text), { error: { code: "workspace_unavailable", message: "Workspace execution is not available yet" } });
+});
+
+test("execution status resolves foreground but cancellation requires an explicit ref", async () => {
+  const registered = tools();
+  let lookedUpRef: string | undefined;
+  let cancelledRef: string | undefined;
+  let contextLookups = 0;
+  const api = {
+    getWorkContext: async () => {
+      contextLookups += 1;
+      return { context: { execution: { foreground: "WSE-foreground" } } };
+    },
+    getWorkspaceExecutionByRef: async (ref: string) => {
+      lookedUpRef = ref;
+      return { ref, state: "running" };
+    },
+    workspaceExecutionActionByRef: async (ref: string, action: string) => {
+      assert.equal(action, "cancel");
+      cancelledRef = ref;
+      return { ref, state: "cancelled" };
+    },
+  } as unknown as LaterBenderApi;
+  const server = new McpServer({ name: "test", version: "1" });
+  registerWorkspaceTools(server, api);
+  const status = await (server as any)._registeredTools.get_workspace_execution.handler({});
+  assert.equal(lookedUpRef, "WSE-foreground");
+  assert.equal(status.structuredContent.execution.ref, "WSE-foreground");
+  const contextsBeforeCancel = contextLookups;
+  const cancelled = await (server as any)._registeredTools.cancel_workspace_execution.handler({ ref: "WSE-explicit" });
+  assert.equal(cancelledRef, "WSE-explicit");
+  assert.equal(cancelled.structuredContent.execution.ref, "WSE-explicit");
+  assert.equal(contextLookups, contextsBeforeCancel, "cancellation must not consult the foreground context");
+  assert.equal(registered.cancel_workspace_execution.inputSchema.safeParse({}).success, false);
+  assert.equal(registered.cancel_workspace_execution.inputSchema.safeParse({ ref: "WSE-explicit" }).success, true);
 });
 
 test("Workspace input schemas are object-shaped in the actual MCP tools/list response", async () => {
