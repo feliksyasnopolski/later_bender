@@ -565,7 +565,7 @@ module Api
 
     def transcript_execution_payload(result, execution)
       result = result.fetch("execution", result)
-      { "execution" => execution.ref, "invocation" => result.fetch("invocation", execution.invocation), "cwd" => result.fetch("cwd", execution.cwd), "secret_env_names" => result.fetch("secret_env_names", execution.secret_env_names), "started_at" => result.fetch("started_at", execution.started_at), "finished_at" => result["finished_at"] || execution.finished_at, "requested_timeout_seconds" => timeout_seconds_value(result["requested_timeout_seconds"] || execution.requested_timeout_seconds), "state" => result.fetch("state", execution.state), "failure" => execution.failure_projection, "exit_code" => result["exit_code"] || execution.exit_code, "terminating_signal" => result["terminating_signal"] || execution.terminating_signal, "stdout_preview" => result.fetch("stdout", stream_projection(execution, :stdout)), "stderr_preview" => result.fetch("stderr", stream_projection(execution, :stderr)) }
+      { "execution" => execution.ref, "invocation" => result.fetch("invocation", execution.invocation), "cwd" => result.fetch("cwd", execution.cwd), "secret_env_names" => result.fetch("secret_env_names", execution.secret_env_names), "started_at" => result.fetch("started_at", execution.started_at), "finished_at" => result["finished_at"] || execution.finished_at, "requested_timeout_seconds" => timeout_seconds_value(result["requested_timeout_seconds"] || execution.requested_timeout_seconds), "state" => result.fetch("state", execution.state), "failure" => execution.failure_projection, "exit_code" => result["exit_code"] || execution.exit_code, "terminating_signal" => result["terminating_signal"] || execution.terminating_signal, "stdout_preview" => result.fetch("stdout", stream_projection(execution, :stdout)).except("next_cursor", :next_cursor), "stderr_preview" => result.fetch("stderr", stream_projection(execution, :stderr)).except("next_cursor", :next_cursor) }
     end
 
     def summary(workspace) = full(workspace).slice(:ref, :label, :state, :environment, :architecture, :created_at, :last_activity_at, :expires_at, :failure)
@@ -579,12 +579,12 @@ module Api
     def stream_projection(execution, stream)
       if execution.workspace.remote_workspace_placement.present?
         result = remote_output(execution, "stream" => stream.to_s, "format" => "auto")
-        return { format: result.fetch("format"), data: result.fetch("data"), total_byte_size: result.fetch("total_byte_size"), inline_complete: result.fetch("stream_complete") }
+        return { format: result.fetch("format"), data: result.fetch("data"), total_byte_size: result.fetch("total_byte_size"), inline_complete: result.fetch("stream_complete"), next_cursor: result.fetch("next_cursor") }
       end
       result = runner.request(:post, "/executions/#{execution.ref}/output", "stream" => stream.to_s, "format" => "auto")
-      { format: result.fetch("format"), data: result.fetch("data"), total_byte_size: result.fetch("total_byte_size", result.fetch("chunk_byte_size", 0)), inline_complete: result.fetch("stream_complete", false) }
+      { format: result.fetch("format"), data: result.fetch("data"), total_byte_size: result.fetch("total_byte_size", result.fetch("chunk_byte_size", 0)), inline_complete: result.fetch("stream_complete", false), next_cursor: result.fetch("next_cursor") }
     rescue WorkspaceRunnerClient::Unavailable
-      { format: "base64", data: "", total_byte_size: 0, inline_complete: false }
+      { format: "base64", data: "", total_byte_size: 0, inline_complete: false, next_cursor: "0" }
     end
     def render_runner_error(error)
       code = error.respond_to?(:code) && error.code.present? ? error.code : "workspace_unavailable"

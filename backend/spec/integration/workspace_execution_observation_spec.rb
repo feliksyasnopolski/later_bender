@@ -12,17 +12,29 @@ RSpec.describe "Workspace execution observation", type: :request do
     }
   end
 
-  def stub_runner(terminal_state: "exited")
-    allow_any_instance_of(WorkspaceRunnerClient).to receive(:request) do |_, method, path, _payload = nil|
+  def stub_runner(terminal_state: "exited", output_by_stream: nil)
+    allow_any_instance_of(WorkspaceRunnerClient).to receive(:request) do |_, method, path, payload = nil|
       case [ method, path ]
       when [ :post, "/workspaces" ] then @runner_workspace
       when [ :post, "/workspaces/WSR-test/executions" ] then execution_result(state: "running")
       when [ :get, "/executions/WSE-test" ] then execution_result(state: terminal_state)
-      when [ :post, "/executions/WSE-test/output" ] then { "format" => "text", "data" => path ? "out" : "", "chunk_byte_size" => 3, "total_byte_size" => 3, "stream_complete" => true }
+      when [ :post, "/executions/WSE-test/output" ]
+        output_by_stream ? output_by_stream.fetch(payload.fetch("stream")).call(payload) : { "format" => "text", "data" => "out", "chunk_byte_size" => 3, "total_byte_size" => 3, "next_cursor" => nil, "stream_complete" => true }
       when [ :post, "/executions/WSE-test/input" ] then { "execution" => "WSE-test", "bytes_written" => 2 }
       else raise "unexpected runner request #{method} #{path}"
       end
     end
+  end
+
+
+  def cursor_output(bytes, payload)
+    offset = payload["cursor"].present? ? Integer(payload.fetch("cursor")) : 0
+    chunk = bytes.byteslice(offset, 16 * 1024) || "".b
+    requested_format = payload["format"] || "auto"
+    format = requested_format == "auto" ? (chunk.dup.force_encoding(Encoding::UTF_8).valid_encoding? ? "text" : "base64") : requested_format
+    complete = offset + chunk.bytesize >= bytes.bytesize
+    data = format == "base64" ? Base64.strict_encode64(chunk) : chunk.force_encoding(Encoding::UTF_8).to_s
+    { "format" => format, "data" => data, "chunk_byte_size" => chunk.bytesize, "total_byte_size" => bytes.bytesize, "next_cursor" => complete ? nil : (offset + chunk.bytesize).to_s, "stream_complete" => complete }
   end
 
   def execution_result(state:)
@@ -42,6 +54,44 @@ RSpec.describe "Workspace execution observation", type: :request do
     assert_equal "out", json_body.dig("stdout", "data")
     assert_equal Workspace.last.ref, json_body.fetch("workspace")
     assert_match(/\AWS-\d+\z/, Workspace.last.ref)
+  end
+
+
+  it "continues initial text and binary execution previews from their returned cursors without duplication" do
+    stdout_bytes = ("stdout-chunk\n" * 2_000).b
+    stderr_bytes = ("\x00\xff\x10".b * 6_000)
+    output_by_stream = {
+      "stdout" => ->(payload) { cursor_output(stdout_bytes, payload) },
+      "stderr" => ->(payload) { cursor_output(stderr_bytes, payload) }
+    }
+    stub_runner(output_by_stream:)
+
+    post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
+    workspace_ref = json_body.fetch("ref")
+    post "/api/workspaces/#{workspace_ref}/executions", params: { command: "emit-large-output" }.to_json, headers: json_headers(@raw_token)
+    assert_response :created
+    preview = json_body
+
+    expect(preview.dig("stdout", "format")).to eq("text")
+    expect(preview.dig("stdout", "data").bytesize).to eq(16 * 1024)
+    expect(preview.dig("stdout", "inline_complete")).to be(false)
+    expect(preview.dig("stdout", "next_cursor")).to eq((16 * 1024).to_s)
+    expect(preview.dig("stderr", "format")).to eq("base64")
+    expect(preview.dig("stderr", "next_cursor")).to eq((16 * 1024).to_s)
+
+    { "stdout" => stdout_bytes, "stderr" => stderr_bytes }.each do |stream, original|
+      first = preview.fetch(stream)
+      collected = first.fetch("format") == "base64" ? Base64.strict_decode64(first.fetch("data")) : first.fetch("data").b
+      cursor = first.fetch("next_cursor")
+      while cursor
+        post "/api/workspace-executions/WSE-test/output", params: { stream:, format: "auto", cursor: }.to_json, headers: json_headers(@raw_token)
+        assert_response :success
+        chunk = json_body
+        collected << (chunk.fetch("format") == "base64" ? Base64.strict_decode64(chunk.fetch("data")) : chunk.fetch("data").b)
+        cursor = chunk.fetch("next_cursor")
+      end
+      expect(collected).to eq(original), "#{stream} preview and continuation must reconstruct the exact byte stream"
+    end
   end
 
   it "bounds native execution output chunks and advances byte cursors" do

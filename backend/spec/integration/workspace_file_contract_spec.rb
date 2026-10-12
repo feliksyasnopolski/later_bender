@@ -73,7 +73,7 @@ RSpec.describe "Workspace file and transcript contracts", type: :request do
 
   def output_result(stream)
     data = stream == "stdout" ? "stdout-data" : "stderr-data"
-    { "format" => "base64", "data" => Base64.strict_encode64(data), "chunk_byte_size" => data.bytesize, "total_byte_size" => data.bytesize, "stream_complete" => true }
+    { "format" => "base64", "data" => Base64.strict_encode64(data), "chunk_byte_size" => data.bytesize, "total_byte_size" => data.bytesize, "next_cursor" => nil, "stream_complete" => true }
   end
 
   def file_read_result(payload)

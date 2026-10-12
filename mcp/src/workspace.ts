@@ -125,11 +125,14 @@ const invocation = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("shell"), command: z.string() }),
   z.object({ kind: z.literal("argv"), argv: z.array(z.string()).min(1) }),
 ]);
-const streamProjection = z.object({
+const streamPreviewProjection = z.object({
   format: z.enum(["text", "base64"]),
   data: z.string(),
   total_byte_size: bytes,
   inline_complete: z.boolean(),
+});
+const streamProjection = streamPreviewProjection.extend({
+  next_cursor: cursor,
 });
 const execution = z.object({
   ref: opaqueRef,
@@ -272,8 +275,8 @@ const transcriptEvent = z.discriminatedUnion("kind", [
     failure,
     exit_code: z.number().int().nullable(),
     terminating_signal: z.string().nullable(),
-    stdout_preview: streamProjection,
-    stderr_preview: streamProjection,
+    stdout_preview: streamPreviewProjection,
+    stderr_preview: streamPreviewProjection,
   }),
   z.object({
     kind: z.literal("file_promoted"),

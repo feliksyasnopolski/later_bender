@@ -180,6 +180,10 @@ test("Workspace input schemas are object-shaped in the actual MCP tools/list res
   assert.deepEqual(Object.keys(byName.read_workspace_file.inputSchema.properties ?? {}).sort(), ["cursor", "locator", "path", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_transcript.inputSchema.properties ?? {}).sort(), ["cursor", "from_sequence", "limit", "to_sequence", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_execution_output.inputSchema.properties ?? {}).sort(), ["context_id", "cursor", "format", "ref", "stream", "wait_seconds"].sort());
+  const stdoutSchema = (byName.exec_workspace.outputSchema as any).properties.execution.properties.stdout.properties;
+  const stderrSchema = (byName.exec_workspace.outputSchema as any).properties.execution.properties.stderr.properties;
+  assert.ok(stdoutSchema.next_cursor, "execution stdout preview must expose next_cursor");
+  assert.ok(stderrSchema.next_cursor, "execution stderr preview must expose next_cursor");
   await client.close();
   await server.close();
 });
@@ -206,7 +210,7 @@ test("read_workspace_file returns structured content through the real tools/call
 
 test("exec_workspace publishes terminal and running projections through tools/call", async () => {
   const server = new McpServer({ name: "test", version: "1" });
-  const execution = (state: string) => ({ ref: "WSE-1", workspace: "WS-1", sequence: 1, state, invocation: { kind: "shell", command: "printf out; printf err >&2" }, cwd: "/workspace", env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: state === "running" ? null : "2026-01-01T00:00:01Z", exit_code: state === "exited" ? 0 : null, terminating_signal: null, requested_timeout_seconds: state === "timed_out" ? 1 : null, stdout: { format: "text", data: state === "running" ? "" : "out", total_byte_size: state === "running" ? 0 : 3, inline_complete: state !== "running" }, stderr: { format: "text", data: state === "running" ? "" : "err", total_byte_size: state === "running" ? 0 : 3, inline_complete: state !== "running" } });
+  const execution = (state: string) => ({ ref: "WSE-1", workspace: "WS-1", sequence: 1, state, invocation: { kind: "shell", command: "printf out; printf err >&2" }, cwd: "/workspace", env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: state === "running" ? null : "2026-01-01T00:00:01Z", exit_code: state === "exited" ? 0 : null, terminating_signal: null, requested_timeout_seconds: state === "timed_out" ? 1 : null, stdout: { format: "text", data: state === "running" ? "" : "out", total_byte_size: state === "running" ? 0 : 3, inline_complete: state !== "running", next_cursor: state === "running" ? "0" : null }, stderr: { format: "text", data: state === "running" ? "" : "err", total_byte_size: state === "running" ? 0 : 3, inline_complete: state !== "running", next_cursor: state === "running" ? "0" : null } });
   const api = { executeWorkspace: async (input: Record<string, unknown>) => execution(input.timeout_seconds ? "timed_out" : input.command === "long" ? "running" : "exited") } as unknown as LaterBenderApi;
   registerWorkspaceTools(server, api);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -218,7 +222,11 @@ test("exec_workspace publishes terminal and running projections through tools/ca
   assert.equal((terminal.structuredContent as any).execution.state, "exited");
   assert.equal((terminal.structuredContent as any).execution.stdout.data, "out");
   assert.equal((terminal.structuredContent as any).execution.stderr.data, "err");
+  assert.equal((terminal.structuredContent as any).execution.stdout.next_cursor, null);
+  assert.equal((terminal.structuredContent as any).execution.stderr.next_cursor, null);
   assert.equal((running.structuredContent as any).execution.state, "running");
+  assert.equal((running.structuredContent as any).execution.stdout.next_cursor, "0");
+  assert.equal((running.structuredContent as any).execution.stderr.next_cursor, "0");
   const timeout = await client.callTool({ name: "exec_workspace", arguments: { context_id: 42, workspace: "WS-1", command: "sleep 2", timeout_seconds: 1 } });
   assert.equal((timeout.structuredContent as any).execution.state, "timed_out");
   assert.equal((timeout.structuredContent as any).execution.requested_timeout_seconds, 1);
@@ -231,8 +239,8 @@ test("exec_workspace waits for ordinary commands and returns the terminal projec
   const base = { ref: "WSE-wait", workspace: "WS-1", sequence: 1, invocation: { kind: "shell", command: "short-delay" }, cwd: "'/Users/felix/rails/later_bender'", env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", terminating_signal: null, requested_timeout_seconds: null, failure: null };
   let polls = 0;
   const api = {
-    executeWorkspace: async () => ({ ...base, state: "running", finished_at: null, exit_code: null, stdout: { format: "text", data: "partial", total_byte_size: 7, inline_complete: false }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: false } }),
-    getWorkspaceExecutionByRef: async (ref: string) => { polls++; assert.equal(ref, "WSE-wait"); return { ...base, state: "exited", finished_at: "2026-01-01T00:00:01Z", exit_code: 0, stdout: { format: "text", data: "complete", total_byte_size: 8, inline_complete: true }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: true } }; }
+    executeWorkspace: async () => ({ ...base, state: "running", finished_at: null, exit_code: null, stdout: { format: "text", data: "partial", total_byte_size: 7, inline_complete: false, next_cursor: "7" }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: false, next_cursor: "0" } }),
+    getWorkspaceExecutionByRef: async (ref: string) => { polls++; assert.equal(ref, "WSE-wait"); return { ...base, state: "exited", finished_at: "2026-01-01T00:00:01Z", exit_code: 0, stdout: { format: "text", data: "complete", total_byte_size: 8, inline_complete: true, next_cursor: null }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: true, next_cursor: null } }; }
   } as unknown as LaterBenderApi;
   registerWorkspaceTools(server, api);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -249,7 +257,7 @@ test("exec_workspace waits for ordinary commands and returns the terminal projec
 
 test("exec_workspace preserves invalid UTF-8 output as base64 through tools/call", async () => {
   const server = new McpServer({ name: "test", version: "1" });
-  const api = { executeWorkspace: async () => ({ ref: "WSE-binary", workspace: "WS-1", sequence: 1, state: "exited", invocation: { kind: "shell", command: "printf binary" }, cwd: "/workspace", env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: "2026-01-01T00:00:01Z", exit_code: 0, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "base64", data: "/0FCQw==", total_byte_size: 4, inline_complete: true }, stderr: { format: "base64", data: "", total_byte_size: 0, inline_complete: true } }) } as unknown as LaterBenderApi;
+  const api = { executeWorkspace: async () => ({ ref: "WSE-binary", workspace: "WS-1", sequence: 1, state: "exited", invocation: { kind: "shell", command: "printf binary" }, cwd: "/workspace", env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: "2026-01-01T00:00:01Z", exit_code: 0, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "base64", data: "/0FCQw==", total_byte_size: 4, inline_complete: true, next_cursor: null }, stderr: { format: "base64", data: "", total_byte_size: 0, inline_complete: true, next_cursor: null } }) } as unknown as LaterBenderApi;
   registerWorkspaceTools(server, api);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test-client", version: "1" });
@@ -352,7 +360,7 @@ test("stateful execution selection and PTY input work through MCP Client tools/c
     createWorkspace: async (payload: any) => { calls.push(["createWorkspace", payload]); return { ref: "WS-9" }; },
     selectExecutionContext: async (payload: any) => { calls.push(["selectExecutionContext", payload]); context = { context: { execution: { workspace: payload.workspace, cwd: payload.cwd, foreground: null } }, workspace: { ref: payload.workspace, cwd: payload.cwd } }; return context; },
     getWorkContext: async () => context,
-    executeWorkspace: async (payload: any) => { calls.push(["executeWorkspace", payload]); if (payload.argv?.[0] === "test" && payload.argv?.[2] === "/definitely/missing") return { ref: "WSE-probe-failed", state: "exited", exit_code: 1 }; if (payload.argv?.[0] === "test") return { ref: "WSE-probe", state: "exited", exit_code: 0 }; return { ref: "WSE-9", state: "running", workspace: payload.workspace, sequence: 1, invocation: { kind: "shell", command: payload.command }, cwd: payload.cwd, env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: null, exit_code: null, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "text", data: "", total_byte_size: 0, inline_complete: false }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: false } }; },
+    executeWorkspace: async (payload: any) => { calls.push(["executeWorkspace", payload]); if (payload.argv?.[0] === "test" && payload.argv?.[2] === "/definitely/missing") return { ref: "WSE-probe-failed", state: "exited", exit_code: 1 }; if (payload.argv?.[0] === "test") return { ref: "WSE-probe", state: "exited", exit_code: 0 }; return { ref: "WSE-9", state: "running", workspace: payload.workspace, sequence: 1, invocation: { kind: "shell", command: payload.command }, cwd: payload.cwd, env: {}, secret_env_names: [], started_at: "2026-01-01T00:00:00Z", finished_at: null, exit_code: null, terminating_signal: null, requested_timeout_seconds: null, stdout: { format: "text", data: "", total_byte_size: 0, inline_complete: false, next_cursor: "0" }, stderr: { format: "text", data: "", total_byte_size: 0, inline_complete: false, next_cursor: "0" } }; },
     selectForegroundExecution: async (ref: string) => { calls.push(["selectForegroundExecution", ref]); context.context.execution.foreground = ref; return context; },
     sendWorkspaceExecutionInput: async (ref: string, data: string) => { calls.push(["sendWorkspaceExecutionInput", { ref, data }]); return { execution: ref, bytes_written: data.length }; },
     workspaceAction: async (ref: string, action: string, payload: any) => { calls.push(["workspaceAction", { ref, action, payload }]); return { events: [{ sequence: 4, kind: "execution", execution: "WSE-old", state: "running", workspace: ref }, { sequence: 5, kind: "file", ref: "F-1", workspace: ref }, { sequence: 6, kind: "execution", execution: "WSE-old", state: "exited", exit_code: 0, workspace: ref }, { sequence: 7, kind: "execution", execution: "WSE-current", state: "running", workspace: ref }] }; },
