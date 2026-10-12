@@ -3112,6 +3112,59 @@ paths:
       security:
       - bearerAuth: []
       parameters: []
+  "/api/files/by-ref/{ref}/publication":
+    post:
+      summary: api/files#publish
+      tags:
+      - Files
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: ref
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/FilePublishAck"
+        '401':
+          description: authentication required
+        '404':
+          description: owned resource not found
+        '422':
+          description: unsupported media type
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      summary: api/files#unpublish
+      tags:
+      - Files
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: ref
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/FileRefAck"
+        '401':
+          description: authentication required
+        '404':
+          description: owned resource not found
   "/api/files/by-ref/{ref}/read":
     get:
       summary: api/files#read
@@ -4280,6 +4333,21 @@ components:
         updated_at:
           type: string
           format: date-time
+    FilePublishAck:
+      type: object
+      required:
+      - ref
+      - url
+      - updated_at
+      properties:
+        ref:
+          type: string
+        url:
+          type: string
+          format: uri
+        updated_at:
+          type: string
+          format: date-time
     FileDeleteAck:
       type: object
       required:
@@ -4414,6 +4482,8 @@ components:
       - "$ref": "#/components/schemas/FileSummary"
       - type: object
         properties:
+          published:
+            type: boolean
           related_task_refs:
             type: array
             items:

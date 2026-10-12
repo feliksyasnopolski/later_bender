@@ -134,7 +134,7 @@ module Api
     def file_json(file)
       provenance = file.archive_source && { archive_ref: file.archive_source.ref, entry_path: file.archive_entry_path }
       provenance = (provenance || {}).merge(origin: file.origin) if file.origin.present?
-      file_list_json(file).merge(related_task_refs: file.tasks.order(:id).map(&:ref), related_note_ids: file.notes.order(:id).pluck(:id), representations: file.representations.where(status: "ready").order(:kind).map { |representation| { kind: representation.kind, media_type: representation.media_type, coordinate: representation.metadata["coordinate"] } }, provenance: provenance)
+      file_list_json(file).merge(related_task_refs: file.tasks.order(:id).map(&:ref), related_note_ids: file.notes.order(:id).pluck(:id), representations: file.representations.where(status: "ready").order(:kind).map { |representation| { kind: representation.kind, media_type: representation.media_type, coordinate: representation.metadata["coordinate"] } }, provenance: provenance, published: file.published?)
     end
 
     def citation_json(citation)

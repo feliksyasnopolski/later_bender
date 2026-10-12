@@ -14,6 +14,7 @@ class StoredFile < ApplicationRecord
 
   validates :number, presence: true, numericality: { only_integer: true }, uniqueness: { scope: :project_id }
   validates :filename, presence: true
+  validates :public_token, uniqueness: true, allow_nil: true
   validates :byte_size, presence: true, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
   validates :sha256, presence: true, format: { with: /\A\h{64}\z/ }
   validate :number_is_immutable, on: :update
@@ -38,6 +39,14 @@ class StoredFile < ApplicationRecord
 
   def archive?
     ArchiveReader.archive_filename?(filename, media_type)
+  end
+
+  def publishable?
+    media_type == "text/html"
+  end
+
+  def published?
+    public_token.present?
   end
 
   private

@@ -155,6 +155,30 @@ test("manage_files deletes independently, preserves order, and reports missing r
   assert.equal(tools.manage_files.outputSchema.safeParse(result.structuredContent).success, true);
 });
 
+test("manage_files publishes and unpublishes files", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api, calls } = apiFor([
+    { status: 200, body: { ref: "LB-F17", url: "https://storage.example/f/token", updated_at: "2026-10-13T09:00:00Z" } },
+    { status: 200, body: { ref: "LB-F17", updated_at: "2026-10-13T09:01:00Z" } },
+  ]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+  const result = await tools.manage_files.handler({ operations: [
+    { operation: "publish", ref: "LB-F17" },
+    { operation: "unpublish", ref: "LB-F17" },
+  ] });
+  assert.deepEqual(result.structuredContent.results, [
+    { operation: "publish", ref: "LB-F17", status: "succeeded", url: "https://storage.example/f/token" },
+    { operation: "unpublish", ref: "LB-F17", status: "succeeded" },
+  ]);
+  assert.deepEqual(calls.map((call) => [call.url, call.init.method]), [
+    ["https://example.test/laterbender/api/files/by-ref/LB-F17/publication", "POST"],
+    ["https://example.test/laterbender/api/files/by-ref/LB-F17/publication", "DELETE"],
+  ]);
+  assert.equal(tools.manage_files.inputSchema.shape.operations.safeParse([{ operation: "publish", ref: "LB-F17" }]).success, true);
+  assert.equal(tools.manage_files.inputSchema.shape.operations.safeParse([{ operation: "unpublish", ref: "LB-F17" }]).success, true);
+});
+
 test("create_file accepts exactly one attachment or URL source and preserves URL acknowledgements", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api, calls } = apiFor([{ status: 201, body: { ref: "LB-F20", updated_at: "2026-09-17T12:00:00Z", filename: "ignored.txt" } }]);

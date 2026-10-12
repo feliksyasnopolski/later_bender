@@ -418,6 +418,12 @@ export class LaterBenderApi {
       json("PATCH", payload),
     );
   }
+  publishFile(ref: string) {
+    return this.request<{ ref: string; url: string; updated_at: string }>(`/api/files/by-ref/${encodeURIComponent(ref)}/publication`, json("POST", {}));
+  }
+  unpublishFile(ref: string) {
+    return this.request<{ ref: string; updated_at: string }>(`/api/files/by-ref/${encodeURIComponent(ref)}/publication`, { method: "DELETE" });
+  }
   deleteFile(ref: string) {
     return this.request<unknown>(
       `/api/files/by-ref/${encodeURIComponent(ref)}`,

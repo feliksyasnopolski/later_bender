@@ -134,6 +134,7 @@ const fileSummary = z.object({
   sha256: z.string(),
   tags: z.array(z.string()),
   project: fileProject,
+  published: z.boolean(),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -177,13 +178,16 @@ const fileMutationOutput = {
 };
 const fileManagementOperation = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("delete"), ref: z.string().min(1) }),
+  z.object({ operation: z.literal("publish"), ref: z.string().min(1) }),
+  z.object({ operation: z.literal("unpublish"), ref: z.string().min(1) }),
 ]);
 const manageFilesOutput = {
   results: z.array(
     z.object({
-      operation: z.literal("delete"),
+      operation: z.enum(["delete", "publish", "unpublish"]),
       ref: z.string(),
       status: z.enum(["succeeded", "not_found"]),
+      url: z.string().url().optional(),
     }),
   ),
 };
@@ -1115,7 +1119,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "manage_files",
     {
       description:
-        "Manage canonical File lifecycle operations. Supports permanently deleting a File by its external ref; File content remains immutable.",
+        "Manage canonical File lifecycle operations. Publish or unpublish an existing HTML File for unauthenticated read-only sharing, or permanently delete it. File content remains immutable.",
       inputSchema: {
         operations: z.array(fileManagementOperation).min(1).max(100),
       },
@@ -1127,11 +1131,12 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
         Promise.all(
           operations.map(async (operation) => {
             try {
-              await api.deleteFile(operation.ref);
+              const result = operation.operation === "delete" ? await api.deleteFile(operation.ref) : operation.operation === "publish" ? await api.publishFile(operation.ref) : await api.unpublishFile(operation.ref);
               return {
                 operation: operation.operation,
                 ref: operation.ref,
                 status: "succeeded" as const,
+                ...(operation.operation === "publish" ? { url: (result as { url: string }).url } : {}),
               };
             } catch (error) {
               if (error instanceof ApiError && error.code === "not_found")

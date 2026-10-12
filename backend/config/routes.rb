@@ -4,6 +4,7 @@ Rails.application.routes.draw do
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   # Can be used by load balancers and uptime monitors to verify that the app is live.
   get "up" => "rails/health#show", as: :rails_health_check
+  get "f/:token", to: "public_files#show", as: :public_file
 
   devise_for :users, controllers: { sessions: "users/sessions" }, skip: %i[registrations passwords]
 
@@ -86,6 +87,8 @@ Rails.application.routes.draw do
     post "files/by-ref/:ref/read-batch", to: "files#read_batch"
     get "files/by-ref/:ref/egress", to: "files#egress"
     get "files/by-ref/:ref/download", to: "files#download"
+    post "files/by-ref/:ref/publication", to: "files#publish"
+    delete "files/by-ref/:ref/publication", to: "files#unpublish"
     get "files/by-ref/:ref/archive", to: "files#archive_list"
     get "files/by-ref/:ref/archive/entry", to: "files#archive_entry"
     post "files/by-ref/:ref/archive/extract", to: "files#archive_extract"

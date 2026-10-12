@@ -1,7 +1,7 @@
 module Api
   class FilesController < BaseController
     before_action :set_project, only: %i[index create]
-    before_action :set_file_by_ref, only: %i[show update destroy read read_batch egress download archive_list archive_entry archive_extract]
+    before_action :set_file_by_ref, only: %i[show update destroy read read_batch egress download archive_list archive_entry archive_extract publish unpublish]
 
     def index
       scope = @project.stored_files.includes(:project, :tags)
@@ -101,6 +101,19 @@ module Api
         disposition: "attachment"
     end
 
+    def publish
+      render_publication_error unless @file.publishable?
+      return if performed?
+
+      @file.update!(public_token: SecureRandom.urlsafe_base64(32)) unless @file.published?
+      render json: { ref: @file.ref, url: public_file_url(@file.public_token), updated_at: @file.updated_at }
+    end
+
+    def unpublish
+      @file.update!(public_token: nil)
+      render json: { ref: @file.ref, updated_at: @file.updated_at }
+    end
+
     def archive_list
       if params[:paginated].to_s == "true"
         values = ArchiveReader.entries(@file, path: params[:path], depth: params[:depth])
@@ -143,6 +156,14 @@ module Api
     def set_file_by_ref
       shorthand, number = request.path_parameters[:ref].to_s.split("-F", 2)
       @file = current_user.projects.joins(:stored_files).where(shorthand: shorthand.to_s.upcase).merge(StoredFile.where(number: number)).first!.stored_files.find_by!(number: number)
+    end
+
+    def public_file_url(token)
+      "#{ENV.fetch('PUBLIC_FILE_BASE_URL', request.base_url)}/f/#{token}"
+    end
+
+    def render_publication_error
+      render json: { error: { code: "unsupported_media_type", message: "Only text/html Files can be published" } }, status: :unprocessable_content
     end
 
     def replace_tasks(refs)

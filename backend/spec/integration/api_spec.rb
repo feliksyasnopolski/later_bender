@@ -495,6 +495,36 @@ RSpec.describe "Api API", type: :request do
     assert_nil json_body["locator"]
   end
 
+  it "publishes and revokes HTML files without exposing private files" do
+    html = create_file("explainer.html", "<h1>hello</h1>", media_type: "text/html")
+    post "/api/files/by-ref/#{html.ref}/publication", headers: json_headers(@raw_token)
+    assert_response :success
+    url = json_body.fetch("url")
+    assert_equal true, json_body.fetch("ref") == html.ref
+
+    host! URI(url).host
+    get URI(url).request_uri
+    assert_response :success
+    assert_equal "<h1>hello</h1>", response.body
+    assert_equal "text/html", response.media_type
+    assert_equal "nosniff", response.headers["X-Content-Type-Options"]
+    assert_equal "no-referrer", response.headers["Referrer-Policy"]
+
+    post "/api/files/by-ref/#{html.ref}/publication", headers: json_headers(@raw_token)
+    assert_equal url, json_body.fetch("url")
+    delete "/api/files/by-ref/#{html.ref}/publication", headers: json_headers(@raw_token)
+    assert_response :success
+    get URI(url).request_uri
+    assert_response :not_found
+  end
+
+  it "rejects publication of non-HTML files" do
+    file = create_file("private.txt", "private")
+    post "/api/files/by-ref/#{file.ref}/publication", headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    assert_equal "unsupported_media_type", json_body.dig("error", "code")
+  end
+
   it "archive pagination traverses deterministic paths and rejects a cursor from another view" do
     Dir.mktmpdir("later-bender-api-archive") do |source|
       %w[c.txt a.txt b.txt].each { |name| File.binwrite(File.join(source, name), name) }
