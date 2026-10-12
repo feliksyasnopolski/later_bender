@@ -47,6 +47,7 @@ test("Workspace schemas keep capability and resource identifiers open", () => {
     capabilities: { process_control: "process_group", isolation: "none", hardware_access: "host" }
   }] }).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({}).success, true);
+  assert.match(registered.create_workspace.description, /state.*ready.*starting.*get_workspace.*failed/i);
   assert.equal(registered.destroy_workspace.outputSchema.safeParse({ ref: "WS-1", destroyed: false, state: "stopping" }).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({ target: "RA-1", executor: "native" }).success, true);
   assert.equal(registered.create_workspace.inputSchema.safeParse({ executor: "unsupported" }).success, false);

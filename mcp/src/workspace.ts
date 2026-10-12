@@ -751,7 +751,7 @@ export function registerWorkspaceTools(
   server.registerTool(
     "create_workspace",
     {
-      description: `Create a transient Workspace using optional minimum resource requirements and capability requirements. Every required capability must resolve true for the selected offering; otherwise the request fails with capability_unavailable. An empty object requests the normal useful default; requirements are minimums, not exact operator configuration, and are never silently substituted. Target selection, executor support, or credential failures may return target_not_found, workspace_unavailable, executor_unsupported, credential_not_found, credential_conflict, or credential_injection_failed.`,
+      description: `Create a transient Workspace using optional minimum resource requirements and capability requirements. Every required capability must resolve true for the selected offering; otherwise the request fails with capability_unavailable. An empty object requests the normal useful default; requirements are minimums, not exact operator configuration, and are never silently substituted. After creation, inspect workspace.state: proceed only when it is ready; if it is starting, use get_workspace to refresh its state before calling exec_workspace; if it is failed, report workspace.failure and stop rather than attempting execution. A successful create call does not itself mean the Workspace is ready. Target selection, executor support, or credential failures may return target_not_found, workspace_unavailable, executor_unsupported, credential_not_found, credential_conflict, or credential_injection_failed.`,
       inputSchema: {
         label: z.string().optional(),
         resource_path: z.string().optional(),
