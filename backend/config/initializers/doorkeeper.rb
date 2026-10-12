@@ -10,6 +10,9 @@ Doorkeeper.configure do
 
   grant_flows %w[authorization_code refresh_token]
   force_pkce
+  # Native clients use HTTP IP-loopback callbacks with ephemeral ports (RFC 8252).
+  # All other HTTP redirect URIs remain forbidden.
+  force_ssl_in_redirect_uri ->(uri) { !%w[127.0.0.1 [::1]].include?(uri.host.to_s) }
   default_scopes :mcp
   optional_scopes :mcp
   access_token_expires_in 30.days

@@ -57,6 +57,27 @@ RSpec.describe "Auth API", type: :request do
     assert_equal user.id, json_body.fetch("id")
   end
 
+  it "permits native-client HTTP IP-loopback redirects with PKCE" do
+    [ "http://127.0.0.1:49123/callback", "http://[::1]:49124/callback" ].each do |callback|
+      post "/oauth/register", params: { client_name: "native MCP client", redirect_uris: [ callback ] }.to_json, headers: json_headers
+      assert_response :created
+      assert_equal [ callback ], json_body.fetch("redirect_uris")
+      get "/oauth/authorize", params: { response_type: "code", client_id: json_body.fetch("client_id"),
+        redirect_uri: callback, scope: "mcp", code_challenge: "challenge", code_challenge_method: "S256" }
+      assert_response :redirect
+      assert_includes response.location, "/users/sign_in"
+    end
+  end
+
+  it "rejects non-loopback HTTP redirects and URI fragments" do
+    [ "http://client.example/callback", "http://localhost:49123/callback",
+      "http://127.0.0.2:49123/callback", "http://[::2]:49123/callback",
+      "http://127.0.0.1:49123/callback#fragment" ].each do |callback|
+      post "/oauth/register", params: { client_name: "unsafe native client", redirect_uris: [ callback ] }.to_json, headers: json_headers
+      assert_response :bad_request
+    end
+  end
+
   it "redirects an unauthenticated OAuth authorization request to login" do
     payload = {
       client_name: "MCP authorization test",
