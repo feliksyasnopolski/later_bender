@@ -87,6 +87,13 @@ test("MCP client lists every tool as read-only and closed-world", async () => {
   const listed = await client.listTools();
 
   assert.ok(listed.tools.length > 0);
+  const createFileSchema = listed.tools.find((tool) => tool.name === "create_file")?.inputSchema as any;
+  assert.equal(createFileSchema.type, "object");
+  assert.ok(createFileSchema.properties.file);
+  assert.ok(createFileSchema.properties.url);
+  assert.equal(createFileSchema.oneOf.length, 2, "tools/list must advertise mutually exclusive file/url sources");
+  assert.deepEqual(createFileSchema.oneOf[0], { required: ["file"], not: { required: ["url"] } });
+  assert.deepEqual(createFileSchema.oneOf[1], { required: ["url"], not: { required: ["file"] } });
   for (const tool of listed.tools) {
     assert.equal(tool.annotations?.readOnlyHint, true, `${tool.name} readOnlyHint`);
     assert.equal(tool.annotations?.openWorldHint, false, `${tool.name} openWorldHint`);
@@ -165,6 +172,27 @@ test("create_file accepts exactly one attachment or URL source and preserves URL
   const result = await tools.create_file.handler({ project: "later-bender", url: "https://example.com/report.pdf", tags: ["source"] });
   assert.deepEqual(result.structuredContent, { file: { ref: "LB-F20", updated_at: "2026-09-17T12:00:00Z" } });
   assert.deepEqual(JSON.parse(String(calls[0].init.body)), { url: "https://example.com/report.pdf", tags: ["source"] });
+});
+
+
+test("create_file rejects missing or conflicting sources before backend dispatch", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api, calls } = apiFor([]);
+  registerTools(server, api);
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+
+  const missing = await client.callTool({ name: "create_file", arguments: { project: "later-bender" } });
+  const conflicting = await client.callTool({ name: "create_file", arguments: { project: "later-bender", file: {}, url: "https://example.com/report.pdf" } });
+  assert.equal(missing.isError, true);
+  assert.equal(conflicting.isError, true);
+  assert.equal(calls.length, 0, "invalid source combinations must fail before making a backend request");
+
+  await client.close();
+  await server.close();
 });
 
 test("preserves stable URL-ingestion errors from the backend", async () => {

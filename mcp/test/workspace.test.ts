@@ -177,6 +177,10 @@ test("Workspace input schemas are object-shaped in the actual MCP tools/list res
     assert.ok(byName[name].inputSchema.properties);
   }
   assert.deepEqual(Object.keys(byName.exec_workspace.inputSchema.properties ?? {}).sort(), ["argv", "command", "context_id", "cwd", "env", "interactive", "pty", "secret_env", "stdin", "timeout_seconds", "wait_seconds", "workspace"].sort());
+  const execJsonSchema = byName.exec_workspace.inputSchema as any;
+  assert.equal(execJsonSchema.oneOf.length, 2, "tools/list must advertise the mutually exclusive invocation forms");
+  assert.deepEqual(execJsonSchema.oneOf[0], { required: ["command"], not: { required: ["argv"] } });
+  assert.deepEqual(execJsonSchema.oneOf[1], { required: ["argv"], not: { required: ["command"] } });
   assert.deepEqual(Object.keys(byName.read_workspace_file.inputSchema.properties ?? {}).sort(), ["cursor", "locator", "path", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_transcript.inputSchema.properties ?? {}).sort(), ["cursor", "from_sequence", "limit", "to_sequence", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_execution_output.inputSchema.properties ?? {}).sort(), ["context_id", "cursor", "format", "ref", "stream", "wait_seconds"].sort());

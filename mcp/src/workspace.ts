@@ -187,6 +187,12 @@ const execInput = z
         path: ["argv"],
       });
     }
+  })
+  .meta({
+    oneOf: [
+      { required: ["command"], not: { required: ["argv"] } },
+      { required: ["argv"], not: { required: ["command"] } },
+    ],
   });
 const readWorkspaceFileInput = z
   .object({

@@ -75,6 +75,7 @@ RSpec.describe "StoredFile model" do
     read = FileReader.read(file, locator: { "kind" => "lines", "start" => 2, "end" => 3 })
     assert_equal "markdown", read[:representation]
     assert_equal "[L2] beta\n[L3] gamma", read[:content]
+    assert_raises(ActiveRecord::RecordNotFound) { FileReader.read(file, representation: "unsupported-kind") }
     assert_not FileReader.valid_locator?(file, "markdown", { "kind" => "lines", "start" => 1, "end" => 4 })
   end
 

@@ -500,6 +500,12 @@ const createFileInput = z
         path: ["url"],
         message: "Exactly one of file or url is required",
       });
+  })
+  .meta({
+    oneOf: [
+      { required: ["file"], not: { required: ["url"] } },
+      { required: ["url"], not: { required: ["file"] } },
+    ],
   });
 const fileEgressTransport = z.enum(["resource_link", "embedded_resource"]);
 const MAX_EMBEDDED_FILE_BYTES = 20 * 1024 * 1024;
@@ -1145,7 +1151,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "read_file",
     {
       description:
-        "Read a bounded model-consumable File representation. If representation is omitted, auto selects the most useful available representation. Results identify the canonical File, effective representation, coordinate system, and effective locator; images return typed metadata only.",
+        "Read a bounded model-consumable File representation. Omit representation or use auto for the most useful available representation. To select explicitly, use a kind listed in this File's representations; kinds vary by File and can be extended, so representation is intentionally an open string rather than a global enum. Results identify the canonical File, effective representation, coordinate system, and effective locator; images return typed metadata only.",
       inputSchema: {
         ref: z.string(),
         representation: z.string().optional(),
@@ -1161,7 +1167,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "read_files",
     {
       description:
-        "Read multiple Files in request order with typed results and per-item not_found or invalid_locator errors. Omitted representation means auto; returned locators support bounded follow-up reads and citations.",
+        "Read multiple Files in request order with typed results and per-item not_found or invalid_locator errors. Omit representation or use auto per File; explicit representation kinds must be present in that File's representations and are intentionally not one global enum. Returned locators support bounded follow-up reads and citations.",
       inputSchema: {
         reads: z
           .array(
@@ -1209,7 +1215,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "read_archive_entry",
     {
       description:
-        "Read one exact member of one canonical archive File without creating a File. Results identify the archive ref and member path with typed text, PDF, or metadata output. Nested archives remain entries until explicitly read or extracted.",
+        "Read one exact member of one canonical archive File without creating a File. Omit representation or use auto (recommended); an explicit representation must match the kind derived from that member's media type, so valid kinds vary by entry and are not a global enum. A mismatching kind returns not_found. Results identify the archive ref and member path with typed text, PDF, or metadata output. Nested archives remain entries until explicitly read or extracted.",
       inputSchema: {
         ref: z.string(),
         path: z.string(),
