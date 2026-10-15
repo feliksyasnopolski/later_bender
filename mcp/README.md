@@ -22,7 +22,7 @@ API base URL when it must fetch and verify bytes for image or embedded content.
 
 ## Production shape
 
-The canonical endpoint is `https://laterbender-mcp.felixworks.v6.rocks/mcp`.
+The canonical endpoint is `https://lb-mcp.felix.pp.ua/mcp`.
 Protected-resource metadata advertises the Rails Doorkeeper authorization and
 token endpoints. Clients register through standard OAuth dynamic client
 registration, use authorization code with mandatory PKCE S256, and receive the

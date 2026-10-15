@@ -158,14 +158,14 @@ Confirm the deployed images and health endpoints, not just Helm success:
 ```sh
 kubectl -n later-bender get deploy later-bender-later-bender later-bender-later-bender-mcp \
   -o jsonpath='{range .items[*]}{.metadata.name}{" => "}{.spec.template.spec.containers[0].image}{"\\n"}{end}'
-curl -fsS https://laterbender-api.felixworks.v6.rocks/up
-curl -fsS https://laterbender-mcp.felixworks.v6.rocks/health
+curl -fsS https://lb-api.felix.pp.ua/up
+curl -fsS https://lb-mcp.felix.pp.ua/health
 ```
 
 Canonical production endpoints are:
 
-- API: `https://laterbender-api.felixworks.v6.rocks`
-- MCP: `https://laterbender-mcp.felixworks.v6.rocks/mcp`
+- API: `https://lb-api.felix.pp.ua`
+- MCP: `https://lb-mcp.felix.pp.ua/mcp`
 - Frontend: `https://laterbender.pages.dev`
 
 The frontend is hosted by Cloudflare Pages. This repository contains its
