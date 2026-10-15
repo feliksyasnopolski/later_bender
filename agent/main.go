@@ -867,13 +867,23 @@ func remoteFileOperation(ctx context.Context, c *Client, s Store, op Operation) 
 			}
 			if boolValue(op.Spec["overwrite"]) {
 				tmp, err := os.CreateTemp(filepath.Dir(path), ".later-bender-transfer-")
-				if err != nil { return "failed", nil, err }
+				if err != nil {
+					return "failed", nil, err
+				}
 				tmpName := tmp.Name()
 				defer os.Remove(tmpName)
-				if _, err = tmp.Write(bytes); err == nil { err = tmp.Chmod(0600) }
-				if closeErr := tmp.Close(); err == nil { err = closeErr }
-				if err == nil { err = os.Rename(tmpName, path) }
-				if err != nil { return "failed", nil, err }
+				if _, err = tmp.Write(bytes); err == nil {
+					err = tmp.Chmod(0600)
+				}
+				if closeErr := tmp.Close(); err == nil {
+					err = closeErr
+				}
+				if err == nil {
+					err = os.Rename(tmpName, path)
+				}
+				if err != nil {
+					return "failed", nil, err
+				}
 				return "succeeded", map[string]string{"byte_size": strconv.Itoa(len(bytes)), "sha256": fmt.Sprintf("%x", sha256.Sum256(bytes))}, nil
 			}
 			return "failed", nil, errors.New("path already exists")
@@ -892,40 +902,53 @@ func remoteFileOperation(ctx context.Context, c *Client, s Store, op Operation) 
 		}
 		return "succeeded", map[string]string{"byte_size": strconv.Itoa(len(bytes)), "sha256": fmt.Sprintf("%x", sha256.Sum256(bytes))}, nil
 	case "read_file":
-		bytes, err := os.ReadFile(path)
+		info, err := os.Stat(path)
 		if err != nil {
 			return "failed", nil, err
 		}
-		if !utf8.Valid(bytes) || bytesContainsNul(bytes) {
+		format, _ := op.Spec["format"].(string)
+		if format == "" {
+			format = "auto"
+		}
+		if format != "auto" && format != "text" && format != "base64" {
+			return "failed", map[string]string{"code": "invalid_format"}, errors.New("invalid file format")
+		}
+		offset := int64(numberValue(op.Spec["cursor"]))
+		if offset < 0 || offset > info.Size() {
+			return "failed", map[string]string{"code": "invalid_cursor"}, errors.New("invalid file cursor")
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return "failed", nil, err
+		}
+		defer f.Close()
+		if _, err = f.Seek(offset, io.SeekStart); err != nil {
+			return "failed", nil, err
+		}
+		bytes := make([]byte, 16*1024)
+		n, err := f.Read(bytes)
+		if err != nil && err != io.EOF {
+			return "failed", nil, err
+		}
+		bytes = bytes[:n]
+		text := utf8.Valid(bytes) && !bytesContainsNul(bytes)
+		if format == "text" && !text {
 			return "failed", map[string]string{"code": "not_text"}, errors.New("file is not text")
 		}
-		lines := strings.SplitAfter(string(bytes), "\n")
-		start := numberValue(op.Spec["cursor"])
-		end := len(lines)
-		if locator, ok := op.Spec["locator"].(map[string]any); ok {
-			start = numberValue(locator["start"]) - 1
-			end = numberValue(locator["end"])
-			if start < 0 || end <= start || start >= len(lines) || end > len(lines) {
-				return "failed", map[string]string{"code": "invalid_range"}, errors.New("invalid line range")
-			}
-		} else {
-			end = start + 200
-			if end > len(lines) {
-				end = len(lines)
-			}
+		outputFormat := "base64"
+		data := base64.StdEncoding.EncodeToString(bytes)
+		if format == "text" || (format == "auto" && text) {
+			outputFormat = "text"
+			data = string(bytes)
 		}
-		if start < 0 || start > len(lines) {
-			return "failed", map[string]string{"code": "invalid_cursor"}, errors.New("invalid cursor")
-		}
-		content := strings.Join(lines[start:end], "")
 		next := ""
-		if end < len(lines) {
-			next = strconv.Itoa(end)
+		if offset+int64(n) < info.Size() {
+			next = strconv.FormatInt(offset+int64(n), 10)
 		}
-		prefix := strings.Join(lines[:start], "")
-		through := strings.Join(lines[:end], "")
-		rangeJSON, _ := json.Marshal(map[string]any{"kind": "lines", "start": start + 1, "end": end, "byte_start": len([]byte(prefix)), "byte_end": len([]byte(through)), "complete": next == ""})
-		extra := map[string]string{"format": "text", "content": content, "media_type": "text/plain", "range_json": string(rangeJSON)}
+		extra := map[string]string{"format": outputFormat, "data": data, "media_type": "application/octet-stream", "chunk_byte_size": strconv.Itoa(n), "total_byte_size": strconv.FormatInt(info.Size(), 10), "stream_complete": strconv.FormatBool(next == "")}
+		if outputFormat == "text" {
+			extra["media_type"] = "text/plain"
+		}
 		if next != "" {
 			extra["next_cursor"] = next
 		}

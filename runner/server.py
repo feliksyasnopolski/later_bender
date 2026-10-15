@@ -469,25 +469,38 @@ class Handler(BaseHTTPRequestHandler):
         path = safe_workspace_path(row, payload.get("path", ""))
         if not path.exists(): raise ValueError("path_not_found")
         if not path.is_file(): raise ValueError("path_not_file")
-        data = path.read_bytes()
-        try:
-            lines = data.decode("utf-8").splitlines(keepends=True)
-        except UnicodeDecodeError as error:
-            raise ValueError("not_text") from error
-        if b"\x00" in data:
-            raise ValueError("not_text")
-        start = int(payload.get("cursor", "0") or 0)
+        size = path.stat().st_size
+        requested_format = payload.get("format", "auto")
+        if requested_format not in ("auto", "text", "base64"):
+            raise ValueError("invalid_format")
         if payload.get("locator"):
+            # Line locators are retained for existing clients. New callers use
+            # byte cursors and the bounded representation below.
+            data = path.read_bytes()
+            try: lines = data.decode("utf-8").splitlines(keepends=True)
+            except UnicodeDecodeError as error: raise ValueError("not_text") from error
+            if b"\x00" in data: raise ValueError("not_text")
             start = max(0, int(payload["locator"].get("start", 1)) - 1)
             end = int(payload["locator"].get("end", len(lines)))
             if start < 0 or end < start + 1 or start >= len(lines) or end > len(lines): raise ValueError("invalid_range")
-            selected = lines[start:end]
-            next_cursor = None
-        else:
-            selected = lines[start:start + 200]
-            next_cursor = str(start + len(selected)) if start + len(selected) < len(lines) else None
-        content = "".join(selected)
-        self.send_json(200, {"workspace": workspace, "path": str(path.relative_to(Path(row["workspace_dir"]) / "workspace")), "content": content, "media_type": "text/plain", "range": {"kind": "lines", "start": start + 1, "end": start + len(selected), "byte_start": len("".join(lines[:start]).encode()), "byte_end": len("".join(lines[:start + len(selected)]).encode()), "complete": next_cursor is None}, "next_cursor": next_cursor})
+            content = "".join(lines[start:end])
+            if len(content.encode()) > MAX_CHUNK: raise ValueError("file_too_large")
+            self.send_json(200, {"workspace": workspace, "path": str(path.relative_to(Path(row["workspace_dir"]) / "workspace")), "format": "text", "data": content, "content": content, "media_type": "text/plain", "chunk_byte_size": len(content.encode()), "total_byte_size": size, "stream_complete": True, "next_cursor": None, "range": {"kind": "lines", "start": start + 1, "end": end, "complete": True}})
+            return
+        try: offset = int(payload.get("cursor", "0") or 0)
+        except (TypeError, ValueError): raise ValueError("invalid_cursor")
+        if offset < 0 or offset > size: raise ValueError("invalid_cursor")
+        with path.open("rb") as handle:
+            handle.seek(offset)
+            chunk = handle.read(MAX_CHUNK)
+        is_text = b"\x00" not in chunk
+        try: chunk.decode("utf-8")
+        except UnicodeDecodeError: is_text = False
+        if requested_format == "text" and not is_text: raise ValueError("not_text")
+        output_format = "text" if requested_format == "text" or (requested_format == "auto" and is_text) else "base64"
+        data = chunk.decode("utf-8") if output_format == "text" else base64.b64encode(chunk).decode("ascii")
+        next_cursor = str(offset + len(chunk)) if offset + len(chunk) < size else None
+        self.send_json(200, {"workspace": workspace, "path": str(path.relative_to(Path(row["workspace_dir"]) / "workspace")), "format": output_format, "data": data, "media_type": mimetypes.guess_type(path.name)[0] or "application/octet-stream", "chunk_byte_size": len(chunk), "total_byte_size": size, "stream_complete": next_cursor is None, "next_cursor": next_cursor})
 
     def promote_file(self, workspace, payload):
         row = workspace_row(workspace)

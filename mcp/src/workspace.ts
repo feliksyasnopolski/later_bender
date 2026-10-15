@@ -200,6 +200,7 @@ const readWorkspaceFileInput = z
     path: z.string(),
     locator: lineLocator.optional(),
     cursor: z.string().optional(),
+    format: z.enum(["auto", "text", "base64"]).default("auto"),
   })
   .strict()
   .superRefine((input, context) => {
@@ -861,21 +862,17 @@ export function registerWorkspaceTools(
     "read_workspace_file",
     {
       description:
-        "Read a bounded text-ish generated file using Workspace-relative paths and an optional line locator or continuation cursor. Locator and cursor are mutually exclusive. Without either, return an initial chunk and continuation metadata. This is not a generic binary transport; non-text content returns not_text. Missing paths return path_not_found or path_not_file; invalid ranges and cursors return invalid_range and invalid_cursor, respectively.",
+        "Read a bounded Workspace-relative file. Responses contain at most 16 KiB of decoded bytes and use byte-offset cursors. format auto returns text when the chunk is valid UTF-8 without NUL, otherwise base64; text rejects binary data and base64 preserves arbitrary bytes. Locator remains a text compatibility option; cursor and locator are mutually exclusive.",
       inputSchema: readWorkspaceFileInput,
       outputSchema: {
         workspace: opaqueRef,
         path: z.string(),
-        content: z.string(),
+        format: z.enum(["text", "base64"]),
+        data: z.string(),
         media_type: z.string(),
-        range: z.object({
-          kind: z.literal("lines"),
-          start: z.number().int().positive(),
-          end: z.number().int().positive(),
-          byte_start: bytes,
-          byte_end: bytes,
-          complete: z.boolean(),
-        }),
+        chunk_byte_size: bytes,
+        total_byte_size: bytes,
+        stream_complete: z.boolean(),
         next_cursor: cursor,
       },
       annotations: readOnly,

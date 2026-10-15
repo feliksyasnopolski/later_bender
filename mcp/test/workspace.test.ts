@@ -182,7 +182,7 @@ test("Workspace input schemas are object-shaped in the actual MCP tools/list res
   assert.equal(execJsonSchema.oneOf.length, 2, "tools/list must advertise the mutually exclusive invocation forms");
   assert.deepEqual(execJsonSchema.oneOf[0], { required: ["command"], not: { required: ["argv"] } });
   assert.deepEqual(execJsonSchema.oneOf[1], { required: ["argv"], not: { required: ["command"] } });
-  assert.deepEqual(Object.keys(byName.read_workspace_file.inputSchema.properties ?? {}).sort(), ["cursor", "locator", "path", "workspace"].sort());
+  assert.deepEqual(Object.keys(byName.read_workspace_file.inputSchema.properties ?? {}).sort(), ["cursor", "format", "locator", "path", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_transcript.inputSchema.properties ?? {}).sort(), ["cursor", "from_sequence", "limit", "to_sequence", "workspace"].sort());
   assert.deepEqual(Object.keys(byName.read_workspace_execution_output.inputSchema.properties ?? {}).sort(), ["context_id", "cursor", "format", "ref", "stream", "wait_seconds"].sort());
   const stdoutSchema = (byName.exec_workspace.outputSchema as any).properties.execution.properties.stdout.properties;
@@ -196,7 +196,7 @@ test("Workspace input schemas are object-shaped in the actual MCP tools/list res
 test("read_workspace_file returns structured content through the real tools/call boundary", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const api = {
-    workspaceAction: async () => ({ workspace: "WS-1", path: "out.txt", content: "generated text\n", media_type: "text/plain", range: { kind: "lines", start: 1, end: 1, byte_start: 0, byte_end: 14, complete: true }, next_cursor: null })
+    workspaceAction: async () => ({ workspace: "WS-1", path: "out.txt", format: "text", data: "generated text\n", media_type: "text/plain", chunk_byte_size: 14, total_byte_size: 14, stream_complete: true, next_cursor: null })
   } as unknown as LaterBenderApi;
   registerWorkspaceTools(server, api);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -206,8 +206,8 @@ test("read_workspace_file returns structured content through the real tools/call
   const result = await client.callTool({ name: "read_workspace_file", arguments: { workspace: "WS-1", path: "out.txt" } });
   assert.equal(result.isError, undefined);
   assert.deepEqual(result.structuredContent, {
-    workspace: "WS-1", path: "out.txt", content: "generated text\n", media_type: "text/plain",
-    range: { kind: "lines", start: 1, end: 1, byte_start: 0, byte_end: 14, complete: true }, next_cursor: null
+    workspace: "WS-1", path: "out.txt", format: "text", data: "generated text\n", media_type: "text/plain",
+    chunk_byte_size: 14, total_byte_size: 14, stream_complete: true, next_cursor: null
   });
   await client.close();
   await server.close();

@@ -1,4 +1,5 @@
 import express, { type RequestHandler } from "express";
+import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -58,6 +59,26 @@ export function createApp(
   tokenVerifier: (token: string) => Promise<AuthInfo> = verifyAccessToken,
 ) {
   const app = express();
+  app.use((request, response, next) => {
+    const requestId = randomUUID();
+    const started = process.hrtime.bigint();
+    response.setHeader("X-Request-Id", requestId);
+    response.on("finish", () => {
+      const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
+      console.log(
+        JSON.stringify({
+          event: "http_request",
+          request_id: requestId,
+          method: request.method,
+          route: request.path,
+          status: response.statusCode,
+          duration_ms: Math.round(durationMs * 100) / 100,
+        }),
+      );
+    });
+    response.locals.requestId = requestId;
+    next();
+  });
   app.use(express.json());
   const metadata = {
     issuer: issuerOrigin,
@@ -107,6 +128,14 @@ export function createApp(
       await server.connect(transport);
       await transport.handleRequest(request, response, request.body);
     } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "mcp_error",
+          request_id: response.locals.requestId,
+          error_type: error instanceof Error ? error.name : "unknown",
+          headers_sent: response.headersSent,
+        }),
+      );
       if (!response.headersSent)
         response.status(500).json({
           error: "MCP server error",

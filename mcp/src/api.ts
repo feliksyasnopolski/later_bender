@@ -99,6 +99,7 @@ export class LaterBenderApi {
 
   async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl!.replace(/\/$/, "")}${path}`;
+    const started = performance.now();
     let response: Response;
     try {
       response = await this.fetcher(url, {
@@ -111,6 +112,15 @@ export class LaterBenderApi {
         },
       });
     } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "backend_request",
+          path: path.split("?")[0],
+          status: "network_error",
+          error_type: error instanceof Error ? error.name : "unknown",
+          duration_ms: Math.round((performance.now() - started) * 100) / 100,
+        }),
+      );
       throw new ApiError(
         "backend_unavailable",
         503,
@@ -118,6 +128,15 @@ export class LaterBenderApi {
       );
     }
     const body = await response.json().catch(() => undefined);
+    console.log(
+      JSON.stringify({
+        event: "backend_request",
+        path: path.split("?")[0],
+        status: response.status,
+        ok: response.ok,
+        duration_ms: Math.round((performance.now() - started) * 100) / 100,
+      }),
+    );
     if (!response.ok) {
       const error = body?.error;
       const code: ApiErrorCode =
