@@ -27,7 +27,7 @@ module Api
       end
 
       user = User.find_for_database_authentication(username: username)
-      credential = user&.totp_credentials&.where.not(confirmed_at: nil)&.detect { |item| item.verify(payload["code"]) }
+      credential = user&.totp_credentials&.where.not(confirmed_at: nil)&.detect { |item| item.verify(payload["code"], drift: 0) }
       unless credential && payload["password"].to_s == payload["password_confirmation"].to_s
         return render json: { error: "Recovery code is invalid or recovery is unavailable" }, status: :unauthorized
       end
