@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto"
@@ -912,6 +913,42 @@ func remoteFileOperation(ctx context.Context, c *Client, s Store, op Operation) 
 		}
 		if format != "auto" && format != "text" && format != "base64" {
 			return "failed", map[string]string{"code": "invalid_format"}, errors.New("invalid file format")
+		}
+		if locator, ok := op.Spec["locator"].(map[string]any); ok {
+			start, end := numberValue(locator["start"])-1, numberValue(locator["end"])
+			if start < 0 || end <= start {
+				return "failed", map[string]string{"code": "invalid_range"}, errors.New("invalid line range")
+			}
+			f, openErr := os.Open(path)
+			if openErr != nil {
+				return "failed", nil, openErr
+			}
+			defer f.Close()
+			var selected []byte
+			line := 0
+			scanner := bufio.NewScanner(f)
+			scanner.Buffer(make([]byte, 1024), 16*1024+1)
+			for scanner.Scan() {
+				if line >= start && line < end {
+					selected = append(selected, scanner.Bytes()...)
+					selected = append(selected, '\n')
+					if len(selected) > 16*1024 {
+						return "failed", map[string]string{"code": "file_too_large"}, errors.New("line range exceeds read limit")
+					}
+				}
+				line++
+			}
+			if err := scanner.Err(); err != nil {
+				return "failed", map[string]string{"code": "file_too_large"}, err
+			}
+			if start >= line || end > line {
+				return "failed", map[string]string{"code": "invalid_range"}, errors.New("invalid line range")
+			}
+			if !utf8.Valid(selected) || bytesContainsNul(selected) {
+				return "failed", map[string]string{"code": "not_text"}, errors.New("file is not text")
+			}
+			extra := map[string]string{"format": "text", "content": string(selected), "data": string(selected), "media_type": "text/plain", "chunk_byte_size": strconv.Itoa(len(selected)), "total_byte_size": strconv.FormatInt(info.Size(), 10), "stream_complete": "true", "range_json": fmt.Sprintf(`{"kind":"lines","start":%d,"end":%d,"complete":true}`, start+1, end)}
+			return "succeeded", extra, nil
 		}
 		offset := int64(numberValue(op.Spec["cursor"]))
 		if offset < 0 || offset > info.Size() {

@@ -117,6 +117,7 @@ export class LaterBenderApi {
       console.error(
         JSON.stringify({
           event: "backend_request",
+          request_id: this.requestId,
           path: path.split("?")[0],
           status: "network_error",
           error_type: error instanceof Error ? error.name : "unknown",
@@ -133,6 +134,7 @@ export class LaterBenderApi {
     console.log(
       JSON.stringify({
         event: "backend_request",
+        request_id: this.requestId,
         path: path.split("?")[0],
         status: response.status,
         ok: response.ok,

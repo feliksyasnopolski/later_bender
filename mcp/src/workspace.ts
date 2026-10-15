@@ -867,12 +867,23 @@ export function registerWorkspaceTools(
       outputSchema: {
         workspace: opaqueRef,
         path: z.string(),
-        format: z.enum(["text", "base64"]),
-        data: z.string(),
+        format: z.enum(["text", "base64"]).optional(),
+        data: z.string().optional(),
+        content: z.string().optional(),
         media_type: z.string(),
-        chunk_byte_size: bytes,
-        total_byte_size: bytes,
-        stream_complete: z.boolean(),
+        chunk_byte_size: bytes.optional(),
+        total_byte_size: bytes.optional(),
+        stream_complete: z.boolean().optional(),
+        range: z
+          .object({
+            kind: z.literal("lines"),
+            start: z.number().int().positive(),
+            end: z.number().int().positive(),
+            byte_start: bytes.optional(),
+            byte_end: bytes.optional(),
+            complete: z.boolean(),
+          })
+          .optional(),
         next_cursor: cursor,
       },
       annotations: readOnly,

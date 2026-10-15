@@ -71,8 +71,10 @@ export function createApp(
   app.use((request, response, next) => {
     const requestId = randomUUID();
     const started = process.hrtime.bigint();
-    response.setHeader("X-Request-Id", requestId);
-    response.on("finish", () => {
+    let logged = false;
+    const logRequest = (outcome: "complete" | "premature_close") => {
+      if (logged) return;
+      logged = true;
       const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
       console.log(
         JSON.stringify({
@@ -81,10 +83,14 @@ export function createApp(
           method: request.method,
           route: request.path,
           status: response.statusCode,
+          outcome,
           duration_ms: Math.round(durationMs * 100) / 100,
         }),
       );
-    });
+    };
+    response.setHeader("X-Request-Id", requestId);
+    response.on("finish", () => logRequest("complete"));
+    response.on("close", () => logRequest("premature_close"));
     response.locals.requestId = requestId;
     next();
   });

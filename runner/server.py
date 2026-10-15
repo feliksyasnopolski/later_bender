@@ -476,15 +476,23 @@ class Handler(BaseHTTPRequestHandler):
         if payload.get("locator"):
             # Line locators are retained for existing clients. New callers use
             # byte cursors and the bounded representation below.
-            data = path.read_bytes()
-            try: lines = data.decode("utf-8").splitlines(keepends=True)
-            except UnicodeDecodeError as error: raise ValueError("not_text") from error
-            if b"\x00" in data: raise ValueError("not_text")
             start = max(0, int(payload["locator"].get("start", 1)) - 1)
-            end = int(payload["locator"].get("end", len(lines)))
-            if start < 0 or end < start + 1 or start >= len(lines) or end > len(lines): raise ValueError("invalid_range")
-            content = "".join(lines[start:end])
-            if len(content.encode()) > MAX_CHUNK: raise ValueError("file_too_large")
+            end = int(payload["locator"].get("end", start + 1))
+            if start < 0 or end < start + 1: raise ValueError("invalid_range")
+            selected = bytearray()
+            line_number = 0
+            with path.open("rb") as handle:
+                for raw in handle:
+                    if b"\x00" in raw:
+                        raise ValueError("not_text")
+                    try: raw.decode("utf-8")
+                    except UnicodeDecodeError as error: raise ValueError("not_text") from error
+                    if start <= line_number < end:
+                        selected.extend(raw)
+                        if len(selected) > MAX_CHUNK: raise ValueError("file_too_large")
+                    line_number += 1
+            if start >= line_number or end > line_number: raise ValueError("invalid_range")
+            content = bytes(selected).decode("utf-8")
             self.send_json(200, {"workspace": workspace, "path": str(path.relative_to(Path(row["workspace_dir"]) / "workspace")), "format": "text", "data": content, "content": content, "media_type": "text/plain", "chunk_byte_size": len(content.encode()), "total_byte_size": size, "stream_complete": True, "next_cursor": None, "range": {"kind": "lines", "start": start + 1, "end": end, "complete": True}})
             return
         try: offset = int(payload.get("cursor", "0") or 0)

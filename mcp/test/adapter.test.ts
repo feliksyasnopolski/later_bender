@@ -41,6 +41,20 @@ test("sends bearer auth and maps project and task endpoints", async () => {
   assert.equal(calls[2].url, "https://example.test/laterbender/api/projects/writing/tasks?status=ready&q=draft&paginated=true&summary=true");
 });
 
+test("correlates backend success and network logs without credentials or payloads", async () => {
+  const messages: string[] = [];
+  const original = console.log;
+  console.log = (message?: unknown) => messages.push(String(message));
+  try {
+    const api = new LaterBenderApi("https://example.test", "secret-token", async () =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 }), undefined, undefined, "request-123");
+    await api.request("/api/projects", { method: "POST", body: JSON.stringify({ content: "private" }) });
+    await assert.rejects(() => new LaterBenderApi("https://example.test", "secret-token", async () => { throw new Error("offline"); }, undefined, undefined, "request-123").request("/api/projects"));
+  } finally { console.log = original; }
+  assert.equal(messages.filter((message) => message.includes('"request_id":"request-123"')).length, 2);
+  assert.ok(messages.every((message) => !message.includes("secret-token") && !message.includes("private")));
+});
+
 test("create_task uses the project-scoped task endpoint and task payload", async () => {
   const { api, calls } = apiFor([{ status: 201, body: {} }, { status: 200, body: {} }]);
   await api.createTask("writing", { title: "Ship", status: "backlog", priority: "normal", context: "A task", tags: ["release"], related_file_refs: ["LB-F7"] });
