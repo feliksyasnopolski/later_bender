@@ -633,7 +633,11 @@ async function workspaceOperation(
         return api.workspaceExecutionActionByRef(ref, "cancel");
       }
       case "read_workspace_transcript": {
-        const result = await api.workspaceAction(input.workspace, "transcript", input);
+        const result = await api.workspaceAction(
+          input.workspace,
+          "transcript",
+          input,
+        );
         const parsed = transcriptOutput.safeParse(result);
         if (!parsed.success)
           throw new ApiError(
