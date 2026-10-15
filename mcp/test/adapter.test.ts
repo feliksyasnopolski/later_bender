@@ -44,13 +44,15 @@ test("sends bearer auth and maps project and task endpoints", async () => {
 test("correlates backend success and network logs without credentials or payloads", async () => {
   const messages: string[] = [];
   const original = console.log;
+  const originalError = console.error;
   console.log = (message?: unknown) => messages.push(String(message));
+  console.error = (message?: unknown) => messages.push(String(message));
   try {
     const api = new LaterBenderApi("https://example.test", "secret-token", async () =>
       new Response(JSON.stringify({ ok: true }), { status: 200 }), undefined, undefined, "request-123");
     await api.request("/api/projects", { method: "POST", body: JSON.stringify({ content: "private" }) });
     await assert.rejects(() => new LaterBenderApi("https://example.test", "secret-token", async () => { throw new Error("offline"); }, undefined, undefined, "request-123").request("/api/projects"));
-  } finally { console.log = original; }
+  } finally { console.log = original; console.error = originalError; }
   assert.equal(messages.filter((message) => message.includes('"request_id":"request-123"')).length, 2);
   assert.ok(messages.every((message) => !message.includes("secret-token") && !message.includes("private")));
 });
