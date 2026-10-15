@@ -70,6 +70,7 @@ export class LaterBenderApi {
       process.env.LATER_BENDER_OAUTH_ISSUER ||
       baseUrl,
     conversationId?: string,
+    private readonly requestId?: string,
   ) {
     if (!baseUrl) throw new Error("LATER_BENDER_API_BASE_URL is required");
     if (!publicBaseUrl)
@@ -108,6 +109,7 @@ export class LaterBenderApi {
           Accept: "application/json",
           "Content-Type": "application/json",
           ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+          ...(this.requestId ? { "X-Request-Id": this.requestId } : {}),
           ...init.headers,
         },
       });

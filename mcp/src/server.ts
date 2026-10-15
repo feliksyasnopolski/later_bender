@@ -52,10 +52,19 @@ async function verifyAccessToken(token: string): Promise<AuthInfo> {
 }
 
 export function createApp(
-  apiFactory: (token: string, conversationId?: string) => LaterBenderApi = (
-    token,
-    conversationId,
-  ) => new LaterBenderApi(apiBaseUrl, token, fetch, undefined, conversationId),
+  apiFactory: (
+    token: string,
+    conversationId?: string,
+    requestId?: string,
+  ) => LaterBenderApi = (token, conversationId, requestId) =>
+    new LaterBenderApi(
+      apiBaseUrl,
+      token,
+      fetch,
+      undefined,
+      conversationId,
+      requestId,
+    ),
   tokenVerifier: (token: string) => Promise<AuthInfo> = verifyAccessToken,
 ) {
   const app = express();
@@ -118,7 +127,14 @@ export function createApp(
       meta["openai/session"].length > 0
         ? meta["openai/session"]
         : undefined;
-    registerTools(server, apiFactory(request.auth!.token, conversationId));
+    registerTools(
+      server,
+      apiFactory(
+        request.auth!.token,
+        conversationId,
+        response.locals.requestId,
+      ),
+    );
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
