@@ -1131,12 +1131,19 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
         Promise.all(
           operations.map(async (operation) => {
             try {
-              const result = operation.operation === "delete" ? await api.deleteFile(operation.ref) : operation.operation === "publish" ? await api.publishFile(operation.ref) : await api.unpublishFile(operation.ref);
+              const result =
+                operation.operation === "delete"
+                  ? await api.deleteFile(operation.ref)
+                  : operation.operation === "publish"
+                    ? await api.publishFile(operation.ref)
+                    : await api.unpublishFile(operation.ref);
               return {
                 operation: operation.operation,
                 ref: operation.ref,
                 status: "succeeded" as const,
-                ...(operation.operation === "publish" ? { url: (result as { url: string }).url } : {}),
+                ...(operation.operation === "publish"
+                  ? { url: (result as { url: string }).url }
+                  : {}),
               };
             } catch (error) {
               if (error instanceof ApiError && error.code === "not_found")
