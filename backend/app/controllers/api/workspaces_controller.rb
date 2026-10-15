@@ -90,6 +90,7 @@ module Api
       path = payload["path"].presence || "/workspace/#{file.filename}"
       return remote_file_operation("put_file", payload.merge("path" => path, "file" => file.ref, "filename" => file.filename, "media_type" => file.media_type, "byte_size" => file.byte_size, "sha256" => file.sha256)) if @workspace.remote_workspace_placement.present?
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/files", payload.merge("bytes_base64" => Base64.strict_encode64(file.original.download), "filename" => file.filename, "media_type" => file.media_type))
+      result["byte_size"] = Integer(result["byte_size"]) if result.key?("byte_size")
       @workspace.append_event!("file_imported", result.merge("file" => file.ref))
       render json: result.merge("workspace" => @workspace.ref, "file" => file.ref)
     rescue WorkspaceRunnerClient::Unavailable => e
@@ -177,8 +178,27 @@ module Api
 
     def transcript
       refresh_workspace_executions!
+      payload = request_payload
+      if payload["cursor"] && (payload["from_sequence"] || payload["to_sequence"])
+        return render json: { error: { code: "invalid_range", message: "cursor cannot be combined with sequence bounds" } }, status: :unprocessable_content
+      end
       events = @workspace.workspace_events.order(:sequence)
-      render json: { workspace: @workspace.ref, events: events.map { |event| WorkspaceEventProjection.call(event) }, next_cursor: nil }
+      events = events.where(sequence: Integer(payload["from_sequence"])..) if payload["from_sequence"]
+      events = events.where(sequence: ..Integer(payload["to_sequence"])) if payload["to_sequence"]
+      events = events.where(sequence: (Integer(payload["cursor"]) + 1)..) if payload["cursor"]
+      limit = payload["limit"] && Integer(payload["limit"]).clamp(1, 100)
+      events = events.limit(limit + 1) if limit
+      projected = events.filter_map do |event|
+        WorkspaceEventProjection.call(event)
+      rescue ArgumentError, TypeError, KeyError
+        Rails.logger.warn("Skipping malformed Workspace transcript event #{event.id}")
+        nil
+      end
+      has_more = limit && projected.length > limit
+      projected = projected.first(limit) if limit
+      render json: { workspace: @workspace.ref, events: projected, next_cursor: has_more ? projected.last["sequence"].to_s : nil }
+    rescue ArgumentError, TypeError
+      render json: { error: { code: "invalid_range", message: "Invalid transcript range or cursor" } }, status: :unprocessable_content
     end
 
     def promote_transcript
@@ -201,7 +221,8 @@ module Api
         if event.kind == "execution" && last_execution_events[event.payload["execution"] || event.payload["ref"]] == event.sequence
           execution_ref = event.payload["execution"] || event.payload["ref"]
           %w[stdout stderr].each do |stream|
-            bytes = read_all_runner_output(execution_ref, stream)
+            execution = @workspace.workspace_executions.find_by(ref: execution_ref)
+            bytes = execution&.workspace&.remote_workspace_placement.present? ? execution.public_send("#{stream}_data").to_s.b : read_all_runner_output(execution_ref, stream)
             lines.concat([ "", "### #{stream}", "", "```", bytes.force_encoding("UTF-8").scrub, "```" ])
           end
         end
@@ -353,6 +374,7 @@ module Api
       raise WorkspaceRunnerClient::Unavailable.new(operation.error_message.presence || "Remote Workspace operation failed", code: operation.result["code"] || "workspace_unavailable") if operation.state == "failed"
       result = operation.result.merge("workspace" => @workspace.ref)
       if kind == "put_file"
+        result["byte_size"] = Integer(result["byte_size"]) if result.key?("byte_size")
         result.merge!("file" => payload["file"], "path" => payload["path"])
         @workspace.append_event!("file_imported", result.slice("file", "path", "byte_size", "sha256"))
       elsif kind == "promote_file"
@@ -517,7 +539,7 @@ module Api
     def validate_target_selection!(payload)
       target = payload["target"].presence || "hosted"
       return if target != "hosted"
-      return if payload["executor"].blank?
+      return if payload["executor"].blank? || payload["executor"] == "docker"
 
       raise WorkspaceRunnerClient::Unavailable.new("Executor #{payload["executor"]} is not supported by the hosted target", code: "executor_unsupported")
     end
@@ -536,7 +558,7 @@ module Api
           os: architecture["os"],
           architectures: Array(offering["architectures"]).filter_map { |item| item["architecture"] }
         },
-        supported_executors: [],
+        supported_executors: [ "docker" ],
         resources: architecture["resources"],
         capabilities: architecture["capabilities"] || {}
       }

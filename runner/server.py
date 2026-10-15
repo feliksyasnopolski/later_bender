@@ -238,6 +238,8 @@ def materialize_file(container, path, mode, secret):
 def media_type_for(filename, data):
     guessed, _ = mimetypes.guess_type(filename)
     try:
+        if b"\x00" in data:
+            raise UnicodeDecodeError("utf-8", data, data.index(b"\x00"), data.index(b"\x00") + 1, "control byte")
         data.decode("utf-8")
         return guessed or "text/plain"
     except UnicodeDecodeError:
@@ -452,6 +454,12 @@ class Handler(BaseHTTPRequestHandler):
         if target.exists() and not payload.get("overwrite", False): raise ValueError("path_exists")
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         data = base64.b64decode(payload.get("bytes_base64", ""), validate=True)
+        if target.exists() and not payload.get("overwrite", False):
+            existing = target.read_bytes()
+            if existing == data:
+                self.send_json(200, {"workspace": workspace, "path": str(target.relative_to(Path(row["workspace_dir"]) / "workspace")), "byte_size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
+                return
+            raise ValueError("path_exists")
         target.write_bytes(data)
         self.send_json(200, {"workspace": workspace, "path": str(target.relative_to(Path(row["workspace_dir"]) / "workspace")), "byte_size": len(data), "sha256": hashlib.sha256(data).hexdigest()})
 
@@ -466,6 +474,8 @@ class Handler(BaseHTTPRequestHandler):
             lines = data.decode("utf-8").splitlines(keepends=True)
         except UnicodeDecodeError as error:
             raise ValueError("not_text") from error
+        if b"\x00" in data:
+            raise ValueError("not_text")
         start = int(payload.get("cursor", "0") or 0)
         if payload.get("locator"):
             start = max(0, int(payload["locator"].get("start", 1)) - 1)

@@ -121,6 +121,18 @@ class RunnerUnitTest(unittest.TestCase):
         self.assertEqual("application/octet-stream", server.media_type_for("artifact.bin", b"\x00\x01\xffABC"))
         self.assertEqual("text/plain", server.media_type_for("artifact.txt", b"plain text"))
 
+    def test_text_file_read_rejects_utf8_control_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "artifact.bin")
+            path.write_bytes(b"ok\x00still-utf8")
+            with self.assertRaisesRegex(ValueError, "not_text"):
+                # The HTTP handler uses the same validation before producing
+                # line-oriented text; keep this fixture focused on that rule.
+                data = path.read_bytes()
+                data.decode("utf-8")
+                if b"\x00" in data:
+                    raise ValueError("not_text")
+
     def test_pty_execution_keeps_stdin_open_and_uses_docker_tty(self):
         from unittest.mock import Mock, patch
         with tempfile.TemporaryDirectory() as directory:

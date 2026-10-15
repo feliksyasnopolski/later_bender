@@ -29,7 +29,7 @@ RSpec.describe "Workspace target contract", type: :request do
       "targets" => [ {
         "ref" => "hosted", "kind" => "hosted", "name" => "Hosted Workspace", "availability" => "available", "last_seen_at" => nil,
         "platform" => { "environment" => "linux", "os" => { "name" => "Linux", "version" => "6.8" }, "architectures" => [ "arm64" ] },
-        "supported_executors" => [], "resources" => { "default" => @runner_workspace["limits"], "max" => @runner_workspace["limits"] },
+        "supported_executors" => [ "docker" ], "resources" => { "default" => @runner_workspace["limits"], "max" => @runner_workspace["limits"] },
         "capabilities" => { "internet" => true }
       } ]
     )
@@ -42,6 +42,9 @@ RSpec.describe "Workspace target contract", type: :request do
     post "/api/workspaces", params: { executor: "native" }.to_json, headers: json_headers(@raw_token)
     expect(response).to have_http_status(:unprocessable_content)
     expect(json_body.dig("error", "code")).to eq("executor_unsupported")
+
+    post "/api/workspaces", params: { executor: "docker" }.to_json, headers: json_headers(@raw_token)
+    expect(response).to have_http_status(:created)
   end
 
   it "rejects unknown targets without provisioning" do

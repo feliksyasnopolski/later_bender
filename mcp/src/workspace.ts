@@ -300,6 +300,11 @@ const transcriptEvent = z.discriminatedUnion("kind", [
     file: opaqueRef,
   }),
 ]);
+const transcriptOutput = z.object({
+  workspace: opaqueRef,
+  events: z.array(transcriptEvent),
+  next_cursor: cursor,
+});
 
 const noRuntime = () =>
   Promise.resolve({
@@ -627,8 +632,17 @@ async function workspaceOperation(
           );
         return api.workspaceExecutionActionByRef(ref, "cancel");
       }
-      case "read_workspace_transcript":
-        return api.workspaceAction(input.workspace, "transcript", input);
+      case "read_workspace_transcript": {
+        const result = await api.workspaceAction(input.workspace, "transcript", input);
+        const parsed = transcriptOutput.safeParse(result);
+        if (!parsed.success)
+          throw new ApiError(
+            "backend_unavailable",
+            502,
+            "Backend returned a malformed Workspace transcript",
+          );
+        return parsed.data;
+      }
       case "promote_workspace_transcript":
         return api.workspaceAction(
           input.workspace,
@@ -950,9 +964,7 @@ export function registerWorkspaceTools(
         "Read the ordered transient Workspace activity ledger, including creation, File imports, executions, and promotions. Sequence numbers are monotonic per Workspace; use either sequence bounds or a continuation cursor, not both. The transcript also provides execution discovery after chat migration. An unknown Workspace returns not_found.",
       inputSchema: readWorkspaceTranscriptInput,
       outputSchema: {
-        workspace: opaqueRef,
-        events: z.array(transcriptEvent),
-        next_cursor: cursor,
+        ...transcriptOutput.shape,
       },
       annotations: readOnly,
     },

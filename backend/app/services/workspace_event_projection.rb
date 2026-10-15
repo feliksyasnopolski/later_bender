@@ -7,6 +7,7 @@ class WorkspaceEventProjection
   def self.call(event)
     kind = LEGACY_KINDS.fetch(event.kind, event.kind)
     payload = event.payload.deep_stringify_keys
+    payload["byte_size"] = Integer(payload["byte_size"]) if payload.key?("byte_size")
     if kind == "execution"
       payload["execution"] ||= payload.delete("ref")
       payload["requested_timeout_seconds"] = timeout_value(payload["requested_timeout_seconds"])

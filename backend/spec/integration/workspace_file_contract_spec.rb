@@ -65,6 +65,34 @@ RSpec.describe "Workspace file and transcript contracts", type: :request do
     assert_equal "invalid_range", json_body.dig("error", "code")
   end
 
+  it "does not let a malformed historical event poison transcript reads" do
+    post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
+    workspace = Workspace.find_by!(ref: json_body.fetch("ref"))
+    workspace.workspace_events.create!(sequence: workspace.next_sequence, kind: "file_imported", occurred_at: Time.current, payload: { "file" => "LB-F1", "path" => "/workspace/bad", "byte_size" => "not-a-number", "sha256" => "a" * 64 })
+
+    post "/api/workspaces/#{workspace.ref}/transcript", params: {}.to_json, headers: json_headers(@raw_token)
+    assert_response :ok
+    assert_equal [], json_body.fetch("events").select { |event| event["sequence"] == 2 }
+  end
+
+  it "supports bounded transcript reads without duplicating cursor pages" do
+    post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
+    workspace_ref = json_body.fetch("ref")
+    workspace = Workspace.find_by!(ref: workspace_ref)
+    3.times { |index| workspace.append_event!("workspace_prepared", { "marker" => index }) }
+
+    post "/api/workspaces/#{workspace_ref}/transcript", params: { limit: 2 }.to_json, headers: json_headers(@raw_token)
+    assert_response :ok
+    first = json_body
+    assert_equal 2, first.fetch("events").length
+    refute_nil first.fetch("next_cursor")
+
+    post "/api/workspaces/#{workspace_ref}/transcript", params: { cursor: first.fetch("next_cursor"), limit: 2 }.to_json, headers: json_headers(@raw_token)
+    assert_response :ok
+    second = json_body
+    assert_empty(first.fetch("events").map { |event| event.fetch("sequence") } & second.fetch("events").map { |event| event.fetch("sequence") })
+  end
+
   private
 
   def execution_result(state)

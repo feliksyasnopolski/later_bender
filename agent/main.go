@@ -865,6 +865,17 @@ func remoteFileOperation(ctx context.Context, c *Client, s Store, op Operation) 
 			if stringValue(op.Spec["sha256"]) == fmt.Sprintf("%x", sha256.Sum256(existing)) && len(existing) == len(bytes) {
 				return "succeeded", map[string]string{"byte_size": strconv.Itoa(len(bytes)), "sha256": fmt.Sprintf("%x", sha256.Sum256(bytes))}, nil
 			}
+			if boolValue(op.Spec["overwrite"]) {
+				tmp, err := os.CreateTemp(filepath.Dir(path), ".later-bender-transfer-")
+				if err != nil { return "failed", nil, err }
+				tmpName := tmp.Name()
+				defer os.Remove(tmpName)
+				if _, err = tmp.Write(bytes); err == nil { err = tmp.Chmod(0600) }
+				if closeErr := tmp.Close(); err == nil { err = closeErr }
+				if err == nil { err = os.Rename(tmpName, path) }
+				if err != nil { return "failed", nil, err }
+				return "succeeded", map[string]string{"byte_size": strconv.Itoa(len(bytes)), "sha256": fmt.Sprintf("%x", sha256.Sum256(bytes))}, nil
+			}
 			return "failed", nil, errors.New("path already exists")
 		}
 		f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
@@ -945,6 +956,11 @@ func numberValue(value any) int {
 	default:
 		return 0
 	}
+}
+
+func boolValue(value any) bool {
+	v, ok := value.(bool)
+	return ok && v
 }
 func bytesContainsNul(value []byte) bool {
 	for _, b := range value {

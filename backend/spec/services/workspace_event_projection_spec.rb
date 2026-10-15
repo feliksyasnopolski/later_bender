@@ -17,4 +17,12 @@ RSpec.describe WorkspaceEventProjection do
     projected = described_class.call(execution)
     expect(projected).to include("kind" => "execution", "execution" => "WSE-1", "requested_timeout_seconds" => 1.25)
   end
+
+  it "normalizes string file sizes from remote-agent operation results" do
+    user = User.create!(username: "event-file-size-user", password: "password123")
+    workspace = user.workspaces.create!(state: "ready", environment: "darwin", architecture: "arm64", os_name: "macOS", os_version: "test", shell: "/bin/bash", workspace_root: "/workspace", last_activity_at: Time.current)
+    event = workspace.workspace_events.create!(sequence: 1, kind: "file_imported", occurred_at: Time.current, payload: { "file" => "LB-F1", "path" => "/workspace/a.bin", "byte_size" => "6", "sha256" => "a" * 64 })
+
+    expect(described_class.call(event)).to include("byte_size" => 6)
+  end
 end
