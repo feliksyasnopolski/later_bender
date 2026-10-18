@@ -621,16 +621,56 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
         "list_projects",
         "list_tasks",
         "get_task",
+        "get_tasks",
         "create_task",
         "update_task",
       ],
     },
     {
       name: "notes.manage",
-      description: "Search, read, create, and update durable semantic Notes.",
+      description:
+        "Search, read, create, update, and make targeted edits to durable semantic Notes.",
       workflow:
-        'Call search_memory({query, kinds:["note"]}); read via get_note({id}); create_note({title, body, project?}) or update_note({id, ...changes}). Prerequisite: project slug when scoping a Note.',
-      tools: ["search_memory", "get_note", "create_note", "update_note"],
+        'Call search_memory({query, kinds:["note"]}) or list_notes({scope:"all"}); read via get_note({id}); create_note({title, body, project?}) or update_note({id, ...changes}). Use edit_note({id, operations}) for targeted body edits. Prerequisite: project slug when scoping a Note.',
+      tools: [
+        "search_memory",
+        "list_notes",
+        "get_note",
+        "create_note",
+        "update_note",
+        "edit_note",
+      ],
+    },
+    {
+      name: "projects.manage",
+      description:
+        "Find and maintain the user's project scopes for Tasks and Files.",
+      workflow:
+        "Call list_projects({}) and use the returned slug with get_project({slug}); create with create_project({name, ...}) or update_project({slug, ...changes}). Prerequisite: use the returned project slug for project-scoped Tasks, Notes, and Files.",
+      tools: [
+        "list_projects",
+        "get_project",
+        "create_project",
+        "update_project",
+      ],
+    },
+    {
+      name: "work-contexts",
+      description:
+        "Start, inspect, resume, and finish conversation-scoped working contexts.",
+      workflow:
+        "Call work_context_current({}); if empty, start with work_context_start({task?}) or list and resume with work_context_select({id}); use work_context_get({id}) for inspection. Attach an existing Task with work_context_attach_task({task}), and finish with work_context_finish({}). Work contexts are temporary working state, not durable Notes or Tasks.",
+      tools: [
+        "work_context_current",
+        "work_context_list",
+        "work_context_get",
+        "work_context_start",
+        "work_context_select",
+        "work_context_attach_task",
+        "work_context_finish",
+        "scratchpad_read",
+        "scratchpad_write",
+      ],
     },
     {
       name: "files.manage",
@@ -659,6 +699,61 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
         "exec_workspace",
         "get_workspace_execution",
         "read_workspace_execution_output",
+      ],
+    },
+    {
+      name: "execution.sessions",
+      description:
+        "Select a Workspace for the current work context and interact with resumable executions.",
+      workflow:
+        'Call execution_current({}) and work_context_current({}); if there is no context, call work_context_start({}) or explicitly select one. Discover with get_workspace_capabilities({}) and list_workspace_targets({}); call execution_select({target, executor?, cwd?}) to acquire and bind a Workspace, or pass workspace to reuse one. Run exec_workspace({argv:[...]}) or exec_workspace({command, pty:true}) for a persistent terminal. Use execution_sessions({}) to rediscover sessions, session_select({ref}) to switch foreground, send_workspace_execution_input({data}) to send input, and read_workspace_execution_output({stream:"stdout", cursor?}) to collect output. Carry next_cursor forward; cancel_workspace_execution requires an explicit ref.',
+      tools: [
+        "work_context_current",
+        "work_context_start",
+        "work_context_select",
+        "execution_current",
+        "get_workspace_capabilities",
+        "list_workspace_targets",
+        "execution_select",
+        "exec_workspace",
+        "execution_sessions",
+        "session_select",
+        "send_workspace_execution_input",
+        "get_workspace_execution",
+        "read_workspace_execution_output",
+        "cancel_workspace_execution",
+      ],
+    },
+    {
+      name: "workspace.lifecycle",
+      description:
+        "Discover, create, inspect, list, and destroy transient Workspaces.",
+      workflow:
+        "Call get_workspace_capabilities({}) and list_workspace_targets({}) before placement when requirements matter; create_workspace({target?, executor?, environment?, resources?, required_capabilities?}) then inspect get_workspace({ref}) until state is ready. Use list_workspaces({}) to rediscover surviving Workspaces. destroy_workspace({ref}) deletes the Workspace and its executions, filesystem, and transcript.",
+      tools: [
+        "get_workspace_capabilities",
+        "list_workspace_targets",
+        "create_workspace",
+        "get_workspace",
+        "list_workspaces",
+        "destroy_workspace",
+      ],
+    },
+    {
+      name: "workspace.artifacts",
+      description:
+        "Move canonical Files into a Workspace and explicitly promote resulting artifacts or transcript evidence.",
+      workflow:
+        "Use put_file_in_workspace({workspace, file, path?}) to copy exact canonical File bytes; inspect with read_workspace_file({workspace, path, cursor?}). Promote an artifact with promote_workspace_file({workspace, path, project, ...}) or activity with promote_workspace_transcript({workspace, project, ...}). Promotion creates a canonical immutable File; prerequisites are an accessible Workspace and project slug.",
+      tools: [
+        "put_file_in_workspace",
+        "read_workspace_file",
+        "promote_workspace_file",
+        "read_workspace_transcript",
+        "promote_workspace_transcript",
+        "list_files",
+        "get_file",
+        "read_file",
       ],
     },
     {

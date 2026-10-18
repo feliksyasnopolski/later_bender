@@ -158,6 +158,29 @@ test("capabilities schema detail reflects the registered native tool schemas", a
   await server.close();
 });
 
+test("native capability catalog references only registered Later Bender tools", async () => {
+  const { api } = apiFor([{ status: 200, body: { workflows: [] } }]);
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, api);
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "capabilities", arguments: { detail: "workflow" } });
+  const output = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+  const names = output.native.map((item: any) => item.name);
+  for (const family of ["memory.search", "tasks.manage", "notes.manage", "files.manage", "work-contexts", "execution.sessions", "workspace.lifecycle", "workspace.artifacts"]) assert.ok(names.includes(family), `missing ${family}`);
+  const registered = Object.keys((server as any)._registeredTools);
+  for (const capability of output.native) {
+    assert.equal(capability.evidence, "native");
+    for (const name of capability.tools) assert.ok(registered.includes(name), `${capability.name} references unregistered tool ${name}`);
+    assert.doesNotMatch(`${capability.description} ${capability.workflow}`, /apt-get|brew install|sudo /i);
+  }
+  await client.close();
+  await server.close();
+});
+
 test("get_tasks preserves order and returns per-ref not_found entries", async () => {
   const { api } = apiFor([
     { status: 200, body: { id: 1, ref: "LB-1" } },
