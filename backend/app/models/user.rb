@@ -11,6 +11,8 @@ class User < ApplicationRecord
   has_many :remote_agent_enrollment_tokens, dependent: :destroy, inverse_of: :user
   has_many :work_context_bindings, dependent: :destroy, inverse_of: :user
   has_many :work_contexts, dependent: :destroy, inverse_of: :user
+  has_many :model_workflows, dependent: :destroy
+  has_many :model_libraries, dependent: :destroy
 
   validates :username, presence: true, length: { in: 1..80 }, uniqueness: { case_sensitive: false }
   validates :password, confirmation: true, length: { minimum: 8 }, allow_nil: true

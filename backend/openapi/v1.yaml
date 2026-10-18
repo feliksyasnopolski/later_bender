@@ -131,6 +131,118 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  "/api/model-workflows":
+    get:
+      summary: api/model_knowledge#workflows_index
+      tags:
+      - Model_knowledge
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    post:
+      summary: api/model_knowledge#workflows_save
+      tags:
+      - Model_knowledge
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  "/api/model-libraries":
+    get:
+      summary: api/model_knowledge#libraries_index
+      tags:
+      - Model_knowledge
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+    post:
+      summary: api/model_knowledge#libraries_save
+      tags:
+      - Model_knowledge
+      responses:
+        '200':
+          description: successful
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '422':
+          description: validation failed
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+      security:
+      - bearerAuth: []
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
   "/api/live":
     get:
       summary: api/live#stream

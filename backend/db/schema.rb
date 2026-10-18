@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_10_12_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_10_19_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -122,6 +122,33 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_12_090000) do
     t.index ["stored_file_id", "task_id"], name: "index_file_tasks_on_stored_file_id_and_task_id", unique: true
     t.index ["stored_file_id"], name: "index_file_tasks_on_stored_file_id"
     t.index ["task_id"], name: "index_file_tasks_on_task_id"
+  end
+
+  create_table "model_libraries", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.jsonb "exports", default: [], null: false
+    t.string "name", null: false
+    t.text "source", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.jsonb "versions", default: [], null: false
+    t.index ["user_id", "name"], name: "index_model_libraries_on_user_id_and_name", unique: true
+    t.index ["user_id"], name: "index_model_libraries_on_user_id"
+  end
+
+  create_table "model_workflows", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "description", null: false
+    t.string "evidence", default: "claimed", null: false
+    t.string "name", null: false
+    t.jsonb "tools", default: [], null: false
+    t.datetime "updated_at", null: false
+    t.bigint "user_id", null: false
+    t.jsonb "versions", default: [], null: false
+    t.text "workflow", null: false
+    t.index ["user_id", "name"], name: "index_model_workflows_on_user_id_and_name", unique: true
+    t.index ["user_id"], name: "index_model_workflows_on_user_id"
   end
 
   create_table "note_tags", force: :cascade do |t|
@@ -311,11 +338,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_12_090000) do
     t.bigint "number", null: false
     t.jsonb "origin"
     t.bigint "project_id", null: false
+    t.string "public_token"
     t.string "sha256", null: false
     t.datetime "updated_at", null: false
     t.index ["archive_source_id"], name: "index_stored_files_on_archive_source_id"
     t.index ["project_id", "number"], name: "index_stored_files_on_project_id_and_number", unique: true
     t.index ["project_id"], name: "index_stored_files_on_project_id"
+    t.index ["public_token"], name: "index_stored_files_on_public_token", unique: true
     t.check_constraint "archive_source_id IS NULL AND archive_entry_path IS NULL OR archive_source_id IS NOT NULL AND archive_entry_path IS NOT NULL", name: "stored_files_archive_provenance_complete"
   end
 
@@ -500,6 +529,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_10_12_090000) do
   add_foreign_key "file_tags", "tags"
   add_foreign_key "file_tasks", "stored_files"
   add_foreign_key "file_tasks", "tasks"
+  add_foreign_key "model_libraries", "users"
+  add_foreign_key "model_workflows", "users"
   add_foreign_key "note_tags", "notes"
   add_foreign_key "note_tags", "tags"
   add_foreign_key "notes", "projects"

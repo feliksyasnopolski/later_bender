@@ -603,6 +603,216 @@ function egressMetadata(file: FileEgress) {
 }
 
 export function registerTools(server: McpServer, api: LaterBenderApi): void {
+  const nativeCapabilities = [
+    {
+      name: "memory.search",
+      description:
+        "Find approximate matches across the authenticated user's Tasks, Notes, and Files.",
+      workflow:
+        'Call search_memory({query, scope:"all", limit:8}). Then use get_task({ref}) for a Task, get_note({id}) for a Note, or get_file({ref}) for a File. Prerequisites: a non-empty query; returned refs/IDs come from Later Bender.',
+      tools: ["search_memory", "get_task", "get_note", "get_file"],
+    },
+    {
+      name: "tasks.manage",
+      description: "Find and update actionable Tasks in a user's Project.",
+      workflow:
+        'Call list_projects({}) or search_memory({query, kinds:["task"]}); call list_tasks({project, ...filters}) for board order; call get_task({ref}) before update_task({ref, ...changes}). Create with create_task({project, title, ...}). Prerequisite: project slug for list/create.',
+      tools: [
+        "list_projects",
+        "list_tasks",
+        "get_task",
+        "create_task",
+        "update_task",
+      ],
+    },
+    {
+      name: "notes.manage",
+      description: "Search, read, create, and update durable semantic Notes.",
+      workflow:
+        'Call search_memory({query, kinds:["note"]}); read via get_note({id}); create_note({title, body, project?}) or update_note({id, ...changes}). Prerequisite: project slug when scoping a Note.',
+      tools: ["search_memory", "get_note", "create_note", "update_note"],
+    },
+    {
+      name: "files.manage",
+      description:
+        "Store and retrieve canonical project Files and their readable representations.",
+      workflow:
+        'Call list_projects({}); create_file({project, url:"https://public.example/file", filename:"report.pdf"}) for a public artifact, or supply the provider file payload; use search_memory({query, kinds:["file"]}) then get_file({ref}) and read_file({ref, ...}) for existing evidence. Prerequisite: project slug for creation; file ref for reads.',
+      tools: [
+        "list_projects",
+        "create_file",
+        "search_memory",
+        "get_file",
+        "read_file",
+      ],
+    },
+    {
+      name: "execution",
+      description:
+        "Create and inspect a transient Workspace, then run commands and collect output.",
+      workflow:
+        'Call get_workspace_capabilities({}) and list_workspace_targets({}); create_workspace({target?, executor?, environment?}) using supported requirements; inspect get_workspace({ref}) until state is ready; run exec_workspace({workspace:ref, argv:[...]}); inspect get_workspace_execution({ref:execution_ref}) and read_workspace_execution_output({ref:execution_ref, stream:"stdout"}). Prerequisite: eligible target/capabilities; persistent sessions also need a selected work context.',
+      tools: [
+        "get_workspace_capabilities",
+        "list_workspace_targets",
+        "create_workspace",
+        "exec_workspace",
+        "get_workspace_execution",
+        "read_workspace_execution_output",
+      ],
+    },
+    {
+      name: "execution.interactive-terminal",
+      description:
+        "Run a long-lived interactive command and exchange terminal input/output.",
+      workflow:
+        'Call get_workspace_capabilities({}) and list_workspace_targets({}); create_workspace({target?, executor?}); inspect get_workspace({ref}) until ready; start exec_workspace({workspace:ref, argv:["bash"], pty:true}); continue with send_workspace_execution_input({data:"...\\n"}) and read_workspace_execution_output({stream:"stdout"}); call cancel_workspace_execution({ref:execution_ref}) when appropriate. Prerequisites: ready Workspace, supported target/executor, and a selected work context for persistent sessions.',
+      tools: [
+        "get_workspace_capabilities",
+        "list_workspace_targets",
+        "create_workspace",
+        "exec_workspace",
+        "get_workspace_execution",
+        "send_workspace_execution_input",
+        "read_workspace_execution_output",
+        "cancel_workspace_execution",
+      ],
+    },
+  ];
+  server.registerTool(
+    "capabilities",
+    {
+      description:
+        "Browse Later Bender native tool workflows and saved model workflows. This describes Later Bender only.",
+      inputSchema: z
+        .object({
+          name: z.string().optional(),
+          query: z.string().optional(),
+          detail: z.enum(["summary", "workflow", "schema"]).optional(),
+        })
+        .strict(),
+      annotations: readAnnotations,
+    },
+    async ({ name, query, detail }) => {
+      const saved = (await api.listModelWorkflows({ name, query })).workflows;
+      const schemaFor = (toolName: string) => {
+        const input = (server as any)._registeredTools?.[toolName]?.inputSchema;
+        if (!input) return null;
+        try {
+          return z.toJSONSchema(
+            typeof input.safeParse === "function" ? input : z.object(input),
+          );
+        } catch {
+          return { available_via_tools_list: true };
+        }
+      };
+      const selected = nativeCapabilities.filter(
+        (item) =>
+          (!name || item.name === name || item.name.startsWith(`${name}.`)) &&
+          (!query ||
+            query
+              .toLowerCase()
+              .split(/[^a-z0-9]+/)
+              .filter(Boolean)
+              .some((term) =>
+                `${item.name} ${item.description} ${item.workflow}`
+                  .toLowerCase()
+                  .includes(term),
+              )),
+      );
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                native: selected.map(
+                  ({ name: n, description, workflow, tools }) => ({
+                    name: n,
+                    description,
+                    evidence: "native",
+                    ...(detail === "workflow" ? { workflow, tools } : {}),
+                    ...(detail === "schema"
+                      ? {
+                          workflow,
+                          tools: tools.map((tool) => ({
+                            name: tool,
+                            input_schema: schemaFor(tool),
+                          })),
+                        }
+                      : {}),
+                  }),
+                ),
+                saved,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+  server.registerTool(
+    "capabilities_save",
+    {
+      description:
+        "Save or replace a model-discovered Later Bender workflow. Native tool schemas cannot be overwritten; saved workflow evidence is labeled claimed.",
+      inputSchema: z
+        .object({
+          name: z.string(),
+          description: z.string(),
+          workflow: z.string(),
+          tools: z.array(z.string()).optional(),
+        })
+        .strict(),
+      annotations: updateAnnotations,
+    },
+    async (input) => {
+      const result = await api.saveModelWorkflow(input);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    },
+  );
+  server.registerTool(
+    "library_load",
+    {
+      description:
+        "Load metadata for trusted agent-authored JavaScript libraries, or source for one named library. Returned source is for evaluation inside Code Mode.",
+      inputSchema: z.object({ name: z.string().optional() }).strict(),
+      annotations: readAnnotations,
+    },
+    async ({ name }) => {
+      const result = await api.listModelLibraries(name);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    },
+  );
+  server.registerTool(
+    "library_save",
+    {
+      description:
+        "Persist trusted agent-authored JavaScript with syntax validation and prior snapshots.",
+      inputSchema: z
+        .object({
+          name: z.string(),
+          source: z.string(),
+          description: z.string().optional(),
+          exports: z.array(z.string()).optional(),
+        })
+        .strict(),
+      annotations: createAnnotations,
+    },
+    async (input) => {
+      try {
+        new Function(input.source);
+      } catch (error) {
+        throw new Error(
+          `Invalid JavaScript: ${error instanceof Error ? error.message : "syntax error"}`,
+        );
+      }
+      const result = await api.saveModelLibrary(input);
+      return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    },
+  );
   server.registerTool(
     "list_credentials",
     {

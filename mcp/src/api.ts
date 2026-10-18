@@ -523,6 +523,28 @@ export class LaterBenderApi {
   getWorkspaceCapabilities() {
     return this.request<unknown>("/api/workspaces/capabilities");
   }
+  listModelWorkflows(input: { name?: string; query?: string } = {}) {
+    return this.request<{ workflows: Array<Record<string, unknown>> }>(
+      `/api/model-workflows${query(input)}`,
+    );
+  }
+  saveModelWorkflow(payload: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>(
+      "/api/model-workflows",
+      json("POST", payload),
+    );
+  }
+  listModelLibraries(name?: string) {
+    return this.request<{ libraries: Array<Record<string, unknown>> }>(
+      `/api/model-libraries${query({ name })}`,
+    );
+  }
+  saveModelLibrary(payload: Record<string, unknown>) {
+    return this.request<Record<string, unknown>>(
+      "/api/model-libraries",
+      json("POST", payload),
+    );
+  }
   listWorkspaceTargets() {
     return this.request<unknown>("/api/workspaces/targets");
   }

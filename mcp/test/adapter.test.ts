@@ -103,6 +103,12 @@ test("MCP client lists every tool as read-only and closed-world", async () => {
   const listed = await client.listTools();
 
   assert.ok(listed.tools.length > 0);
+  for (const name of ["capabilities", "capabilities_save", "library_load", "library_save"]) {
+    const tool = listed.tools.find((candidate) => candidate.name === name);
+    assert.ok(tool, `${name} is part of the one-batch connector surface`);
+    assert.equal(tool.inputSchema.type, "object");
+    assert.equal(tool.inputSchema.additionalProperties, false);
+  }
   const createFileSchema = listed.tools.find((tool) => tool.name === "create_file")?.inputSchema as any;
   assert.equal(createFileSchema.type, "object");
   assert.ok(createFileSchema.properties.file);
@@ -114,6 +120,40 @@ test("MCP client lists every tool as read-only and closed-world", async () => {
     assert.equal(tool.annotations?.readOnlyHint, true, `${tool.name} readOnlyHint`);
     assert.equal(tool.annotations?.openWorldHint, false, `${tool.name} openWorldHint`);
   }
+  await client.close();
+  await server.close();
+});
+
+test("library_save rejects JavaScript syntax errors before persistence", async () => {
+  const { api, calls } = apiFor([]);
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, api);
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "library_save", arguments: { name: "broken", source: "return { broken: ; }" } });
+  assert.equal(result.isError, true);
+  assert.equal(calls.length, 0);
+  await client.close();
+  await server.close();
+});
+
+test("capabilities schema detail reflects the registered native tool schemas", async () => {
+  const { api } = apiFor([{ status: 200, body: { workflows: [] } }]);
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, api);
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "capabilities", arguments: { name: "execution", detail: "schema" } });
+  const output = JSON.parse((result.content as Array<{ text: string }>)[0].text);
+  const execution = output.native.find((item: any) => item.name === "execution");
+  assert.ok(execution.tools.some((tool: any) => tool.name === "exec_workspace" && tool.input_schema.properties.argv));
+  assert.ok(output.native.some((item: any) => item.name === "execution.interactive-terminal"));
   await client.close();
   await server.close();
 });
@@ -543,7 +583,7 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "scratchpad_read", "scratchpad_write", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", "work_context_attach_task", "work_context_current", "work_context_finish", "work_context_get", "work_context_list", "work_context_select", "work_context_start", ...workspaceToolNames].sort());
+  assert.deepEqual(Object.keys(tools).sort(), ["capabilities", "capabilities_save", "create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "library_load", "library_save", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "scratchpad_read", "scratchpad_write", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", "work_context_attach_task", "work_context_current", "work_context_finish", "work_context_get", "work_context_list", "work_context_select", "work_context_start", ...workspaceToolNames].sort());
   assert.ok(tools.create_task.inputSchema);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", representation: "text", locator: { kind: "lines", start: 138, end: 152 } }]).success, true);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", locator: { kind: "bytes", start: 1, end: 2 } }]).success, false);
