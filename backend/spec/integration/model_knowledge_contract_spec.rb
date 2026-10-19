@@ -6,6 +6,16 @@ RSpec.describe "Model knowledge API", type: :request do
     @token, @raw_token = ApiToken.issue!(user: @user, name: "test client")
   end
 
+  it "keeps the sync source inside the backend image context and matches the canonical MCP library" do
+    packaged = Rails.root.join("config/standard_library/lb.js")
+    canonical = Rails.root.join("../mcp/libraries/lb.js")
+    expect(packaged).to be_file
+    expect(File.binread(packaged)).to eq(File.binread(canonical))
+    expect(File.read(Rails.root.join("Dockerfile"))).to include("COPY . .")
+    expect(File.read(Rails.root.join("../.github/workflows/publish-backend.yml"))).to include("context: backend")
+    expect(File.read(Rails.root.join("lib/tasks/model_libraries.rake"))).to include('"config", "standard_library", "lb.js"')
+  end
+
   it "upserts workflows with claimed evidence and retains the prior version" do
     payload = { name: "execution.custom", description: "First", workflow: "Call tools", tools: [ "execute_workspace" ] }
     post "/api/model-workflows", params: payload.to_json, headers: json_headers(@raw_token)

@@ -3,7 +3,7 @@ namespace :model_libraries do
   task sync_standard: :environment do
     user_id = ENV.fetch("USER_ID") { abort "USER_ID is required" }
     expected_revision = Integer(ENV.fetch("EXPECTED_REVISION") { abort "EXPECTED_REVISION is required (use 0 only to create)" }, 10)
-    source_path = Rails.root.join("..", "mcp", "libraries", "lb.js")
+    source_path = Rails.root.join("config", "standard_library", "lb.js")
     abort "Source library not found: #{source_path}" unless source_path.file?
 
     user = User.find(user_id)

@@ -6,10 +6,15 @@ const source = await readFile(
   new URL("../libraries/lb.js", import.meta.url),
   "utf8",
 );
+const packagedSource = await readFile(
+  new URL("../../backend/config/standard_library/lb.js", import.meta.url),
+  "utf8",
+);
 const instantiate = (tools: Record<string, (args: any) => any>) =>
   new Function("tools", source)(tools);
 
 test("standalone source evaluates as a Code Mode factory and exposes a compact manifest", () => {
+  assert.equal(packagedSource, source, "backend image source must match the MCP canonical library");
   const lb = instantiate({});
   assert.equal(lb.manifest.name, "lb");
   assert.equal(typeof lb.execution.exec, "function");
