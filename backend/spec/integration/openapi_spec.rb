@@ -50,6 +50,60 @@ RSpec.describe "Browser API contract", type: :request do
     end
   end
 
+  path "/api/model-workflows" do
+    delete "Delete a saved model workflow" do
+      tags "Model Knowledge"
+      produces "application/json"
+      security [ bearerAuth: [] ]
+      parameter name: :name, in: :query, required: true, schema: { type: :string, maxLength: 120, pattern: "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$" }
+      let(:name) { "execution.custom" }
+      response 204, "workflow deleted" do
+        before { user.model_workflows.create!(name: name, description: "Custom", workflow: "Call tools") }
+        run_test!
+      end
+      response 404, "workflow not found for this user" do
+        run_test!
+      end
+      response 422, "invalid or reserved workflow name" do
+        let(:name) { "native.execution" }
+        schema "$ref" => "#/components/schemas/Error"
+        run_test!
+      end
+      response 401, "authentication required" do
+        let(:Authorization) { nil }
+        schema "$ref" => "#/components/schemas/Error"
+        run_test!
+      end
+    end
+  end
+
+  path "/api/model-libraries" do
+    delete "Delete a saved model library" do
+      tags "Model Knowledge"
+      produces "application/json"
+      security [ bearerAuth: [] ]
+      parameter name: :name, in: :query, required: true, schema: { type: :string, maxLength: 120, pattern: "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$" }
+      let(:name) { "helpers" }
+      response 204, "library deleted" do
+        before { user.model_libraries.create!(name: name, source: "return {};") }
+        run_test!
+      end
+      response 404, "library not found for this user" do
+        run_test!
+      end
+      response 422, "invalid library name" do
+        let(:name) { "../helpers" }
+        schema "$ref" => "#/components/schemas/Error"
+        run_test!
+      end
+      response 401, "authentication required" do
+        let(:Authorization) { nil }
+        schema "$ref" => "#/components/schemas/Error"
+        run_test!
+      end
+    end
+  end
+
   path "/api/projects" do
     get "List projects" do
       tags "Projects"

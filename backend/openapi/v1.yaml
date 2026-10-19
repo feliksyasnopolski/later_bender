@@ -187,6 +187,37 @@ paths:
             schema:
               type: object
               additionalProperties: true
+    delete:
+      summary: Delete a saved model workflow
+      tags:
+      - Model Knowledge
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: name
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 120
+          pattern: "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+      responses:
+        '204':
+          description: workflow deleted
+        '404':
+          description: workflow not found for this user
+        '422':
+          description: invalid or reserved workflow name
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/model-libraries":
     get:
       summary: api/model_knowledge#libraries_index
@@ -243,6 +274,37 @@ paths:
             schema:
               type: object
               additionalProperties: true
+    delete:
+      summary: Delete a saved model library
+      tags:
+      - Model Knowledge
+      security:
+      - bearerAuth: []
+      parameters:
+      - name: name
+        in: query
+        required: true
+        schema:
+          type: string
+          maxLength: 120
+          pattern: "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+      responses:
+        '204':
+          description: library deleted
+        '404':
+          description: library not found for this user
+        '422':
+          description: invalid library name
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        '401':
+          description: authentication required
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   "/api/live":
     get:
       summary: api/live#stream

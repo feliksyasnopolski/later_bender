@@ -869,6 +869,27 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     },
   );
   server.registerTool(
+    "capabilities_delete",
+    {
+      description:
+        "Permanently delete one saved model-discovered workflow by its exact name. Native workflows cannot be deleted. This cannot be undone.",
+      inputSchema: z.object({ name: z.string().min(1).max(120) }).strict(),
+      annotations: {
+        ...updateAnnotations,
+        readOnlyHint: false,
+        idempotentHint: false,
+      },
+    },
+    async ({ name }) => {
+      await api.deleteModelWorkflow(name);
+      return {
+        content: [
+          { type: "text", text: JSON.stringify({ deleted: true, name }) },
+        ],
+      };
+    },
+  );
+  server.registerTool(
     "library_load",
     {
       description:
@@ -906,6 +927,27 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
       }
       const result = await api.saveModelLibrary(input);
       return { content: [{ type: "text", text: JSON.stringify(result) }] };
+    },
+  );
+  server.registerTool(
+    "library_delete",
+    {
+      description:
+        "Permanently delete one saved model library by its exact name, including its saved versions. This cannot be undone.",
+      inputSchema: z.object({ name: z.string().min(1).max(120) }).strict(),
+      annotations: {
+        ...updateAnnotations,
+        readOnlyHint: false,
+        idempotentHint: false,
+      },
+    },
+    async ({ name }) => {
+      await api.deleteModelLibrary(name);
+      return {
+        content: [
+          { type: "text", text: JSON.stringify({ deleted: true, name }) },
+        ],
+      };
     },
   );
   server.registerTool(

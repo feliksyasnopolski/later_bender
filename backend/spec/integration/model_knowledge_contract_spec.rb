@@ -37,4 +37,35 @@ RSpec.describe "Model knowledge API", type: :request do
     refute json_body["libraries"].first.key?("source")
     refute json_body["libraries"].first.key?("versions")
   end
+
+  it "deletes exact saved names only within the authenticated user's ownership" do
+    workflow = @user.model_workflows.create!(name: "execution.custom", description: "Custom", workflow: "Call tools")
+    library = @user.model_libraries.create!(name: "helpers", source: "return {};")
+    other = User.create!(username: "other-model-knowledge-user", password: "password123")
+    other.model_libraries.create!(name: "other", source: "return {};")
+
+    delete "/api/model-workflows?name=#{workflow.name}", headers: json_headers(@raw_token)
+    assert_response :no_content
+    expect { @user.model_workflows.find(workflow.id) }.to raise_error(ActiveRecord::RecordNotFound)
+
+    delete "/api/model-libraries?name=#{library.name}", headers: json_headers(@raw_token)
+    assert_response :no_content
+    expect { @user.model_libraries.find(library.id) }.to raise_error(ActiveRecord::RecordNotFound)
+    expect(other.model_libraries.find_by!(name: "other")).to be_present
+
+    delete "/api/model-libraries?name=other", headers: json_headers(@raw_token)
+    assert_response :not_found
+    expect(other.model_libraries.find_by!(name: "other")).to be_present
+  end
+
+  it "returns validation details for invalid deletion names and cannot delete native workflows" do
+    delete "/api/model-workflows?name=native.execution", headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    expect(json_body.dig("error", "code")).to eq("validation_failed")
+    expect(json_body.dig("error", "details", "name")).to include("is reserved")
+
+    delete "/api/model-libraries?name=..%2Fhelpers", headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    expect(json_body.dig("error", "details", "name")).to be_present
+  end
 end

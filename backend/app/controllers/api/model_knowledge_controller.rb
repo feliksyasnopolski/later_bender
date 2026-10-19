@@ -27,6 +27,13 @@ module Api
       render json: workflow_json(item), status: :ok
     end
 
+    def workflows_destroy
+      return unless valid_name?(params[:name], ModelWorkflow)
+
+      current_user.model_workflows.find_by!(name: params[:name]).destroy!
+      head :no_content
+    end
+
     def libraries_index
       scope = current_user.model_libraries.order(:name)
       scope = scope.where(name: params[:name]) if params[:name].present?
@@ -44,9 +51,27 @@ module Api
       render json: library_json(item, include_source: true), status: :ok
     end
 
+    def libraries_destroy
+      return unless valid_name?(params[:name], ModelLibrary)
+
+      current_user.model_libraries.find_by!(name: params[:name]).destroy!
+      head :no_content
+    end
+
     private
 
     def snapshot(item) = { description: item.description, workflow: item.workflow, tools: item.tools, evidence: item.evidence }
+    def valid_name?(name, model)
+      name = name.to_s
+      record = model.new(name: name)
+      record.valid?
+      errors = record.errors[:name].to_a
+      errors << "is reserved" if model == ModelWorkflow && (name.start_with?("native.") || %w[memory.search tasks.manage notes.manage files.manage execution execution.interactive-terminal].include?(name))
+      return true if errors.empty?
+
+      render json: { error: { code: "validation_failed", message: "Invalid name", details: { name: errors.uniq } } }, status: :unprocessable_content
+      false
+    end
     def workflow_json(item) = { name: item.name, description: item.description, workflow: item.workflow, tools: item.tools, evidence: item.evidence, versions: item.versions }
     def library_json(item, include_source:)
       { name: item.name, description: item.description, exports: item.exports, updated_at: item.updated_at, versions_available: item.versions.length }.tap do |json|

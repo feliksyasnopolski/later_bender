@@ -130,7 +130,27 @@ export class LaterBenderApi {
         error instanceof Error ? error.message : "Backend unavailable",
       );
     }
-    const body = await response.json().catch(() => undefined);
+    let body: any;
+    if (response.status !== 204) {
+      try {
+        body = await response.json();
+      } catch {
+        console.error(
+          JSON.stringify({
+            event: "backend_response_parse_error",
+            request_id: this.requestId,
+            path: path.split("?")[0],
+            status: response.status,
+            duration_ms: Math.round((performance.now() - started) * 100) / 100,
+          }),
+        );
+        throw new ApiError(
+          "backend_unavailable",
+          502,
+          "Backend returned an invalid JSON response",
+        );
+      }
+    }
     console.log(
       JSON.stringify({
         event: "backend_request",
@@ -141,6 +161,7 @@ export class LaterBenderApi {
         duration_ms: Math.round((performance.now() - started) * 100) / 100,
       }),
     );
+    if (response.status === 204) return undefined as T;
     if (!response.ok) {
       const error = body?.error;
       const code: ApiErrorCode =
@@ -534,6 +555,11 @@ export class LaterBenderApi {
       json("POST", payload),
     );
   }
+  deleteModelWorkflow(name: string) {
+    return this.request<void>(`/api/model-workflows${query({ name })}`, {
+      method: "DELETE",
+    });
+  }
   listModelLibraries(name?: string) {
     return this.request<{ libraries: Array<Record<string, unknown>> }>(
       `/api/model-libraries${query({ name })}`,
@@ -544,6 +570,11 @@ export class LaterBenderApi {
       "/api/model-libraries",
       json("POST", payload),
     );
+  }
+  deleteModelLibrary(name: string) {
+    return this.request<void>(`/api/model-libraries${query({ name })}`, {
+      method: "DELETE",
+    });
   }
   listWorkspaceTargets() {
     return this.request<unknown>("/api/workspaces/targets");

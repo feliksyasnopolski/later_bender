@@ -52,8 +52,10 @@ test("correlates backend success and network logs without credentials or payload
       new Response(JSON.stringify({ ok: true }), { status: 200 }), undefined, undefined, "request-123");
     await api.request("/api/projects", { method: "POST", body: JSON.stringify({ content: "private" }) });
     await assert.rejects(() => new LaterBenderApi("https://example.test", "secret-token", async () => { throw new Error("offline"); }, undefined, undefined, "request-123").request("/api/projects"));
+    await assert.rejects(() => new LaterBenderApi("https://example.test", "secret-token", async () => new Response("not json", { status: 200 }), undefined, undefined, "request-123").request("/api/projects"));
   } finally { console.log = original; console.error = originalError; }
-  assert.equal(messages.filter((message) => message.includes('"request_id":"request-123"')).length, 2);
+  assert.equal(messages.filter((message) => message.includes('"request_id":"request-123"')).length, 3);
+  assert.ok(messages.some((message) => message.includes('"event":"backend_response_parse_error"') && message.includes('"status":200')));
   assert.ok(messages.every((message) => !message.includes("secret-token") && !message.includes("private")));
 });
 
@@ -103,11 +105,17 @@ test("MCP client lists every tool as read-only and closed-world", async () => {
   const listed = await client.listTools();
 
   assert.ok(listed.tools.length > 0);
-  for (const name of ["capabilities", "capabilities_save", "library_load", "library_save"]) {
+  for (const name of ["capabilities", "capabilities_save", "capabilities_delete", "library_load", "library_save", "library_delete"]) {
     const tool = listed.tools.find((candidate) => candidate.name === name);
     assert.ok(tool, `${name} is part of the one-batch connector surface`);
     assert.equal(tool.inputSchema.type, "object");
     assert.equal(tool.inputSchema.additionalProperties, false);
+  }
+  for (const name of ["capabilities_delete", "library_delete"]) {
+    const tool = listed.tools.find((candidate) => candidate.name === name)!;
+    assert.equal(tool.annotations?.readOnlyHint, false);
+    assert.equal(tool.annotations?.destructiveHint, true);
+    assert.equal(tool.annotations?.idempotentHint, false);
   }
   const createFileSchema = listed.tools.find((tool) => tool.name === "create_file")?.inputSchema as any;
   assert.equal(createFileSchema.type, "object");
@@ -117,11 +125,30 @@ test("MCP client lists every tool as read-only and closed-world", async () => {
   assert.deepEqual(createFileSchema.oneOf[0], { required: ["file"], not: { required: ["url"] } });
   assert.deepEqual(createFileSchema.oneOf[1], { required: ["url"], not: { required: ["file"] } });
   for (const tool of listed.tools) {
-    assert.equal(tool.annotations?.readOnlyHint, true, `${tool.name} readOnlyHint`);
+    if (tool.name !== "capabilities_delete" && tool.name !== "library_delete")
+      assert.equal(tool.annotations?.readOnlyHint, true, `${tool.name} readOnlyHint`);
     assert.equal(tool.annotations?.openWorldHint, false, `${tool.name} openWorldHint`);
   }
   await client.close();
   await server.close();
+});
+
+test("model library and workflow deletion use exact owner-scoped API names", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const api = new LaterBenderApi(
+    "https://example.test/laterbender",
+    "secret",
+    async (url, init) => {
+      calls.push({ url: String(url), init });
+      return new Response(null, { status: 204 });
+    },
+  );
+  await api.deleteModelWorkflow("execution.custom");
+  await api.deleteModelLibrary("helpers");
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/model-workflows?name=execution.custom");
+  assert.equal(calls[1].url, "https://example.test/laterbender/api/model-libraries?name=helpers");
+  assert.equal(calls[0].init.method, "DELETE");
+  assert.equal(calls[1].init.method, "DELETE");
 });
 
 test("library_save rejects JavaScript syntax errors before persistence", async () => {
@@ -606,7 +633,7 @@ test("registers exactly the v1 tools with schemas", () => {
   const server = new McpServer({ name: "test", version: "1" });
   registerTools(server, new LaterBenderApi("https://example.test", "secret", fetch));
   const tools = (server as any)._registeredTools as Record<string, any>;
-  assert.deepEqual(Object.keys(tools).sort(), ["capabilities", "capabilities_save", "create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "library_load", "library_save", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "scratchpad_read", "scratchpad_write", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", "work_context_attach_task", "work_context_current", "work_context_finish", "work_context_get", "work_context_list", "work_context_select", "work_context_start", ...workspaceToolNames].sort());
+  assert.deepEqual(Object.keys(tools).sort(), ["capabilities", "capabilities_delete", "capabilities_save", "create_file", "create_note", "create_project", "create_task", "delete_note", "edit_note", "extract_archive_entry", "get_file", "get_files", "get_note", "get_project", "get_task", "get_tasks", "library_delete", "library_load", "library_save", "list_archive", "list_credentials", "list_files", "list_notes", "list_projects", "list_tasks", "manage_files", "read_archive_entry", "read_file", "read_files", "retrieve_file", "scratchpad_read", "scratchpad_write", "search_memory", "update_file_metadata", "update_note", "update_project", "update_task", "view_file_image", "work_context_attach_task", "work_context_current", "work_context_finish", "work_context_get", "work_context_list", "work_context_select", "work_context_start", ...workspaceToolNames].sort());
   assert.ok(tools.create_task.inputSchema);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", representation: "text", locator: { kind: "lines", start: 138, end: 152 } }]).success, true);
   assert.equal(tools.create_task.inputSchema.shape.citations.safeParse([{ file: "LB-F7", locator: { kind: "bytes", start: 1, end: 2 } }]).success, false);
