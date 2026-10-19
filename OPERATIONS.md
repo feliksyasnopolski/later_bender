@@ -101,6 +101,23 @@ kubectl -n later-bender exec deployment/later-bender-later-bender -- sh -c 'test
 
 ## Image publication and deployment
 
+### Source-controlled Code Mode library sync
+
+`mcp/libraries/lb.js` is the canonical standard Code Mode library source. The
+Rails database copy is user-owned and is not overwritten by seeds or schema
+changes. To explicitly sync one user's `lb` record from a checkout with both
+`backend/` and `mcp/` present, run from `backend/`:
+
+```sh
+USER_ID=<owner-id> EXPECTED_REVISION=<current-revision-or-0-for-create> bundle exec rake model_libraries:sync_standard
+```
+
+The task requires both values, locks the named user's row, checks the exact
+revision, and preserves the prior source as a version before updating. Inspect
+`library_load({name:"lb"})` after an authorized sync. Do not run this as part of
+deployment automatically: the owner and current revision must be selected
+deliberately. This task was not run as part of source implementation.
+
 Push application changes to `master` only after the relevant local checks
 pass. These workflows build ARM64 immutable full-SHA images and publish them
 to GHCR:

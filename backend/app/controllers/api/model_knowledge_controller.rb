@@ -1,5 +1,15 @@
 module Api
   class ModelKnowledgeController < BaseController
+    class RevisionConflict < StandardError; end
+    class InvalidRevision < StandardError; end
+
+    rescue_from RevisionConflict do |error|
+      render json: { error: { code: "revision_conflict", message: error.message } }, status: :conflict
+    end
+    rescue_from InvalidRevision do |error|
+      render json: { error: { code: "validation_failed", message: error.message, details: { expected_revision: [ "must be a non-negative integer" ] } } }, status: :unprocessable_content
+    end
+
     def workflows_index
       scope = current_user.model_workflows.order(:name)
       if params[:name].present?
@@ -20,10 +30,9 @@ module Api
       name = payload["name"].to_s
       reserved = %w[memory.search tasks.manage notes.manage files.manage execution execution.interactive-terminal]
       raise ActiveRecord::RecordNotFound if name.start_with?("native.") || reserved.include?(name)
-      item = current_user.model_workflows.find_or_initialize_by(name: name)
-      item.versions = (item.versions + [ snapshot(item) ]).last(10) if item.persisted?
-      item.assign_attributes(description: payload["description"], workflow: payload["workflow"], tools: payload["tools"] || [], evidence: "claimed")
-      item.save!
+      item = save_versioned(current_user.model_workflows, name, payload) do |record|
+        record.assign_attributes(description: payload["description"], workflow: payload["workflow"], tools: payload["tools"] || [], evidence: "claimed")
+      end
       render json: workflow_json(item), status: :ok
     end
 
@@ -42,12 +51,9 @@ module Api
 
     def libraries_save
       payload = request_payload
-      item = current_user.model_libraries.find_or_initialize_by(name: payload["name"])
-      if item.persisted?
-        item.versions = (item.versions + [ { source: item.source, description: item.description, exports: item.exports } ]).last(10)
+      item = save_versioned(current_user.model_libraries, payload["name"], payload) do |record|
+        record.assign_attributes(source: payload["source"], description: payload["description"], exports: payload["exports"] || [])
       end
-      item.assign_attributes(source: payload["source"], description: payload["description"], exports: payload["exports"] || [])
-      item.save!
       render json: library_json(item, include_source: true), status: :ok
     end
 
@@ -60,7 +66,40 @@ module Api
 
     private
 
-    def snapshot(item) = { description: item.description, workflow: item.workflow, tools: item.tools, evidence: item.evidence }
+    def save_versioned(scope, name, payload)
+      item = nil
+      ModelLibrary.transaction do
+        item = scope.lock.find_by(name: name)
+        if item
+          check_revision!(item, payload)
+          item.versions = (item.versions + [ snapshot(item) ]).last(10)
+        else
+          item = scope.build(name: name, revision: 1)
+          check_revision!(item, payload)
+        end
+        yield item
+        item.revision += 1 if item.persisted?
+        item.save!
+      end
+      item
+    rescue ActiveRecord::RecordNotUnique
+      raise RevisionConflict, "The record was created concurrently; reload and retry with its revision"
+    end
+
+    def check_revision!(item, payload)
+      expected = payload["expected_revision"]
+      return if expected.nil?
+      raise InvalidRevision, "expected_revision must be a non-negative integer" unless expected.is_a?(Integer) && expected >= 0
+      return if expected == (item.persisted? ? item.revision : 0)
+
+      raise RevisionConflict, "Revision conflict: expected #{expected}, current revision is #{item.persisted? ? item.revision : 0}"
+    end
+
+    def snapshot(item)
+      attrs = item.attributes
+      common = { revision: attrs["revision"] }
+      common.merge(item.is_a?(ModelLibrary) ? { source: attrs["source"], description: attrs["description"], exports: attrs["exports"] } : { description: attrs["description"], workflow: attrs["workflow"], tools: attrs["tools"], evidence: attrs["evidence"] })
+    end
     def valid_name?(name, model)
       name = name.to_s
       record = model.new(name: name)
@@ -72,9 +111,9 @@ module Api
       render json: { error: { code: "validation_failed", message: "Invalid name", details: { name: errors.uniq } } }, status: :unprocessable_content
       false
     end
-    def workflow_json(item) = { name: item.name, description: item.description, workflow: item.workflow, tools: item.tools, evidence: item.evidence, versions: item.versions }
+    def workflow_json(item) = { name: item.name, description: item.description, workflow: item.workflow, tools: item.tools, evidence: item.evidence, revision: item.revision, versions: item.versions }
     def library_json(item, include_source:)
-      { name: item.name, description: item.description, exports: item.exports, updated_at: item.updated_at, versions_available: item.versions.length }.tap do |json|
+      { name: item.name, description: item.description, exports: item.exports, revision: item.revision, updated_at: item.updated_at, versions_available: item.versions.length }.tap do |json|
         if include_source
           json[:source] = item.source
           json[:versions] = item.versions

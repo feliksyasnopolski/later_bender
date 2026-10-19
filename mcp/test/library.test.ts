@@ -14,6 +14,11 @@ test("standalone source evaluates as a Code Mode factory and exposes a compact m
   assert.equal(lb.manifest.name, "lb");
   assert.equal(typeof lb.execution.exec, "function");
   assert.equal(typeof lb.memory.search, "function");
+  assert.equal(lb.manifest.version, "2");
+  assert.equal(lb.manifest.factory, 'new Function("tools", source)(tools)');
+  assert.equal(lb.manifest.methods["execution.exec"], "exec(command, options = {}) — command string, argv array, or exec options object.");
+  assert.ok(lb.manifest.tools.includes("execution_current"));
+  assert.ok(lb.manifest.tools.includes("get_workspace_execution"));
   assert.equal(Object.isFrozen(lb.execution), true);
 });
 

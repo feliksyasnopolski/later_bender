@@ -11,10 +11,17 @@ RSpec.describe "Model knowledge API", type: :request do
     post "/api/model-workflows", params: payload.to_json, headers: json_headers(@raw_token)
     assert_response :success
     assert_equal "claimed", json_body["evidence"]
+    assert_equal 1, json_body["revision"]
     post "/api/model-workflows", params: payload.merge(description: "Second").to_json, headers: json_headers(@raw_token)
     assert_response :success
     assert_equal 1, json_body["versions"].length
     assert_equal "First", @user.model_workflows.find_by!(name: payload[:name]).versions.first["description"]
+    assert_equal 1, @user.model_workflows.find_by!(name: payload[:name]).versions.first["revision"]
+    assert_equal 2, json_body["revision"]
+    post "/api/model-workflows", params: payload.merge(description: "stale", expected_revision: 1).to_json, headers: json_headers(@raw_token)
+    assert_response :conflict
+    assert_equal "revision_conflict", json_body.dig("error", "code")
+    assert_equal "Second", @user.model_workflows.find_by!(name: payload[:name]).description
   end
 
   it "prevents native workflow overwrite and scopes saved workflows to the user" do
@@ -28,14 +35,29 @@ RSpec.describe "Model knowledge API", type: :request do
     payload = { name: "helpers", source: "return { add: (a, b) => a + b };", exports: [ "add" ] }
     post "/api/model-libraries", params: payload.to_json, headers: json_headers(@raw_token)
     assert_response :success
+    assert_equal 1, json_body["revision"]
     post "/api/model-libraries", params: payload.merge(source: "return { add: (a, b) => a - b }; ").to_json, headers: json_headers(@raw_token)
     assert_response :success
+    assert_equal 2, json_body["revision"]
+    post "/api/model-libraries", params: payload.merge(source: "return {};", expected_revision: 1).to_json, headers: json_headers(@raw_token)
+    assert_response :conflict
     get "/api/model-libraries", params: { name: "helpers" }, headers: json_headers(@raw_token)
     assert_equal "return { add: (a, b) => a - b }; ", json_body["libraries"].first["source"]
     assert_equal payload[:source], json_body["libraries"].first["versions"].first["source"]
+    assert_equal 1, json_body["libraries"].first["versions"].first["revision"]
     get "/api/model-libraries", headers: json_headers(@raw_token)
     refute json_body["libraries"].first.key?("source")
     refute json_body["libraries"].first.key?("versions")
+  end
+
+  it "accepts a zero expected revision for creation and reports precise validation errors" do
+    payload = { name: "first", source: "return {};", expected_revision: 0 }
+    post "/api/model-libraries", params: payload.to_json, headers: json_headers(@raw_token)
+    assert_response :success
+    assert_equal 1, json_body["revision"]
+    post "/api/model-libraries", params: { name: "bad name", source: "return {};" }.to_json, headers: json_headers(@raw_token)
+    assert_response :unprocessable_content
+    assert_equal [ "is invalid" ], json_body.dig("error", "details", "name")
   end
 
   it "deletes exact saved names only within the authenticated user's ownership" do

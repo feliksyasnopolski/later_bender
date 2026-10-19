@@ -110,6 +110,10 @@ test("MCP client lists every tool as read-only and closed-world", async () => {
     assert.ok(tool, `${name} is part of the one-batch connector surface`);
     assert.equal(tool.inputSchema.type, "object");
     assert.equal(tool.inputSchema.additionalProperties, false);
+    if (name === "library_save" || name === "capabilities_save") {
+      assert.equal((tool.inputSchema as any).properties.expected_revision.type, "integer");
+      assert.ok(!(tool.inputSchema as any).required.includes("expected_revision"));
+    }
   }
   for (const name of ["capabilities_delete", "library_delete"]) {
     const tool = listed.tools.find((candidate) => candidate.name === name)!;
@@ -163,6 +167,24 @@ test("library_save rejects JavaScript syntax errors before persistence", async (
   const result = await client.callTool({ name: "library_save", arguments: { name: "broken", source: "return { broken: ; }" } });
   assert.equal(result.isError, true);
   assert.equal(calls.length, 0);
+  await client.close();
+  await server.close();
+});
+
+test("library_save accepts the optional revision precondition and preserves legacy callers", async () => {
+  const { api, calls } = apiFor([{ status: 200, body: { name: "helpers", revision: 4 } }]);
+  const server = new McpServer({ name: "test", version: "1" });
+  registerTools(server, api);
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "library_save", arguments: { name: "helpers", source: "return {};", expected_revision: 3 } });
+  assert.equal(result.isError, undefined);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/model-libraries");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), { name: "helpers", source: "return {};", expected_revision: 3 });
   await client.close();
   await server.close();
 });

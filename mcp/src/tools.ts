@@ -778,7 +778,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "capabilities",
     {
       description:
-        "Browse Later Bender native tool workflows and saved model workflows. This describes Later Bender only.",
+        "Browse native workflows, saved model workflows, and their current revisions. Use detail=workflow for execution steps or detail=schema for tool inputs.",
       inputSchema: z
         .object({
           name: z.string().optional(),
@@ -852,13 +852,14 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "capabilities_save",
     {
       description:
-        "Save or replace a model-discovered Later Bender workflow. Native tool schemas cannot be overwritten; saved workflow evidence is labeled claimed.",
+        "Save or replace a model-discovered workflow. Pass expected_revision from the latest read to prevent overwriting newer edits (optional for legacy callers); revision_conflict means reload before retrying.",
       inputSchema: z
         .object({
           name: z.string(),
           description: z.string(),
           workflow: z.string(),
           tools: z.array(z.string()).optional(),
+          expected_revision: z.number().int().nonnegative().optional(),
         })
         .strict(),
       annotations: updateAnnotations,
@@ -893,7 +894,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "library_load",
     {
       description:
-        "Load metadata for trusted agent-authored JavaScript libraries, or source for one named library. Returned source is for evaluation inside Code Mode.",
+        "Load saved library metadata and revisions, or include source and version history by naming one library. library_save returns the current revision; source is intended for Code Mode evaluation.",
       inputSchema: z.object({ name: z.string().optional() }).strict(),
       annotations: readAnnotations,
     },
@@ -906,13 +907,14 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "library_save",
     {
       description:
-        "Persist trusted agent-authored JavaScript with syntax validation and prior snapshots.",
+        "Persist trusted agent-authored JavaScript with syntax validation and prior snapshots. Pass expected_revision from library_load to prevent overwriting newer edits (optional for legacy callers); revision_conflict means reload before retrying.",
       inputSchema: z
         .object({
           name: z.string(),
           source: z.string(),
           description: z.string().optional(),
           exports: z.array(z.string()).optional(),
+          expected_revision: z.number().int().nonnegative().optional(),
         })
         .strict(),
       annotations: createAnnotations,
