@@ -57,6 +57,70 @@ RSpec.describe "Auth API", type: :request do
     assert_equal user.id, json_body.fetch("id")
   end
 
+  it "advertises request-bound OAuth issuer identities only for the two API hosts" do
+    {
+      "lb-api.felix.pp.ua" => "https://lb-api.felix.pp.ua",
+      "lb-api.felixworks.top" => "https://lb-api.felixworks.top"
+    }.each do |host, issuer|
+      get "/.well-known/oauth-authorization-server", headers: { "HTTP_HOST" => host }
+      assert_response :success
+      assert_equal issuer, json_body.fetch("issuer")
+      assert_equal "#{issuer}/oauth/authorize", json_body.fetch("authorization_endpoint")
+      assert_equal "#{issuer}/oauth/token", json_body.fetch("token_endpoint")
+      assert_equal "#{issuer}/oauth/register", json_body.fetch("registration_endpoint")
+    end
+
+    get "/.well-known/oauth-authorization-server", headers: { "HTTP_HOST" => "attacker.example" }
+    assert_response :bad_request
+
+    get "/.well-known/oauth-authorization-server", headers: {
+      "HTTP_HOST" => "lb-api.felix.pp.ua", "HTTP_X_FORWARDED_HOST" => "attacker.example"
+    }
+    assert_response :bad_request
+  end
+
+  it "completes an authorization-code flow against each advertised issuer origin" do
+    user = User.create!(username: "dual-issuer", password: "password123")
+    callback = "https://client.example/callback"
+    verifier = "a" * 43
+    challenge = Base64.urlsafe_encode64(Digest::SHA256.digest(verifier), padding: false)
+
+    [ "lb-api.felix.pp.ua", "lb-api.felixworks.top" ].each do |host|
+      host! host
+      get "/.well-known/oauth-authorization-server"
+      assert_response :success
+      issuer = json_body.fetch("issuer")
+      assert_equal "https://#{host}", issuer
+      token_endpoint = json_body.fetch("token_endpoint")
+
+      post "/oauth/register", params: { client_name: "dual issuer test", redirect_uris: [ callback ] }.to_json, headers: json_headers
+      assert_response :created
+      client_id = json_body.fetch("client_id")
+
+      post "/users/sign_in", params: { user: { username: user.username, password: "password123" } }
+      assert_response :redirect
+      get "/oauth/authorize", params: {
+        response_type: "code", client_id: client_id, redirect_uri: callback, scope: "mcp",
+        code_challenge: challenge, code_challenge_method: "S256", state: "dual-#{host}"
+      }
+      assert_response :redirect
+      callback_uri = URI(response.location)
+      assert_equal callback, "#{callback_uri.scheme}://#{callback_uri.host}#{callback_uri.path}"
+      code = URI.decode_www_form(callback_uri.query).to_h.fetch("code")
+
+      assert_equal "#{issuer}/oauth/token", token_endpoint
+      post "/oauth/token", params: {
+        grant_type: "authorization_code", code: code, client_id: client_id,
+        redirect_uri: callback, code_verifier: verifier
+      }
+      assert_response :success
+      oauth_token = json_body.fetch("access_token")
+      get "/api/auth/current", headers: json_headers(oauth_token)
+      assert_response :success
+      assert_equal user.id, json_body.fetch("id")
+    end
+  end
+
   it "permits native-client HTTP IP-loopback redirects with PKCE" do
     [ "http://127.0.0.1:49123/callback", "http://[::1]:49124/callback" ].each do |callback|
       post "/oauth/register", params: { client_name: "native MCP client", redirect_uris: [ callback ] }.to_json, headers: json_headers
