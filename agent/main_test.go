@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -13,6 +14,17 @@ import (
 	"testing"
 	"time"
 )
+
+func TestPrintVersionIncludesVersionAndCommit(t *testing.T) {
+	oldVersion, oldCommit := Version, Commit
+	Version, Commit = "v0.1.0", "0123456789abcdef"
+	t.Cleanup(func() { Version, Commit = oldVersion, oldCommit })
+	var out bytes.Buffer
+	printVersion(&out)
+	if got, want := out.String(), "Later Bender Remote Agent v0.1.0 (commit 0123456789abcdef)\n"; got != want {
+		t.Fatalf("version output = %q, want %q", got, want)
+	}
+}
 
 func TestRestoredRunningExecutionBecomesLostWhenProcessDisappears(t *testing.T) {
 	s := Store{Dir: t.TempDir()}

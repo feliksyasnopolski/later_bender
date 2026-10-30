@@ -11,9 +11,19 @@ Build and run manually:
 
 ```sh
 go build -o later-bender-agent .
+later-bender-agent version
 later-bender-agent enroll -server https://later-bender.example -token TOKEN -name "My Mac"
 later-bender-agent run -server https://later-bender.example
 ```
+
+Prebuilt releases are published at
+`https://github.com/feliksyasnopolski/later_bender/releases`. Select a version
+and download its platform binary, for example:
+`https://github.com/feliksyasnopolski/later_bender/releases/download/v0.1.0/later-bender-agent-linux-amd64`.
+Each release includes `manifest.json` with versioned download URLs, byte sizes,
+and SHA-256 digests, plus a conventional `checksums.txt`. Verify the downloaded
+binary against either file before running it. Release assets use version-tagged
+URLs and are not replaced by a moving `latest` asset.
 
 The default state directory is the user config directory under
 `later-bender-agent`; tests and dogfood can override it with `-state`. The

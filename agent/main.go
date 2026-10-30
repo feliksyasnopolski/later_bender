@@ -33,6 +33,10 @@ import (
 
 const protocolVersion = "later-bender-agent-auth-v1"
 
+// Version and Commit are set by the release build through Go linker flags.
+var Version = "dev"
+var Commit = "unknown"
+
 type Identity struct {
 	Name       string `json:"name"`
 	Ref        string `json:"ref"`
@@ -1443,7 +1447,11 @@ func defaultState() string {
 }
 func main() {
 	if len(os.Args) < 2 {
-		log.Fatal("usage: later-bender-agent enroll|run [flags]")
+		log.Fatal("usage: later-bender-agent enroll|run|version [flags]")
+	}
+	if os.Args[1] == "version" {
+		printVersion(os.Stdout)
+		return
 	}
 	ctx := context.Background()
 	cmd := os.Args[1]
@@ -1477,4 +1485,8 @@ func main() {
 	if err := run(ctx, c, s, id); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatal(err)
 	}
+}
+
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "Later Bender Remote Agent %s (commit %s)\n", Version, Commit)
 }

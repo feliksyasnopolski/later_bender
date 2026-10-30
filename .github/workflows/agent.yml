@@ -1,0 +1,130 @@
+name: Remote Agent
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: Run native Go tests
+        working-directory: agent
+        run: go test ./...
+      - name: Verify Linux version command
+        working-directory: agent
+        run: |
+          go build -o /tmp/later-bender-agent .
+          output=$(/tmp/later-bender-agent version)
+          printf '%s\n' "$output"
+          test "$output" = "Later Bender Remote Agent dev (commit unknown)"
+
+  build:
+    needs: test
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: ''
+          - goos: linux
+            goarch: arm64
+            ext: ''
+          - goos: darwin
+            goarch: arm64
+            ext: ''
+          - goos: windows
+            goarch: amd64
+            ext: '.exe'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - name: Compile agent
+        working-directory: agent
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+          RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'dev' }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          mkdir -p dist
+          output="later-bender-agent-${GOOS}-${GOARCH}${{ matrix.ext }}"
+          go build -trimpath -ldflags "-s -w -X main.Version=${RELEASE_VERSION} -X main.Commit=${RELEASE_COMMIT}" -o "dist/${output}" .
+          if [ "$GOOS" = windows ]; then
+            file "dist/${output}" | grep -q 'PE32+'
+          fi
+          printf '%s\n' "$output"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: agent/dist/later-bender-agent-*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: agent-*
+          path: release-assets
+          merge-multiple: true
+      - name: Generate SHA-256 manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path("release-assets")
+          files = []
+          for path in sorted(root.glob("later-bender-agent-*")):
+              data = path.read_bytes()
+              files.append({
+                  "name": path.name,
+                  "size": len(data),
+                  "sha256": hashlib.sha256(data).hexdigest(),
+                  "url": f"{os.environ['REPOSITORY_URL']}/releases/download/{os.environ['RELEASE_TAG']}/{path.name}",
+              })
+          expected = {
+              "later-bender-agent-linux-amd64",
+              "later-bender-agent-linux-arm64",
+              "later-bender-agent-darwin-arm64",
+              "later-bender-agent-windows-amd64.exe",
+          }
+          if {item["name"] for item in files} != expected:
+              raise SystemExit(f"unexpected release binaries: {[item['name'] for item in files]}")
+          manifest = {"version": os.environ["RELEASE_TAG"], "commit": os.environ["RELEASE_COMMIT"], "assets": files}
+          Path("release-assets/manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          Path("release-assets/checksums.txt").write_text("".join(f"{item['sha256']}  {item['name']}\n" for item in files))
+          PY
+      - name: Publish immutable GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" release-assets/later-bender-agent-* release-assets/manifest.json release-assets/checksums.txt \
+            --verify-tag --title "Later Bender Remote Agent $RELEASE_TAG" \
+            --notes "First public Remote Agent release. Download the platform binary directly from this versioned release; verify it with manifest.json or checksums.txt."
