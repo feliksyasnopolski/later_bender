@@ -24,12 +24,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
 )
 
@@ -407,7 +405,7 @@ type Advertisement struct {
 }
 
 func advertise(name string) Advertisement {
-	return Advertisement{Name: name, Platform: runtime.GOOS, Architecture: runtime.GOARCH, SupportedExecutors: []string{"native"}, Capabilities: map[string]any{"process_control": "process_group", "isolation": "none", "hardware_access": "host"}}
+	return Advertisement{Name: name, Platform: runtime.GOOS, Architecture: runtime.GOARCH, SupportedExecutors: []string{"native"}, Capabilities: map[string]any{"process_control": processControlCapability, "pty": ptySupported, "isolation": "none", "hardware_access": "host"}}
 }
 
 func enroll(ctx context.Context, c *Client, store Store, name, token string) error {
@@ -573,7 +571,7 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 		if !ok {
 			return nil, errors.New("invalid shell invocation")
 		}
-		argv = []string{"/bin/bash", "-lc", nativeShellCommand(command, executionRoot, w.ExternalRoot)}
+		argv = shellInvocation(command, executionRoot, w.ExternalRoot)
 	case "argv":
 		values, ok := invocation["argv"].([]any)
 		if !ok || len(values) == 0 {
@@ -647,6 +645,9 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 	}
 	stdin, _ := op.Spec["stdin"].(string)
 	usePTY, _ := op.Spec["pty"].(bool)
+	if usePTY && !ptySupported {
+		return nil, errors.New("PTY execution is not supported on this platform")
+	}
 	var sessionInput io.WriteCloser
 	if !usePTY {
 		if persistent, _ := op.Spec["interactive"].(bool); persistent {
@@ -672,15 +673,7 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 		return nil, err
 	}
 	cmd.Stdout, cmd.Stderr = &boundedOutput{file: out}, &boundedOutput{file: errout}
-	if !usePTY {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
-	var ptyFile *os.File
-	if usePTY {
-		ptyFile, err = pty.Start(cmd)
-	} else {
-		err = cmd.Start()
-	}
+	ptyFile, err := startNativeCommand(cmd, usePTY)
 	if err != nil {
 		_ = out.Close()
 		_ = errout.Close()
@@ -724,11 +717,11 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 			e.mu.Lock()
 			e.timedOut = true
 			e.mu.Unlock()
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+			_ = terminateProcess(cmd.Process.Pid, false)
 			select {
 			case <-done:
 			case <-time.After(2 * time.Second):
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				_ = terminateProcess(cmd.Process.Pid, true)
 				<-done
 			}
 		}
@@ -757,10 +750,6 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 	return e, nil
 }
 
-func processIsAlive(pid int) bool {
-	return pid > 0 && syscall.Kill(pid, 0) == nil
-}
-
 func signalNative(e *LocalExecution) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -768,7 +757,7 @@ func signalNative(e *LocalExecution) error {
 		return nil
 	}
 	e.cancelled = true
-	return syscall.Kill(-e.ProcessGroup, syscall.SIGTERM)
+	return terminateProcess(e.ProcessGroup, false)
 }
 
 func executionReport(e *LocalExecution) map[string]string {
@@ -1031,13 +1020,6 @@ func bytesContainsNul(value []byte) bool {
 	return false
 }
 
-func nativeShellCommand(command, root string, externalRoot bool) string {
-	if externalRoot {
-		return command
-	}
-	return rewriteShellNativePaths(command, root)
-}
-
 func nativeArgValue(value, root string, externalRoot bool) string {
 	if externalRoot {
 		return value
@@ -1046,18 +1028,7 @@ func nativeArgValue(value, root string, externalRoot bool) string {
 }
 
 func rewriteNativePaths(value, root string) string {
-	const rootMarker = "\x00LB_ROOT_PATH\x00"
-	value = strings.ReplaceAll(value, "/root", rootMarker)
-	value = strings.ReplaceAll(value, "/workspace", root)
-	return strings.ReplaceAll(value, rootMarker, filepath.Join(root, "root"))
-}
-
-func rewriteShellNativePaths(value, root string) string {
-	quotedRoot := "'" + strings.ReplaceAll(root, "'", "'\\''") + "'"
-	const rootMarker = "\x00LB_ROOT_PATH\x00"
-	value = strings.ReplaceAll(value, "/root", rootMarker)
-	value = strings.ReplaceAll(value, "/workspace", quotedRoot)
-	return strings.ReplaceAll(value, rootMarker, "'"+strings.ReplaceAll(filepath.Join(root, "root"), "'", "'\\''")+"'")
+	return strings.ReplaceAll(value, "/workspace", root)
 }
 
 func provisionWorkspaceFiles(ctx context.Context, c *Client, s Store, ref string) error {
@@ -1105,7 +1076,7 @@ func provisionWorkspaceFiles(ctx context.Context, c *Client, s Store, ref string
 		if err := os.MkdirAll(filepath.Dir(item.path), 0700); err != nil {
 			return err
 		}
-		file, err := os.OpenFile(item.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, item.mode)
+		file, err := os.OpenFile(item.path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|credentialOpenFlags(), item.mode)
 		if err != nil {
 			return errors.New("credential target is not safely create-only")
 		}

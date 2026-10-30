@@ -312,12 +312,12 @@ func TestCredentialFilesAreCreateOnlyAndWorkspaceScoped(t *testing.T) {
 func TestRewriteNativePathsKeepsLogicalWorkspacePathsAgentOwned(t *testing.T) {
 	root := "/private/var/felix/workspaces/WS-1/root"
 	got := rewriteNativePaths("cat /workspace/input && test -f /root/id_ed25519", root)
-	want := "cat /private/var/felix/workspaces/WS-1/root/input && test -f /private/var/felix/workspaces/WS-1/root/root/id_ed25519"
+	want := "cat /private/var/felix/workspaces/WS-1/root/input && test -f /root/id_ed25519"
 	if got != want {
 		t.Fatalf("rewritten command = %q, want %q", got, want)
 	}
-	shell := rewriteShellNativePaths("sha256sum /workspace/input", root)
-	if shell != "sha256sum '/private/var/felix/workspaces/WS-1/root'/input" {
+	shell := rewriteShellNativePaths("sha256sum /workspace/input && test -f /root/ad-secrets/samba-admin-auth", root)
+	if shell != "sha256sum '/private/var/felix/workspaces/WS-1/root'/input && test -f /root/ad-secrets/samba-admin-auth" {
 		t.Fatalf("shell rewrite = %q", shell)
 	}
 }
