@@ -29,6 +29,9 @@ func TestEnrollmentAndChallengeAuthenticationUseBackendContract(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"ref": "RA-1"})
 		case "/api/remote-agent/challenge":
+			if body["public_key"] != enrollment["public_key"] {
+				t.Error("challenge did not identify the enrolled public key")
+			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"challenge_id": "challenge-1", "nonce": "nonce-1", "signed_bytes": "later-bender-agent-auth-v1\nRA-1\nchallenge-1\nnonce-1\n2026-09-21T12:00:00.000000Z"})
 		case "/api/remote-agent/authenticate":
 			public, _ := base64.StdEncoding.DecodeString(enrollment["public_key"].(string))

@@ -23,8 +23,15 @@ module Api
     end
 
     def challenge
-      agent = RemoteAgent.find_by!(ref: request_payload.fetch("agent"))
-      reject_agent!(agent)
+      payload = request_payload
+      agents = RemoteAgent.where(ref: payload.fetch("agent"), enabled: true, revoked_at: nil)
+      if payload["public_key"].present?
+        agents = agents.where(public_key: payload["public_key"])
+      end
+      agents = agents.limit(2)
+      raise ActiveRecord::RecordNotFound unless agents.one?
+
+      agent = agents.first
       nonce = SecureRandom.hex(32)
       challenge = RemoteAgentChallenge.issue!(remote_agent: agent, nonce:)
       render json: { challenge_id: challenge.challenge_id, nonce:, expires_at: challenge.expires_at, signed_bytes: RemoteAgentCrypto.signed_bytes(agent.ref, challenge.challenge_id, nonce, challenge.expires_at) }
@@ -34,9 +41,10 @@ module Api
 
     def authenticate
       payload = request_payload
-      agent = RemoteAgent.find_by!(ref: payload.fetch("agent"))
+      challenge = RemoteAgentChallenge.find_by!(challenge_id: payload.fetch("challenge_id"))
+      agent = challenge.remote_agent
+      raise ActiveRecord::RecordNotFound unless agent.ref == payload.fetch("agent")
       reject_agent!(agent)
-      challenge = agent.remote_agent_challenges.find_by!(challenge_id: payload.fetch("challenge_id"))
       nonce = payload.fetch("nonce")
       raise RemoteAgentCrypto::InvalidSignature unless Digest::SHA256.hexdigest(nonce) == challenge.nonce_digest
 
