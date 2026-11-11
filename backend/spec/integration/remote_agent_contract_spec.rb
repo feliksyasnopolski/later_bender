@@ -47,14 +47,14 @@ RSpec.describe "Remote Agent contract", type: :request do
 
   it "authenticates a signed challenge, replaces sessions, refreshes capabilities, and projects truthful targets" do
     agent = enroll_agent
-    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: Base64.strict_encode64(key.verify_key.to_bytes) }.to_json, headers: json_headers
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: agent.public_key }.to_json, headers: json_headers
     challenge = json_body
     signature = key.sign(challenge.fetch("signed_bytes"))
     post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(signature) }.to_json, headers: json_headers
     expect(response).to have_http_status(:ok)
     session_token = json_body.fetch("session_token")
 
-    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: Base64.strict_encode64(key.verify_key.to_bytes) }.to_json, headers: json_headers
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: agent.public_key }.to_json, headers: json_headers
     replacement = json_body
     post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: replacement.fetch("challenge_id"), nonce: replacement.fetch("nonce"), signature: Base64.strict_encode64(key.sign(replacement.fetch("signed_bytes"))) }.to_json, headers: json_headers
     expect(response).to have_http_status(:ok)
@@ -79,6 +79,66 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(response).to have_http_status(:unauthorized)
     get "/api/workspaces/targets", headers: json_headers(@raw_token)
     expect(json_body.fetch("targets").map { |target| target["ref"] }).not_to include(agent.ref)
+  end
+
+  it "challenges the active agent when another user has a revoked agent with the same ref" do
+    stale_agent = other_user.remote_agents.create!(
+      name: "Revoked Agent", ref: "RA-1", public_number: 1,
+      public_key: Base64.strict_encode64(Ed25519::SigningKey.generate.verify_key.to_bytes),
+      platform: "linux", architecture: "arm64", supported_executors: [ "native" ], capabilities: {}
+    )
+    stale_agent.revoke!
+    agent = enroll_agent
+    expect(agent.ref).to eq(stale_agent.ref)
+
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: agent.public_key }.to_json, headers: json_headers
+
+    expect(response).to have_http_status(:ok)
+    challenge = json_body
+    expect(challenge.fetch("signed_bytes")).to include("\n#{agent.ref}\n")
+
+    post "/api/remote-agent/authenticate", params: {
+      agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"),
+      signature: Base64.strict_encode64(key.sign(challenge.fetch("signed_bytes")))
+    }.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
+  end
+
+  it "rejects a challenge ref shared by multiple active agents" do
+    other_key = Ed25519::SigningKey.generate
+    other_agent = other_user.remote_agents.create!(
+      name: "Other Active Agent", ref: "RA-1", public_number: 1,
+      public_key: Base64.strict_encode64(other_key.verify_key.to_bytes),
+      platform: "linux", architecture: "arm64", supported_executors: [ "native" ], capabilities: {}
+    )
+    agent = enroll_agent
+    expect(agent.ref).to eq("RA-1")
+
+    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+
+    expect(response).to have_http_status(:unauthorized)
+
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: agent.public_key }.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
+    selected_challenge = RemoteAgentChallenge.find_by!(challenge_id: json_body.fetch("challenge_id"))
+    expect(selected_challenge.remote_agent_id).to eq(agent.id)
+    selected_payload = json_body
+    post "/api/remote-agent/authenticate", params: {
+      agent: agent.ref, challenge_id: selected_payload.fetch("challenge_id"), nonce: selected_payload.fetch("nonce"),
+      signature: Base64.strict_encode64(key.sign(selected_payload.fetch("signed_bytes")))
+    }.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
+
+    post "/api/remote-agent/challenge", params: { agent: other_agent.ref, public_key: other_agent.public_key }.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
+    selected_challenge = RemoteAgentChallenge.find_by!(challenge_id: json_body.fetch("challenge_id"))
+    expect(selected_challenge.remote_agent_id).to eq(other_agent.id)
+    selected_payload = json_body
+    post "/api/remote-agent/authenticate", params: {
+      agent: other_agent.ref, challenge_id: selected_payload.fetch("challenge_id"), nonce: selected_payload.fetch("nonce"),
+      signature: Base64.strict_encode64(other_key.sign(selected_payload.fetch("signed_bytes")))
+    }.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
   end
 
   it "rejects a replayed challenge and an expired enrollment token" do
@@ -316,7 +376,7 @@ RSpec.describe "Remote Agent contract", type: :request do
   end
 
   def authenticate_agent(agent)
-    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: Base64.strict_encode64(key.verify_key.to_bytes) }.to_json, headers: json_headers
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: agent.public_key }.to_json, headers: json_headers
     challenge = json_body
     post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(key.sign(challenge.fetch("signed_bytes"))) }.to_json, headers: json_headers
     json_body.fetch("session_token")

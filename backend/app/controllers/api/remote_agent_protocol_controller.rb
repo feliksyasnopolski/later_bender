@@ -24,15 +24,14 @@ module Api
 
     def challenge
       payload = request_payload
-      agents = RemoteAgent.where(ref: payload.fetch("agent"))
-      agent = if payload["public_key"].present?
-        agents.find_by!(public_key: payload.fetch("public_key"))
-      else
-        raise ActiveRecord::RecordNotFound unless agents.one?
-
-        agents.first!
+      agents = RemoteAgent.where(ref: payload.fetch("agent"), enabled: true, revoked_at: nil)
+      if payload["public_key"].present?
+        agents = agents.where(public_key: payload["public_key"])
       end
-      reject_agent!(agent)
+      agents = agents.limit(2)
+      raise ActiveRecord::RecordNotFound unless agents.one?
+
+      agent = agents.first
       nonce = SecureRandom.hex(32)
       challenge = RemoteAgentChallenge.issue!(remote_agent: agent, nonce:)
       render json: { challenge_id: challenge.challenge_id, nonce:, expires_at: challenge.expires_at, signed_bytes: RemoteAgentCrypto.signed_bytes(agent.ref, challenge.challenge_id, nonce, challenge.expires_at) }

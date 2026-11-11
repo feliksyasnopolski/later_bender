@@ -452,7 +452,9 @@ func authenticate(ctx context.Context, c *Client, id *Identity) (int, error) {
 		return 0, errors.New("invalid Agent private key")
 	}
 	publicKey := ed25519.PrivateKey(keyBytes).Public().(ed25519.PublicKey)
-	if err := c.post(ctx, "/api/remote-agent/challenge", map[string]string{"agent": id.Ref, "public_key": base64.StdEncoding.EncodeToString(publicKey)}, false, &ch); err != nil {
+	if err := c.post(ctx, "/api/remote-agent/challenge", map[string]string{
+		"agent": id.Ref, "public_key": base64.StdEncoding.EncodeToString(publicKey),
+	}, false, &ch); err != nil {
 		return 0, err
 	}
 	sig, err := ed25519.PrivateKey(keyBytes).Sign(rand.Reader, []byte(ch.SignedBytes), crypto.Hash(0))
