@@ -23,20 +23,31 @@ module Api
     end
 
     def challenge
-      agent = RemoteAgent.find_by!(ref: request_payload.fetch("agent"))
+      payload = request_payload
+      agents = RemoteAgent.where(ref: payload.fetch("agent"))
+      agent = if payload["public_key"].present?
+        agents.find_by!(public_key: payload.fetch("public_key"))
+      else
+        raise ActiveRecord::RecordNotFound unless agents.one?
+
+        agents.first!
+      end
       reject_agent!(agent)
       nonce = SecureRandom.hex(32)
       challenge = RemoteAgentChallenge.issue!(remote_agent: agent, nonce:)
       render json: { challenge_id: challenge.challenge_id, nonce:, expires_at: challenge.expires_at, signed_bytes: RemoteAgentCrypto.signed_bytes(agent.ref, challenge.challenge_id, nonce, challenge.expires_at) }
     rescue KeyError
       render json: { error: { code: "validation_failed", message: "agent is required" } }, status: :unprocessable_content
+    rescue ActiveRecord::RecordNotFound
+      render json: { error: { code: "authentication_failed", message: "Agent authentication failed" } }, status: :unauthorized
     end
 
     def authenticate
       payload = request_payload
-      agent = RemoteAgent.find_by!(ref: payload.fetch("agent"))
+      challenge = RemoteAgentChallenge.find_by!(challenge_id: payload.fetch("challenge_id"))
+      agent = challenge.remote_agent
+      raise ActiveRecord::RecordNotFound unless agent.ref == payload.fetch("agent")
       reject_agent!(agent)
-      challenge = agent.remote_agent_challenges.find_by!(challenge_id: payload.fetch("challenge_id"))
       nonce = payload.fetch("nonce")
       raise RemoteAgentCrypto::InvalidSignature unless Digest::SHA256.hexdigest(nonce) == challenge.nonce_digest
 

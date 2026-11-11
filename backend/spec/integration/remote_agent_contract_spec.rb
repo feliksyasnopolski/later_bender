@@ -47,14 +47,14 @@ RSpec.describe "Remote Agent contract", type: :request do
 
   it "authenticates a signed challenge, replaces sessions, refreshes capabilities, and projects truthful targets" do
     agent = enroll_agent
-    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: Base64.strict_encode64(key.verify_key.to_bytes) }.to_json, headers: json_headers
     challenge = json_body
     signature = key.sign(challenge.fetch("signed_bytes"))
     post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(signature) }.to_json, headers: json_headers
     expect(response).to have_http_status(:ok)
     session_token = json_body.fetch("session_token")
 
-    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: Base64.strict_encode64(key.verify_key.to_bytes) }.to_json, headers: json_headers
     replacement = json_body
     post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: replacement.fetch("challenge_id"), nonce: replacement.fetch("nonce"), signature: Base64.strict_encode64(key.sign(replacement.fetch("signed_bytes"))) }.to_json, headers: json_headers
     expect(response).to have_http_status(:ok)
@@ -89,7 +89,7 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(response).to have_http_status(:unprocessable_content)
 
     agent = enroll_agent
-    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: Base64.strict_encode64(key.verify_key.to_bytes) }.to_json, headers: json_headers
     challenge = json_body
     params = { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(key.sign(challenge.fetch("signed_bytes"))) }
     post "/api/remote-agent/authenticate", params: params.to_json, headers: json_headers
@@ -100,7 +100,7 @@ RSpec.describe "Remote Agent contract", type: :request do
 
   it "rejects the wrong key and cross-user access" do
     agent = enroll_agent
-    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: Base64.strict_encode64(key.verify_key.to_bytes) }.to_json, headers: json_headers
     challenge = json_body
     wrong_key = Ed25519::SigningKey.generate
     post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(wrong_key.sign(challenge.fetch("signed_bytes"))) }.to_json, headers: json_headers
@@ -109,6 +109,51 @@ RSpec.describe "Remote Agent contract", type: :request do
     _other_token, other_raw = ApiToken.issue!(user: other_user, name: "other")
     post "/api/remote-agents/#{agent.ref}/revoke", headers: json_headers(other_raw)
     expect(response).to have_http_status(:not_found)
+  end
+
+  it "authenticates agents with colliding per-user refs using their public keys" do
+    first_agent = enroll_agent
+    first_key = key
+    other_key = Ed25519::SigningKey.generate
+    _other_api_token, other_raw = ApiToken.issue!(user: other_user, name: "other remote agent")
+    post "/api/remote-agents/enrollment-tokens", headers: json_headers(other_raw)
+    enrollment_token = json_body.fetch("token")
+    post "/api/remote-agent/enroll", params: advertisement.merge("enrollment_token" => enrollment_token, "public_key" => Base64.strict_encode64(other_key.verify_key.to_bytes)).to_json, headers: json_headers
+    expect(response).to have_http_status(:created)
+    second_agent = other_user.remote_agents.first
+    expect(second_agent.ref).to eq(first_agent.ref)
+
+    post "/api/remote-agent/challenge", params: { agent: second_agent.ref, public_key: Base64.strict_encode64(other_key.verify_key.to_bytes) }.to_json, headers: json_headers
+    challenge = json_body
+    post "/api/remote-agent/authenticate", params: { agent: second_agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(other_key.sign(challenge.fetch("signed_bytes"))) }.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
+    second_session = json_body.fetch("session_token")
+
+    post "/api/remote-agent/challenge", params: { agent: first_agent.ref, public_key: Base64.strict_encode64(first_key.verify_key.to_bytes) }.to_json, headers: json_headers
+    challenge = json_body
+    post "/api/remote-agent/authenticate", params: { agent: first_agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(first_key.sign(challenge.fetch("signed_bytes"))) }.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
+    first_session = json_body.fetch("session_token")
+
+    post "/api/remote-agent/heartbeat", params: advertisement.to_json, headers: json_headers(second_session)
+    expect(response).to have_http_status(:ok)
+    expect(second_agent.reload.last_seen_at).to be_present
+    post "/api/remote-agent/heartbeat", params: advertisement.to_json, headers: json_headers(first_session)
+    expect(response).to have_http_status(:ok)
+    expect(first_agent.reload.last_seen_at).to be_present
+  end
+
+  it "keeps legacy challenge requests working only when the ref is unambiguous" do
+    agent = enroll_agent
+    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    expect(response).to have_http_status(:ok)
+
+    _other_api_token, other_raw = ApiToken.issue!(user: other_user, name: "other remote agent")
+    post "/api/remote-agents/enrollment-tokens", headers: json_headers(other_raw)
+    post "/api/remote-agent/enroll", params: advertisement.merge("enrollment_token" => json_body.fetch("token"), "public_key" => Base64.strict_encode64(Ed25519::SigningKey.generate.verify_key.to_bytes)).to_json, headers: json_headers
+    expect(response).to have_http_status(:created)
+    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    expect(response).to have_http_status(:unauthorized)
   end
 
   it "allocates the canonical Workspace before exposing an idempotent prepare operation" do
@@ -271,7 +316,7 @@ RSpec.describe "Remote Agent contract", type: :request do
   end
 
   def authenticate_agent(agent)
-    post "/api/remote-agent/challenge", params: { agent: agent.ref }.to_json, headers: json_headers
+    post "/api/remote-agent/challenge", params: { agent: agent.ref, public_key: Base64.strict_encode64(key.verify_key.to_bytes) }.to_json, headers: json_headers
     challenge = json_body
     post "/api/remote-agent/authenticate", params: { agent: agent.ref, challenge_id: challenge.fetch("challenge_id"), nonce: challenge.fetch("nonce"), signature: Base64.strict_encode64(key.sign(challenge.fetch("signed_bytes"))) }.to_json, headers: json_headers
     json_body.fetch("session_token")

@@ -447,10 +447,14 @@ func authenticate(ctx context.Context, c *Client, id *Identity) (int, error) {
 		Nonce       string `json:"nonce"`
 		SignedBytes string `json:"signed_bytes"`
 	}
-	if err := c.post(ctx, "/api/remote-agent/challenge", map[string]string{"agent": id.Ref}, false, &ch); err != nil {
+	keyBytes, _ := base64.StdEncoding.DecodeString(id.PrivateKey)
+	if len(keyBytes) != ed25519.PrivateKeySize {
+		return 0, errors.New("invalid Agent private key")
+	}
+	publicKey := ed25519.PrivateKey(keyBytes).Public().(ed25519.PublicKey)
+	if err := c.post(ctx, "/api/remote-agent/challenge", map[string]string{"agent": id.Ref, "public_key": base64.StdEncoding.EncodeToString(publicKey)}, false, &ch); err != nil {
 		return 0, err
 	}
-	keyBytes, _ := base64.StdEncoding.DecodeString(id.PrivateKey)
 	sig, err := ed25519.PrivateKey(keyBytes).Sign(rand.Reader, []byte(ch.SignedBytes), crypto.Hash(0))
 	if err != nil {
 		return 0, fmt.Errorf("sign challenge: %w", err)
