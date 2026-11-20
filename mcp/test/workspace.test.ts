@@ -213,6 +213,23 @@ test("read_workspace_file returns structured content through the real tools/call
   await server.close();
 });
 
+test("put_file_in_workspace returns required integrity fields through tools/call", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const api = {
+    workspaceAction: async () => ({ workspace: "WS-1", file: "LB-F1", path: "input.bin", byte_size: 8, sha256: "a".repeat(64) }),
+  } as unknown as LaterBenderApi;
+  registerWorkspaceTools(server, api);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "put_file_in_workspace", arguments: { workspace: "WS-1", file: "LB-F1" } });
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(result.structuredContent, { workspace: "WS-1", file: "LB-F1", path: "input.bin", byte_size: 8, sha256: "a".repeat(64) });
+  await client.close();
+  await server.close();
+});
+
 test("read_workspace_transcript rejects malformed backend events at the tool boundary", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const api = {

@@ -90,7 +90,7 @@ module Api
       path = payload["path"].presence || "/workspace/#{file.filename}"
       return remote_file_operation("put_file", payload.merge("path" => path, "file" => file.ref, "filename" => file.filename, "media_type" => file.media_type, "byte_size" => file.byte_size, "sha256" => file.sha256)) if @workspace.remote_workspace_placement.present?
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/files", payload.merge("bytes_base64" => Base64.strict_encode64(file.original.download), "filename" => file.filename, "media_type" => file.media_type))
-      result["byte_size"] = Integer(result["byte_size"]) if result.key?("byte_size")
+      result = verified_file_import_result(result, file)
       @workspace.append_event!("file_imported", result.merge("file" => file.ref))
       render json: result.merge("workspace" => @workspace.ref, "file" => file.ref)
     rescue WorkspaceRunnerClient::Unavailable => e
@@ -374,15 +374,34 @@ module Api
       raise WorkspaceRunnerClient::Unavailable.new(operation.error_message.presence || "Remote Workspace operation failed", code: operation.result["code"] || "workspace_unavailable") if operation.state == "failed"
       result = operation.result.merge("workspace" => @workspace.ref)
       if kind == "put_file"
-        result["byte_size"] = Integer(result["byte_size"]) if result.key?("byte_size")
+        file = find_file(payload.fetch("file"))
+        result = verified_file_import_result(result, file)
         result.merge!("file" => payload["file"], "path" => payload["path"])
         @workspace.append_event!("file_imported", result.slice("file", "path", "byte_size", "sha256"))
+      elsif kind == "read_file"
+        %w[chunk_byte_size total_byte_size].each do |key|
+          result[key] = Integer(result.fetch(key)) if result.key?(key)
+        rescue ArgumentError, TypeError
+          raise WorkspaceRunnerClient::Unavailable.new("Remote Workspace returned an invalid file size", code: "workspace_unavailable")
+        end
       elsif kind == "promote_file"
         @workspace.append_event!("file_promoted", result.slice("ref", "path", "byte_size", "sha256"))
       end
       render json: result
     rescue ActiveRecord::RecordInvalid => e
       raise WorkspaceRunnerClient::Unavailable.new(e.message, code: "validation_failed")
+    end
+
+    def verified_file_import_result(result, file)
+      byte_size = Integer(result.fetch("byte_size"))
+      sha256 = result.fetch("sha256").to_s
+      unless byte_size == file.byte_size && ActiveSupport::SecurityUtils.secure_compare(sha256, file.sha256)
+        raise WorkspaceRunnerClient::Unavailable.new("Workspace file import integrity acknowledgement was invalid", code: "workspace_unavailable")
+      end
+
+      result.merge("byte_size" => file.byte_size, "sha256" => file.sha256)
+    rescue KeyError, ArgumentError, TypeError
+      raise WorkspaceRunnerClient::Unavailable.new("Workspace file import integrity acknowledgement was invalid", code: "workspace_unavailable")
     end
 
     def find_execution_by_ref = current_user.workspaces.joins(:workspace_executions).merge(WorkspaceExecution.where(ref: params[:ref])).first!.workspace_executions.find_by!(ref: params[:ref])
