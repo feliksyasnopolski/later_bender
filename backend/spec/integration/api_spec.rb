@@ -223,6 +223,19 @@ RSpec.describe "Api API", type: :request do
     assert_raises(ActiveRecord::RecordNotFound) { StoredFile.find(file.id) }
   end
 
+  it "includes publication state in the paginated file-list projection" do
+    bytes = "<p>public</p>"
+    file = StoredFile.new(project: @project, filename: "public.html", media_type: "text/html", byte_size: bytes.bytesize, sha256: Digest::SHA256.hexdigest(bytes))
+    file.original.attach(io: StringIO.new(bytes), filename: "public.html", content_type: "text/html")
+    file.save!
+    file.update!(public_token: "published-token")
+
+    get "/api/projects/writing/files", params: { paginated: true }, headers: json_headers(@raw_token)
+    assert_response :success
+    listed = json_body.fetch("files").find { |entry| entry["ref"] == file.ref }
+    assert_equal true, listed.fetch("published")
+  end
+
   it "creates a URL-backed file with structured provenance and stable source errors" do
     post "/api/projects/writing/files", params: {}.to_json, headers: json_headers(@raw_token)
     assert_response :unprocessable_content

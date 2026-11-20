@@ -128,7 +128,7 @@ module Api
     end
 
     def file_list_json(file)
-      { ref: file.ref, number: file.number, filename: file.filename, media_type: file.media_type, byte_size: file.byte_size, sha256: file.sha256, tags: file.tags.order(:name).pluck(:name), project: { slug: file.project.slug, shorthand: file.project.shorthand, name: file.project.name }, created_at: file.created_at, updated_at: file.updated_at }
+      { ref: file.ref, number: file.number, filename: file.filename, media_type: file.media_type, byte_size: file.byte_size, sha256: file.sha256, tags: file.tags.order(:name).pluck(:name), project: { slug: file.project.slug, shorthand: file.project.shorthand, name: file.project.name }, published: file.published?, created_at: file.created_at, updated_at: file.updated_at }
     end
 
     def file_json(file)

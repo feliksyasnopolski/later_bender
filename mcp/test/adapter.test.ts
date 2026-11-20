@@ -307,6 +307,43 @@ test("manage_files publishes and unpublishes files", async () => {
   assert.equal(tools.manage_files.inputSchema.shape.operations.safeParse([{ operation: "unpublish", ref: "LB-F17" }]).success, true);
 });
 
+test("list_files accepts the backend's canonical paginated file projection over MCP", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api, calls } = apiFor([{ status: 200, body: { files: [{ ref: "LB-F17", number: 17, filename: "page.html", media_type: "text/html", byte_size: 12, sha256: "a".repeat(64), tags: [], project: { slug: "writing", shorthand: "LB", name: "Writing" }, published: false, created_at: "2026-10-13T09:00:00Z", updated_at: "2026-10-13T09:00:00Z" }], next_cursor: null } }]);
+  registerTools(server, api);
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "list_files", arguments: { project: "writing" } });
+  assert.equal(result.isError, undefined);
+  const output = (result as any).structuredContent;
+  assert.equal(output.files[0].published, false);
+  assert.equal(output.next_cursor, null);
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/projects/writing/files?paginated=true");
+  await client.close();
+  await server.close();
+});
+
+test("promote_workspace_file accepts the backend's post-creation acknowledgement over MCP", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api, calls } = apiFor([{ status: 200, body: { ref: "LB-F18", filename: "artifact.bin", media_type: "application/octet-stream", byte_size: 6, sha256: "b".repeat(64) } }]);
+  registerTools(server, api);
+  const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test-client", version: "1" });
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const result = await client.callTool({ name: "promote_workspace_file", arguments: { workspace: "WS-4", path: "output/artifact.bin", project: "writing" } });
+  assert.equal(result.isError, undefined);
+  assert.deepEqual((result as any).structuredContent, { ref: "LB-F18", filename: "artifact.bin", media_type: "application/octet-stream", byte_size: 6, sha256: "b".repeat(64) });
+  assert.equal(calls[0].url, "https://example.test/laterbender/api/workspaces/WS-4/file-promote");
+  assert.equal(calls[0].init.method, "POST");
+  await client.close();
+  await server.close();
+});
+
 test("create_file accepts exactly one attachment or URL source and preserves URL acknowledgements", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api, calls } = apiFor([{ status: 201, body: { ref: "LB-F20", updated_at: "2026-09-17T12:00:00Z", filename: "ignored.txt" } }]);

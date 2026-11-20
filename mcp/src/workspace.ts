@@ -894,7 +894,7 @@ export function registerWorkspaceTools(
     "promote_workspace_file",
     {
       description:
-        "Promote one Workspace-relative artifact into a normal immutable canonical Later Bender File. Promotion is explicit and becomes a transcript event. Unknown Workspaces return not_found; missing artifacts or invalid promotion metadata return the corresponding path or validation error.",
+        "Promote one Workspace-relative artifact into a normal immutable canonical Later Bender File. There is no arbitrary 1 MiB promotion limit; promotion reads the complete artifact into memory and the resulting File is subject to the backend's configured MAX_FILE_UPLOAD_BYTES limit (100 MiB by default), runner and HTTP transport capacity, and available memory. This differs from retrieve_file's 20 MiB embedded-resource limit. Promotion is explicit and becomes a transcript event. Unknown Workspaces return not_found; missing artifacts or invalid promotion metadata return the corresponding path or validation error.",
       inputSchema: {
         workspace: opaqueRef,
         path: z.string(),
