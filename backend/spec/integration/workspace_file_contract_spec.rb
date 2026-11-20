@@ -62,6 +62,36 @@ RSpec.describe "Workspace file and transcript contracts", type: :request do
     expect(workspace.workspace_events.last.payload).to include("byte_size" => bytes.bytesize, "sha256" => file.sha256)
   end
 
+  it "normalizes Remote Agent read-file byte counts for the MCP response contract" do
+    workspace = create_remote_workspace
+    allow_any_instance_of(Api::WorkspacesController).to receive(:observe_remote_operation) do |_controller, **_kwargs, &condition|
+      operation = workspace.remote_workspace_operations.order(:created_at).last
+      operation.update!(state: "succeeded", result: { "path" => "note.txt", "format" => "text", "data" => "hello", "media_type" => "text/plain", "chunk_byte_size" => "5", "total_byte_size" => "5", "stream_complete" => true, "next_cursor" => nil })
+      condition.call
+    end
+
+    post "/api/workspaces/#{workspace.ref}/file-read", params: { path: "note.txt" }.to_json, headers: json_headers(@raw_token)
+
+    expect(response).to have_http_status(:ok)
+    expect(json_body).to include("chunk_byte_size" => 5, "total_byte_size" => 5)
+  end
+
+  it "rejects a Remote Agent import acknowledgement whose digest does not match the canonical File" do
+    file = create_file("remote bytes".b)
+    workspace = create_remote_workspace
+    allow_any_instance_of(Api::WorkspacesController).to receive(:observe_remote_operation) do |_controller, **_kwargs, &condition|
+      operation = workspace.remote_workspace_operations.order(:created_at).last
+      operation.update!(state: "succeeded", result: { "byte_size" => file.byte_size.to_s, "sha256" => "0" * 64 })
+      condition.call
+    end
+
+    post "/api/workspaces/#{workspace.ref}/files", params: { file: file.ref, path: "input.bin" }.to_json, headers: json_headers(@raw_token)
+
+    expect(response).to have_http_status(:service_unavailable)
+    expect(json_body.dig("error", "code")).to eq("workspace_unavailable")
+    expect(workspace.workspace_events.where(kind: "file_imported")).to be_empty
+  end
+
   it "rejects malformed hosted integrity acknowledgements without recording an import" do
     bytes = "hosted bytes".b
     file = create_file(bytes)
