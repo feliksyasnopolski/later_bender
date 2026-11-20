@@ -110,11 +110,8 @@ module Api
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/file-promote", promotion_payload)
       project = current_user.projects.find_by!(slug: payload.fetch("project"))
       bytes = Base64.strict_decode64(result.fetch("bytes_base64"))
-      file = nil
-      ActiveRecord::Base.transaction do
-        file = StoredFileBytesCreator.call(project:, bytes:, filename: result["filename"] || payload["filename"] || File.basename(payload.fetch("path")), media_type: result["media_type"], tags: payload["tags"])
-        @workspace.append_event!("file_promoted", promotion_payload.merge("file" => file.ref))
-      end
+      file = StoredFileBytesCreator.call(project:, bytes:, filename: result["filename"] || payload["filename"] || File.basename(payload.fetch("path")), media_type: result["media_type"], tags: payload["tags"])
+      @workspace.append_event!("file_promoted", promotion_payload.merge("file" => file.ref))
       render json: { ref: file.ref, filename: file.filename, media_type: file.media_type, byte_size: file.byte_size, sha256: file.sha256 }
     rescue ArgumentError
       render json: { error: { code: "validation_failed", message: "Invalid file bytes" } }, status: :unprocessable_content

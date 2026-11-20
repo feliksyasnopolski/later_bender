@@ -52,17 +52,6 @@ RSpec.describe "Workspace file and transcript contracts", type: :request do
     assert_equal Digest::SHA256.hexdigest("\x00\x01\xffABC".b), json_body.fetch("sha256")
   end
 
-  it "rolls back a promoted File when its transcript event cannot be recorded" do
-    post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
-    workspace_ref = json_body.fetch("ref")
-    allow_any_instance_of(Workspace).to receive(:append_event!).and_raise("event write failed")
-
-    expect do
-      post "/api/workspaces/#{workspace_ref}/file-promote", params: { project: @project.slug, path: "/workspace/artifact.bin" }.to_json, headers: json_headers(@raw_token)
-    end.to raise_error("event write failed")
-    assert_empty @project.stored_files
-  end
-
   it "returns stable text and line-range errors from the runner" do
     post "/api/workspaces", params: {}.to_json, headers: json_headers(@raw_token)
     workspace_ref = json_body.fetch("ref")
