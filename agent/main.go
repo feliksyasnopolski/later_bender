@@ -265,6 +265,22 @@ type Client struct {
 	Session string
 }
 
+const fileTransferTimeout = 15 * time.Minute
+
+func (c *Client) fileTransferHTTP() *http.Client {
+	if c.HTTP == nil {
+		copy := *http.DefaultClient
+		copy.Timeout = fileTransferTimeout
+		return &copy
+	}
+	if c.HTTP.Timeout >= fileTransferTimeout {
+		return c.HTTP
+	}
+	copy := *c.HTTP
+	copy.Timeout = fileTransferTimeout
+	return &copy
+}
+
 func (c *Client) post(ctx context.Context, path string, body any, auth bool, out any) error {
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -313,7 +329,7 @@ func (c *Client) bytes(ctx context.Context, method, path string, body io.Reader,
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.fileTransferHTTP().Do(req)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -366,7 +382,7 @@ func (c *Client) downloadFile(ctx context.Context, workspace, operation, file st
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Session)
 	req.Header.Set("X-Remote-Operation-Id", operation)
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.fileTransferHTTP().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -377,11 +393,11 @@ func (c *Client) downloadFile(ctx context.Context, workspace, operation, file st
 	return io.ReadAll(resp.Body)
 }
 
-func (c *Client) uploadFile(ctx context.Context, workspace, operation string, body []byte) error {
+func (c *Client) uploadFile(ctx context.Context, workspace, operation string, body []byte) (map[string]string, error) {
 	path := "/api/remote-agent/workspaces/" + url.PathEscape(workspace) + "/file-upload"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Base+path, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Session)
 	req.Header.Set("X-Remote-Operation-Id", operation)
@@ -389,15 +405,32 @@ func (c *Client) uploadFile(ctx context.Context, workspace, operation string, bo
 	req.Header.Set("X-Byte-Size", strconv.Itoa(len(body)))
 	digest := sha256.Sum256(body)
 	req.Header.Set("X-SHA256", fmt.Sprintf("%x", digest))
-	resp, err := c.HTTP.Do(req)
+	resp, err := c.fileTransferHTTP().Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return errors.New("remote file upload failed")
+		return nil, errors.New("remote file upload failed")
 	}
-	return nil
+	var acknowledgement struct {
+		Ref       string `json:"ref"`
+		Filename  string `json:"filename"`
+		MediaType string `json:"media_type"`
+		ByteSize  int64  `json:"byte_size"`
+		SHA256    string `json:"sha256"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&acknowledgement); err != nil {
+		return nil, fmt.Errorf("decode remote file upload acknowledgement: %w", err)
+	}
+	if acknowledgement.Ref == "" || acknowledgement.Filename == "" || acknowledgement.MediaType == "" || acknowledgement.ByteSize != int64(len(body)) || acknowledgement.SHA256 != fmt.Sprintf("%x", digest) {
+		return nil, errors.New("remote file upload returned an incomplete acknowledgement")
+	}
+	return map[string]string{
+		"ref": acknowledgement.Ref, "filename": acknowledgement.Filename,
+		"media_type": acknowledgement.MediaType, "byte_size": strconv.FormatInt(acknowledgement.ByteSize, 10),
+		"sha256": acknowledgement.SHA256,
+	}, nil
 }
 
 type Advertisement struct {
@@ -817,7 +850,7 @@ func workspacePath(s Store, ref, value string) (string, error) {
 func remoteFileOperation(ctx context.Context, c *Client, s Store, op Operation) (string, map[string]string, error) {
 	if op.Type == "input_execution" {
 		execution := stringValue(op.Spec["execution"])
-		e, ok := executions[execution]
+		e, ok := localExecution(Operation{Execution: execution})
 		if !ok {
 			if b, err := os.ReadFile(filepath.Join(s.executionDir(execution), "metadata.json")); err == nil {
 				var saved LocalExecution
@@ -994,10 +1027,11 @@ func remoteFileOperation(ctx context.Context, c *Client, s Store, op Operation) 
 		if err != nil {
 			return "failed", nil, err
 		}
-		if err := c.uploadFile(ctx, op.Workspace, op.OperationID, bytes); err != nil {
+		acknowledgement, err := c.uploadFile(ctx, op.Workspace, op.OperationID, bytes)
+		if err != nil {
 			return "failed", nil, err
 		}
-		return "succeeded", nil, nil
+		return "succeeded", acknowledgement, nil
 	default:
 		return "failed", nil, errors.New("unknown remote file operation")
 	}
@@ -1141,6 +1175,8 @@ const (
 	wsHeartbeatInterval = 10 * time.Second
 	wsHeartbeatDeadline = 5 * time.Second
 	wsMaxRTTSamples     = 8
+	wsOperationWorkers  = 4
+	wsOperationQueue    = 32
 )
 
 type wsMessage struct {
@@ -1155,6 +1191,144 @@ type wsMessage struct {
 type rttHealth struct {
 	samples  []time.Duration
 	degraded int
+}
+
+type operationOutcome struct {
+	op      Operation
+	payload map[string]any
+}
+
+type operationJob struct {
+	op      Operation
+	done    bool
+	payload map[string]any
+}
+
+// operationDispatcher outlives individual WebSocket connections. A connection
+// loss therefore does not restart an HTTP/file operation; its cached result is
+// offered on the next connection until the server acknowledges it.
+type operationDispatcher struct {
+	ctx     context.Context
+	client  *Client
+	store   Store
+	execute func(Operation) map[string]any
+	mu      sync.Mutex
+	jobs    map[string]*operationJob
+	queue   chan Operation
+	ready   chan struct{}
+}
+
+func newOperationDispatcher(ctx context.Context, client *Client, store Store) *operationDispatcher {
+	return newOperationDispatcherWithExecutor(ctx, client, store, nil)
+}
+
+func newOperationDispatcherWithExecutor(ctx context.Context, client *Client, store Store, execute func(Operation) map[string]any) *operationDispatcher {
+	d := &operationDispatcher{ctx: ctx, client: client, store: store, execute: execute, jobs: make(map[string]*operationJob), queue: make(chan Operation, wsOperationQueue), ready: make(chan struct{}, 1)}
+	for i := 0; i < wsOperationWorkers; i++ {
+		go d.worker()
+	}
+	return d
+}
+
+func (d *operationDispatcher) worker() {
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case op := <-d.queue:
+			var payload map[string]any
+			if d.execute != nil {
+				payload = d.execute(op)
+			} else {
+				payload = operationResultPayload(d.ctx, d.client, d.store, op)
+			}
+			d.mu.Lock()
+			if job := d.jobs[op.OperationID]; job != nil {
+				job.payload = payload
+				job.done = true
+			}
+			d.mu.Unlock()
+			select {
+			case d.ready <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+func operationResultPayload(ctx context.Context, client *Client, store Store, op Operation) map[string]any {
+	status := "failed"
+	extra := map[string]string{"code": "workspace_operation_failed", "stage": op.Type}
+	err := handleOperationWithResult(ctx, client, store, op, func(resultStatus string, fields map[string]string) error {
+		status = resultStatus
+		extra = fields
+		return nil
+	})
+	if err != nil {
+		extra["message"] = err.Error()
+	}
+	payload := map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": status}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	if op.Execution != "" {
+		payload["execution"] = op.Execution
+	}
+	return payload
+}
+
+func (d *operationDispatcher) submit(op Operation) error {
+	if op.OperationID == "" {
+		return errors.New("operation is missing operation_id")
+	}
+	d.mu.Lock()
+	if existing := d.jobs[op.OperationID]; existing != nil {
+		if existing.op.Workspace != op.Workspace || existing.op.SpecHash != op.SpecHash || existing.op.Type != op.Type {
+			d.mu.Unlock()
+			return errors.New("operation ID was reused with different content")
+		}
+		d.mu.Unlock()
+		select {
+		case d.ready <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	job := &operationJob{op: op}
+	d.jobs[op.OperationID] = job
+	d.mu.Unlock()
+	select {
+	case d.queue <- op:
+		return nil
+	case <-d.ctx.Done():
+		d.mu.Lock()
+		delete(d.jobs, op.OperationID)
+		d.mu.Unlock()
+		return d.ctx.Err()
+	default:
+		d.mu.Lock()
+		delete(d.jobs, op.OperationID)
+		d.mu.Unlock()
+		return errors.New("operation queue is full; operation will be retried")
+	}
+}
+
+func (d *operationDispatcher) completed() []operationOutcome {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var outcomes []operationOutcome
+	for _, job := range d.jobs {
+		if job.done {
+			outcomes = append(outcomes, operationOutcome{op: job.op, payload: job.payload})
+		}
+	}
+	return outcomes
+}
+
+func (d *operationDispatcher) acknowledge(operationID string) {
+	d.mu.Lock()
+	delete(d.jobs, operationID)
+	d.mu.Unlock()
 }
 
 func (h *rttHealth) observe(sample time.Duration) bool {
@@ -1197,6 +1371,7 @@ func websocketURL(base string) string {
 
 func run(ctx context.Context, c *Client, store Store, id *Identity) error {
 	backoff := time.Second
+	dispatcher := newOperationDispatcher(ctx, c, store)
 	for {
 		if _, err := authenticate(ctx, c, id); err != nil {
 			log.Printf("authentication failed: %v; reconnecting", err)
@@ -1206,7 +1381,7 @@ func run(ctx context.Context, c *Client, store Store, id *Identity) error {
 			backoff = minDuration(backoff*2, 30*time.Second)
 			continue
 		}
-		if err := runWSS(ctx, c, store, id); err != nil && !errors.Is(err, context.Canceled) {
+		if err := runWSS(ctx, c, store, id, dispatcher); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("WSS disconnected: %v", err)
 		}
 		if err := waitBackoff(ctx, backoff); err != nil {
@@ -1219,7 +1394,7 @@ func run(ctx context.Context, c *Client, store Store, id *Identity) error {
 	}
 }
 
-func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
+func runWSS(ctx context.Context, c *Client, store Store, id *Identity, dispatcher *operationDispatcher) error {
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	header := http.Header{"Authorization": []string{"Bearer " + c.Session}}
 	conn, _, err := dialer.DialContext(ctx, websocketURL(c.Base), header)
@@ -1227,6 +1402,8 @@ func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
 		return err
 	}
 	defer conn.Close()
+	connectionDone := make(chan struct{})
+	defer close(connectionDone)
 	writeMu := sync.Mutex{}
 	send := func(value any) error {
 		writeMu.Lock()
@@ -1244,20 +1421,44 @@ func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
 			}
 			message := wsMessage{Type: stringValue(raw["type"]), ID: stringValue(raw["id"]), OperationID: stringValue(raw["operation_id"]), Interval: intValue(raw["heartbeat_interval_seconds"]), Operation: mapValue(raw["operation"])}
 			message.Payload = raw
-			readCh <- message
+			select {
+			case readCh <- message:
+			case <-connectionDone:
+				return
+			}
 		}
 	}()
 	heartbeat := time.NewTicker(wsHeartbeatInterval)
 	defer heartbeat.Stop()
 	lastPong := time.Now()
 	lastPing := map[string]time.Time{}
+	sentResults := make(map[string]bool)
 	var health rttHealth
+	sendCompleted := func() error {
+		for _, outcome := range dispatcher.completed() {
+			if sentResults[outcome.op.OperationID] {
+				continue
+			}
+			if err := send(outcome.payload); err != nil {
+				return err
+			}
+			sentResults[outcome.op.OperationID] = true
+		}
+		return nil
+	}
+	if err := sendCompleted(); err != nil {
+		return err
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case err := <-errCh:
 			return err
+		case <-dispatcher.ready:
+			if err := sendCompleted(); err != nil {
+				return err
+			}
 		case <-heartbeat.C:
 			if time.Since(lastPong) > wsHeartbeatInterval+wsHeartbeatDeadline {
 				return errors.New("WSS heartbeat deadline exceeded")
@@ -1278,24 +1479,17 @@ func runWSS(ctx context.Context, c *Client, store Store, id *Identity) error {
 					return err
 				}
 			case "ack":
+				dispatcher.acknowledge(message.OperationID)
+				delete(sentResults, message.OperationID)
 			case "operation":
 				b, _ := json.Marshal(message.Operation)
 				var op Operation
 				if err := json.Unmarshal(b, &op); err != nil {
 					return err
 				}
-				if err := handleOperationWithResult(ctx, c, store, op, func(status string, extra map[string]string) error {
-					payload := map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": status}
-					for key, value := range extra {
-						payload[key] = value
-					}
-					return send(payload)
-				}); err != nil {
-					failure := map[string]any{"type": "result", "operation_id": op.OperationID, "workspace": op.Workspace, "spec_hash": op.SpecHash, "status": "failed", "code": "workspace_operation_failed", "stage": op.Type, "message": err.Error()}
-					if op.Execution != "" {
-						failure["execution"] = op.Execution
-					}
-					_ = send(failure)
+				delete(sentResults, op.OperationID)
+				if err := dispatcher.submit(op); err != nil {
+					log.Printf("WSS operation %s deferred: %v", op.OperationID, err)
 				}
 			case "pong":
 				lastPong = time.Now()
@@ -1357,7 +1551,9 @@ func handleOperationWithResult(ctx context.Context, c *Client, s Store, op Opera
 	case "cancel_execution":
 		e, ok := localExecution(op)
 		if !ok {
-			return errors.New("execution is not known locally")
+			// Do not report cancellation success for a process this Agent cannot
+			// signal. Mark it lost so the backend reaches an honest terminal state.
+			return result("lost", map[string]string{"execution": op.Execution})
 		}
 		if err := signalNative(e); err != nil {
 			return err

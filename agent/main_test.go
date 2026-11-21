@@ -199,6 +199,21 @@ func TestFailedSecondWorkspacePreparationDoesNotBreakFirstWorkspaceExecution(t *
 	}
 }
 
+func TestCancelUnknownExecutionReportsLostRatherThanCancelled(t *testing.T) {
+	op := Operation{Type: "cancel_execution", Workspace: "WS-404", Execution: "WSE-404", OperationID: "WSOP-cancel-404", SpecHash: "hash"}
+	var status string
+	var fields map[string]string
+	if err := handleOperationWithResult(context.Background(), &Client{}, Store{Dir: t.TempDir()}, op, func(got string, extra map[string]string) error {
+		status, fields = got, extra
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status != "lost" || fields["execution"] != op.Execution {
+		t.Fatalf("unknown execution cancel result = status %q, fields %#v", status, fields)
+	}
+}
+
 func TestNativeExecutionAllowsArbitraryHostWorkingDirectory(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	if _, err := s.prepare("WS-10", "native", "WSOP-10", "hash-10"); err != nil {
