@@ -1362,10 +1362,9 @@ func handleOperationWithResult(ctx context.Context, c *Client, s Store, op Opera
 		if err := signalNative(e); err != nil {
 			return err
 		}
-		e.mu.Lock()
-		e.State = "cancelled"
-		e.mu.Unlock()
-		return result("cancelled", executionReport(e))
+		// The process waiter owns the terminal transition. Reporting cancelled
+		// here would claim success before the OS confirms that it exited.
+		return result("running", executionReport(e))
 	default:
 		return fmt.Errorf("unknown operation type %q", op.Type)
 	}
@@ -1435,10 +1434,7 @@ func handleOperation(ctx context.Context, c *Client, s Store, op Operation) erro
 		if err := signalNative(e); err != nil {
 			return err
 		}
-		e.mu.Lock()
-		e.State = "cancelled"
-		e.mu.Unlock()
-		return c.result(ctx, op, "cancelled", executionReport(e))
+		return c.result(ctx, op, "running", executionReport(e))
 	default:
 		return fmt.Errorf("unknown operation type %q", op.Type)
 	}
