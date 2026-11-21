@@ -224,6 +224,47 @@ func TestOperationDispatcherRejectsOperationIDReuse(t *testing.T) {
 	}
 }
 
+func TestAcceptedStartCanAdvanceToPollAfterLostAcknowledgement(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	started := make(chan struct{})
+	d := newOperationDispatcherWithExecutor(ctx, &Client{}, Store{}, func(op Operation) map[string]any {
+		if calls.Add(1) == 1 {
+			return map[string]any{"operation_id": op.OperationID, "status": "running"}
+		}
+		close(started)
+		return map[string]any{"operation_id": op.OperationID, "status": "exited"}
+	})
+	start := Operation{Type: "start_execution", Workspace: "WS-20", Execution: "WSE-20", OperationID: "WSOP-20", SpecHash: "hash"}
+	if err := d.submit(start); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(d.completed()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(d.completed()) != 1 || d.completed()[0].payload["status"] != "running" {
+		t.Fatal("start acceptance result was not retained")
+	}
+	poll := start
+	poll.Type = "poll_execution"
+	if err := d.submit(poll); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("status poll did not run after lost start acknowledgement")
+	}
+	if got := d.completed(); len(got) != 1 || got[0].op.Type != "poll_execution" || got[0].payload["status"] != "exited" {
+		t.Fatalf("terminal poll result = %#v", got)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("operation handler invoked %d times; want start and poll", got)
+	}
+}
+
 func TestUploadFileReturnsCanonicalFileAcknowledgement(t *testing.T) {
 	var requested atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

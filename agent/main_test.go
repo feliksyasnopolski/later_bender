@@ -122,6 +122,75 @@ func TestNativeExecutionCapturesOutputAndUsesStableIdentity(t *testing.T) {
 	}
 }
 
+func TestPollExecutionReportsTerminalResultWithoutRestartingProcess(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.prepare("WS-13", "native", "WSOP-prepare-poll", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "invocations")
+	op := Operation{Type: "start_execution", Workspace: "WS-13", Execution: "WSE-13", OperationID: "WSOP-poll", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/sh", "-c", "printf x >> '" + marker + "'; printf terminal-output"}},
+		"cwd":        "/workspace", "env": map[string]any{},
+	}}
+	e, err := startNative(s, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		e.mu.Lock()
+		state := e.State
+		e.mu.Unlock()
+		if state != "running" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	poll := op
+	poll.Type = "poll_execution"
+	var status string
+	var fields map[string]string
+	if err := handleOperationWithResult(context.Background(), &Client{}, s, poll, func(got string, extra map[string]string) error {
+		status, fields = got, extra
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status != "exited" || fields["stdout_base64"] != base64.StdEncoding.EncodeToString([]byte("terminal-output")) {
+		t.Fatalf("poll result status=%q fields=%#v", status, fields)
+	}
+	calls, err := os.ReadFile(marker)
+	if err != nil || string(calls) != "x" {
+		t.Fatalf("command invoked again: contents=%q err=%v", calls, err)
+	}
+}
+
+func TestInterruptedStartIntentIsLostInsteadOfSpawningDuplicate(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.prepare("WS-14", "native", "WSOP-prepare-intent", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{Type: "start_execution", Workspace: "WS-14", Execution: "WSE-14", OperationID: "WSOP-intent", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/sh", "-c", "touch " + filepath.Join(t.TempDir(), "spawned")}},
+		"cwd":        "/workspace", "env": map[string]any{},
+	}}
+	dir := s.executionDir(op.Execution)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	intent := &LocalExecution{Execution: op.Execution, Workspace: op.Workspace, SpecHash: op.SpecHash, State: "starting"}
+	if err := atomicJSON(filepath.Join(dir, "metadata.json"), intent, 0600); err != nil {
+		t.Fatal(err)
+	}
+	e, err := startNative(s, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.State != "lost" || e.FinishedAt == nil {
+		t.Fatalf("interrupted start state=%q finished_at=%v", e.State, e.FinishedAt)
+	}
+}
+
 func TestSecondWorkspacePreparationDoesNotBreakFirstWorkspaceExecution(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	first, err := s.prepare("WS-1", "native", "WSOP-1", "hash-1")

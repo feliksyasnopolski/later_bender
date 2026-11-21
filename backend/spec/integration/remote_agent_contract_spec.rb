@@ -310,8 +310,20 @@ RSpec.describe "Remote Agent contract", type: :request do
     result = operation.merge("status" => "running", "execution" => execution.ref, "stdout_base64" => Base64.strict_encode64("remote"), "stderr_base64" => "")
     post "/api/remote-agent/operations/#{execution.remote_operation_id}/result", params: result.to_json, headers: json_headers(session_token)
     expect(response).to have_http_status(:ok)
+    expect(execution.reload.remote_start_accepted_at).to be_present
+    get "/api/remote-agent/operations", headers: json_headers(session_token)
+    accepted_operation = json_body.fetch("operations").find { |item| item["operation_id"] == execution.remote_operation_id }
+    expect(accepted_operation).to include("type" => "poll_execution", "execution" => execution.ref)
+    get "/api/remote-agent/operations", headers: json_headers(session_token)
+    expect(json_body.fetch("operations")).not_to include(include("operation_id" => execution.remote_operation_id))
 
     post "/api/remote-agent/operations/#{execution.remote_operation_id}/result", params: result.merge("status" => "exited", "exit_code" => 0).to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:ok)
+    get "/api/workspace-executions/#{execution.ref}", headers: json_headers(@raw_token)
+    expect(json_body).to include("state" => "exited", "exit_code" => 0)
+    post "/api/workspace-executions/#{execution.ref}/output", params: { stream: "stdout", format: "text" }.to_json, headers: json_headers(@raw_token)
+    expect(json_body).to include("data" => "remote", "stream_complete" => true)
+    post "/api/remote-agent/operations/#{execution.remote_operation_id}/result", params: result.to_json, headers: json_headers(session_token)
     expect(response).to have_http_status(:ok)
     get "/api/workspace-executions/#{execution.ref}", headers: json_headers(@raw_token)
     expect(json_body).to include("state" => "exited", "exit_code" => 0)

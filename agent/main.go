@@ -586,10 +586,19 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 			if existing.SpecHash != op.SpecHash || existing.Workspace != op.Workspace {
 				return nil, errors.New("execution identity conflicts with existing spec")
 			}
-			if existing.State == "running" && !processIsAlive(existing.PID) {
+			if existing.State == "running" {
+				if processIsAlive(existing.PID) {
+					_ = terminateProcess(existing.ProcessGroup, true)
+				}
 				now := time.Now().UTC()
 				existing.State = "lost"
 				existing.FinishedAt = &now
+				_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), &existing, 0600)
+			} else if existing.State == "starting" {
+				// A crash may have happened after spawning but before persisting the
+				// PID. Never retry that identity: doing so could launch a duplicate.
+				now := time.Now().UTC()
+				existing.State, existing.FinishedAt = "lost", &now
 				_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), &existing, 0600)
 			}
 			executionMu.Lock()
@@ -716,10 +725,18 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 		return nil, err
 	}
 	cmd.Stdout, cmd.Stderr = &boundedOutput{file: out}, &boundedOutput{file: errout}
+	intent := &LocalExecution{Execution: op.Execution, Workspace: op.Workspace, SpecHash: op.SpecHash, State: "starting", StartedAt: time.Now().UTC(), Stdout: filepath.Join(s.executionDir(op.Execution), "stdout"), Stderr: filepath.Join(s.executionDir(op.Execution), "stderr")}
+	metadataPath := filepath.Join(s.executionDir(op.Execution), "metadata.json")
+	if err := atomicJSON(metadataPath, intent, 0600); err != nil {
+		_ = out.Close()
+		_ = errout.Close()
+		return nil, fmt.Errorf("persist execution start intent: %w", err)
+	}
 	ptyFile, err := startNativeCommand(cmd, usePTY)
 	if err != nil {
 		_ = out.Close()
 		_ = errout.Close()
+		_ = os.Remove(metadataPath)
 		return nil, fmt.Errorf("process spawn failed: %w", err)
 	}
 	e := &LocalExecution{Execution: op.Execution, Workspace: op.Workspace, SpecHash: op.SpecHash, State: "running", PID: cmd.Process.Pid, ProcessGroup: cmd.Process.Pid, StartedAt: time.Now().UTC(), Stdout: filepath.Join(s.executionDir(op.Execution), "stdout"), Stderr: filepath.Join(s.executionDir(op.Execution), "stderr"), cmd: cmd, PTY: usePTY, ptyFile: ptyFile}
@@ -739,7 +756,7 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 	executionMu.Lock()
 	executions[op.Execution] = e
 	executionMu.Unlock()
-	_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), e, 0600)
+	_ = atomicJSON(metadataPath, e, 0600)
 	go func() {
 		timeout := 0.0
 		if raw, ok := op.Spec["timeout_seconds"].(float64); ok {
@@ -788,7 +805,7 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 		e.mu.Lock()
 		e.State, e.FinishedAt, e.ExitCode = state, &now, &code
 		e.mu.Unlock()
-		_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), e, 0600)
+		_ = atomicJSON(metadataPath, e, 0600)
 	}()
 	return e, nil
 }
@@ -1283,7 +1300,29 @@ func (d *operationDispatcher) submit(op Operation) error {
 	}
 	d.mu.Lock()
 	if existing := d.jobs[op.OperationID]; existing != nil {
-		if existing.op.Workspace != op.Workspace || existing.op.SpecHash != op.SpecHash || existing.op.Type != op.Type {
+		if existing.op.Workspace != op.Workspace || existing.op.SpecHash != op.SpecHash {
+			d.mu.Unlock()
+			return errors.New("operation ID was reused with different content")
+		}
+		if existing.op.Type == "start_execution" && op.Type == "poll_execution" && existing.done && existing.payload["status"] == "running" {
+			previousOp := existing.op
+			existing.op = op
+			existing.done = false
+			d.mu.Unlock()
+			select {
+			case d.queue <- op:
+				return nil
+			default:
+				d.mu.Lock()
+				if current := d.jobs[op.OperationID]; current != nil && current.op.Type == op.Type && !current.done {
+					current.op = previousOp
+					current.done = true
+				}
+				d.mu.Unlock()
+				return errors.New("operation queue is full; operation will be retried")
+			}
+		}
+		if existing.op.Type != op.Type {
 			d.mu.Unlock()
 			return errors.New("operation ID was reused with different content")
 		}
@@ -1548,6 +1587,22 @@ func handleOperationWithResult(ctx context.Context, c *Client, s Store, op Opera
 		}
 		report := executionReport(e)
 		return result(report["status"], report)
+	case "poll_execution":
+		e, ok := localExecution(op)
+		if !ok {
+			// A restarted Agent cannot safely reattach a waiter to the process or
+			// reconstruct complete output. Reconcile as lost rather than keeping
+			// the backend execution running indefinitely.
+			_, err := startNativeWithClient(ctx, c, s, Operation{Type: "start_execution", Workspace: op.Workspace, Execution: op.Execution, OperationID: op.OperationID, Executor: op.Executor, SpecHash: op.SpecHash, Spec: op.Spec})
+			if err != nil {
+				return result("lost", map[string]string{"execution": op.Execution})
+			}
+			e, _ = localExecution(op)
+		}
+		if e == nil {
+			return result("lost", map[string]string{"execution": op.Execution})
+		}
+		return result(executionReport(e)["status"], executionReport(e))
 	case "cancel_execution":
 		e, ok := localExecution(op)
 		if !ok {
@@ -1622,6 +1677,30 @@ func handleOperation(ctx context.Context, c *Client, s Store, op Operation) erro
 		extra := executionReport(e)
 		status := extra["status"]
 		return c.result(ctx, op, status, extra)
+	case "poll_execution":
+		e, ok := localExecution(op)
+		if !ok {
+			if b, readErr := os.ReadFile(filepath.Join(s.executionDir(op.Execution), "metadata.json")); readErr == nil {
+				var saved LocalExecution
+				if json.Unmarshal(b, &saved) == nil {
+					if saved.State == "running" || saved.State == "starting" {
+						if saved.PID > 0 && processIsAlive(saved.PID) {
+							_ = terminateProcess(saved.ProcessGroup, true)
+						}
+						now := time.Now().UTC()
+						saved.State, saved.FinishedAt = "lost", &now
+						_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), &saved, 0600)
+					}
+					e = &saved
+					ok = true
+				}
+			}
+		}
+		if !ok {
+			return c.result(ctx, op, "lost", map[string]string{"execution": op.Execution})
+		}
+		report := executionReport(e)
+		return c.result(ctx, op, report["status"], report)
 	case "cancel_execution":
 		e, ok := localExecution(op)
 		if !ok {

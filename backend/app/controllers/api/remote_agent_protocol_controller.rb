@@ -79,10 +79,20 @@ module Api
       operations = @session.remote_agent.remote_workspace_placements
         .where(state: %w[pending preparing]).includes(:workspace).order(:created_at)
       operations.each { |placement| placement.update!(state: "preparing") if placement.state == "pending" }
-      executions = WorkspaceExecution.joins(workspace: :remote_workspace_placement).where(remote_workspace_placements: { remote_agent_id: @session.remote_agent.id }).where(state: "running").includes(workspace: :remote_workspace_placement).order(:created_at)
+      executions = WorkspaceExecution.joins(workspace: :remote_workspace_placement)
+        .where(remote_workspace_placements: { remote_agent_id: @session.remote_agent.id }, state: "running")
+        .where("workspace_executions.remote_start_accepted_at IS NULL OR workspace_executions.remote_next_poll_at IS NULL OR workspace_executions.remote_next_poll_at <= ?", Time.current)
+        .includes(workspace: :remote_workspace_placement).order(:created_at)
       execution_operations = executions.map do |execution|
         placement = execution.workspace.remote_workspace_placement
-        execution.cancel_operation_id.present? ? placement.cancel_payload(execution) : placement.execution_payload(execution)
+        if execution.cancel_operation_id.present?
+          placement.cancel_payload(execution)
+        elsif execution.remote_start_accepted_at.present?
+          execution.update!(remote_next_poll_at: 2.seconds.from_now)
+          placement.execution_payload(execution).merge("type" => "poll_execution")
+        else
+          placement.execution_payload(execution)
+        end
       end
       data_operations = RemoteWorkspaceOperation.joins(workspace: :remote_workspace_placement)
         .where(remote_workspace_placements: { remote_agent_id: @session.remote_agent.id }, state: %w[pending running]).includes(:workspace).order(:created_at)
@@ -190,34 +200,37 @@ module Api
 
     def apply_execution_result!(execution, payload)
       status = payload.fetch("status")
-      return if execution.state != "running" && status != "running"
-      if payload["stdout_base64"]
-        execution.stdout_data = bounded_output(payload["stdout_base64"])
-      end
-      if payload["stderr_base64"]
-        execution.stderr_data = bounded_output(payload["stderr_base64"])
-      end
-      execution.finished_at = Time.current if %w[exited timed_out cancelled failed lost].include?(status)
-      execution.state = status == "failed" ? "failed_to_start" : status if %w[running exited timed_out cancelled failed lost].include?(status)
-      if status == "failed"
-        execution.error_code = printable_value(payload["code"], 80).presence || "execution_start_failed"
-        execution.failure_stage = printable_value(payload["stage"], 80).presence || "process_start"
-        execution.error_message = printable_value(payload["message"], 500).presence || "Native execution could not start"
-      end
-      execution.exit_code = payload["exit_code"] if payload.key?("exit_code")
-      execution.terminating_signal = printable_value(payload["terminating_signal"], 80) if payload.key?("terminating_signal")
-      changed = execution.state_changed?
-      execution.save!
-      if changed
-        execution.workspace.append_event!("execution", {
-          "execution" => execution.ref, "invocation" => execution.invocation, "cwd" => execution.cwd,
-          "secret_env_names" => execution.secret_env_names, "started_at" => execution.started_at,
-          "finished_at" => execution.finished_at, "requested_timeout_seconds" => execution.requested_timeout_seconds,
-          "state" => execution.state, "exit_code" => execution.exit_code, "terminating_signal" => execution.terminating_signal,
-          "failure" => execution.failure_projection,
-          "stdout_preview" => { "format" => "base64", "data" => "", "total_byte_size" => execution.stdout_data.to_s.bytesize, "inline_complete" => execution.state != "running" },
-          "stderr_preview" => { "format" => "base64", "data" => "", "total_byte_size" => execution.stderr_data.to_s.bytesize, "inline_complete" => execution.state != "running" }
-        })
+      execution.with_lock do
+        return unless execution.state == "running"
+        if payload["stdout_base64"]
+          execution.stdout_data = bounded_output(payload["stdout_base64"])
+        end
+        if payload["stderr_base64"]
+          execution.stderr_data = bounded_output(payload["stderr_base64"])
+        end
+        execution.finished_at = Time.current if %w[exited timed_out cancelled failed lost].include?(status)
+        execution.state = status == "failed" ? "failed_to_start" : status if %w[running exited timed_out cancelled failed lost].include?(status)
+        execution.remote_start_accepted_at ||= Time.current if status == "running"
+        if status == "failed"
+          execution.error_code = printable_value(payload["code"], 80).presence || "execution_start_failed"
+          execution.failure_stage = printable_value(payload["stage"], 80).presence || "process_start"
+          execution.error_message = printable_value(payload["message"], 500).presence || "Native execution could not start"
+        end
+        execution.exit_code = payload["exit_code"] if payload.key?("exit_code")
+        execution.terminating_signal = printable_value(payload["terminating_signal"], 80) if payload.key?("terminating_signal")
+        changed = execution.state_changed?
+        execution.save!
+        if changed
+          execution.workspace.append_event!("execution", {
+            "execution" => execution.ref, "invocation" => execution.invocation, "cwd" => execution.cwd,
+            "secret_env_names" => execution.secret_env_names, "started_at" => execution.started_at,
+            "finished_at" => execution.finished_at, "requested_timeout_seconds" => execution.requested_timeout_seconds,
+            "state" => execution.state, "exit_code" => execution.exit_code, "terminating_signal" => execution.terminating_signal,
+            "failure" => execution.failure_projection,
+            "stdout_preview" => { "format" => "base64", "data" => "", "total_byte_size" => execution.stdout_data.to_s.bytesize, "inline_complete" => execution.state != "running" },
+            "stderr_preview" => { "format" => "base64", "data" => "", "total_byte_size" => execution.stderr_data.to_s.bytesize, "inline_complete" => execution.state != "running" }
+          })
+        end
       end
     end
 
