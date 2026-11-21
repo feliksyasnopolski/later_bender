@@ -311,6 +311,8 @@ RSpec.describe "Remote Agent contract", type: :request do
     post "/api/remote-agent/operations/#{execution.remote_operation_id}/result", params: result.to_json, headers: json_headers(session_token)
     expect(response).to have_http_status(:ok)
     expect(execution.reload.remote_start_accepted_at).to be_present
+    post "/api/remote-agent/heartbeat", params: advertisement.merge("capabilities" => advertisement.fetch("capabilities").merge("execution_status_poll" => true)).to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:ok)
     get "/api/remote-agent/operations", headers: json_headers(session_token)
     accepted_operation = json_body.fetch("operations").find { |item| item["operation_id"] == execution.remote_operation_id }
     expect(accepted_operation).to include("type" => "poll_execution", "execution" => execution.ref)
@@ -329,6 +331,29 @@ RSpec.describe "Remote Agent contract", type: :request do
     expect(json_body).to include("state" => "exited", "exit_code" => 0)
     post "/api/workspace-executions/#{execution.ref}/output", params: { stream: "stdout", format: "text" }.to_json, headers: json_headers(@raw_token)
     expect(json_body).to include("data" => "remote", "stream_complete" => true)
+  end
+
+  it "repeats start for legacy agents and enables polling only after heartbeat advertises support" do
+    stub_const("Api::WorkspacesController::REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS", 0)
+    agent = enroll_agent
+    session_token = authenticate_agent(agent)
+    post "/api/workspaces", params: { target: agent.ref, executor: "native" }.to_json, headers: json_headers(@raw_token)
+    workspace = Workspace.find_by!(ref: json_body.fetch("ref"))
+    placement = workspace.remote_workspace_placement
+    post "/api/remote-agent/operations/#{placement.operation_id}/result", params: { operation_id: placement.operation_id, workspace: workspace.ref, spec_hash: placement.spec_hash, status: "prepared" }.to_json, headers: json_headers(session_token)
+    post "/api/workspaces/#{workspace.ref}/executions", params: { command: "sleep 1" }.to_json, headers: json_headers(@raw_token)
+    execution = workspace.workspace_executions.last
+
+    get "/api/remote-agent/operations", headers: json_headers(session_token)
+    operation = json_body.fetch("operations").find { |item| item["operation_id"] == execution.remote_operation_id }
+    post "/api/remote-agent/operations/#{execution.remote_operation_id}/result", params: operation.merge("status" => "running").to_json, headers: json_headers(session_token)
+    get "/api/remote-agent/operations", headers: json_headers(session_token)
+    expect(json_body.fetch("operations").find { |item| item["operation_id"] == execution.remote_operation_id }).to include("type" => "start_execution")
+
+    post "/api/remote-agent/heartbeat", params: advertisement.merge("capabilities" => advertisement.fetch("capabilities").merge("execution_status_poll" => true)).to_json, headers: json_headers(session_token)
+    expect(response).to have_http_status(:ok)
+    get "/api/remote-agent/operations", headers: json_headers(session_token)
+    expect(json_body.fetch("operations").find { |item| item["operation_id"] == execution.remote_operation_id }).to include("type" => "poll_execution")
   end
 
   it "collapses remote create and execution fast paths within the bounded wait" do

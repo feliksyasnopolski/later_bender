@@ -87,7 +87,7 @@ module Api
         placement = execution.workspace.remote_workspace_placement
         if execution.cancel_operation_id.present?
           placement.cancel_payload(execution)
-        elsif execution.remote_start_accepted_at.present?
+        elsif execution.remote_start_accepted_at.present? && @session.remote_agent.capabilities["execution_status_poll"] == true
           execution.update!(remote_next_poll_at: 2.seconds.from_now)
           placement.execution_payload(execution).merge("type" => "poll_execution")
         else

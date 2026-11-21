@@ -442,7 +442,7 @@ type Advertisement struct {
 }
 
 func advertise(name string) Advertisement {
-	return Advertisement{Name: name, Platform: runtime.GOOS, Architecture: runtime.GOARCH, SupportedExecutors: []string{"native"}, Capabilities: map[string]any{"process_control": processControlCapability, "pty": ptySupported, "isolation": "none", "hardware_access": "host"}}
+	return Advertisement{Name: name, Platform: runtime.GOOS, Architecture: runtime.GOARCH, SupportedExecutors: []string{"native"}, Capabilities: map[string]any{"process_control": processControlCapability, "pty": ptySupported, "execution_status_poll": true, "isolation": "none", "hardware_access": "host"}}
 }
 
 func enroll(ctx context.Context, c *Client, store Store, name, token string) error {

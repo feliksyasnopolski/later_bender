@@ -18,6 +18,12 @@ import (
 	"time"
 )
 
+func TestAdvertisementIncludesExecutionStatusPollCapability(t *testing.T) {
+	if got := advertise("test").Capabilities["execution_status_poll"]; got != true {
+		t.Fatalf("execution_status_poll capability = %#v, want true", got)
+	}
+}
+
 func TestPrintVersionIncludesVersionAndCommit(t *testing.T) {
 	oldVersion, oldCommit := Version, Commit
 	Version, Commit = "v0.1.0", "0123456789abcdef"
