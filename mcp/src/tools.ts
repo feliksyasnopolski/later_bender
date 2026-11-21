@@ -541,8 +541,8 @@ const noteScopeInput = z
 const searchInput = z
   .object({
     query: z.string(),
-    scope: z.enum(["all", "global", "project"]).optional(),
-    project: z.string().optional(),
+    scope: z.enum(["all", "global", "project"]).optional().describe("Use scope=project when filtering to one project; requires project slug."),
+    project: z.string().optional().describe("Project slug; requires scope=project. Omit for scope=all/global."),
     kinds: z.array(z.enum(["task", "note", "file"])).optional(),
     tags: z.array(z.string()).optional(),
     task_statuses: z.array(statuses).optional(),
@@ -1617,7 +1617,7 @@ export function registerTools(server: McpServer, api: LaterBenderApi): void {
     "search_memory",
     {
       description:
-        "Search Later Bender durable state across Tasks, Notes, and readable File representations. File matches return canonical refs and locators suitable for read_file.",
+        "Search Later Bender durable state across Tasks, Notes, and readable File representations. File matches return canonical refs and locators suitable for read_file. Set scope=project AND project=<slug> together; omit project for global/all search.",
       inputSchema: searchInput,
       outputSchema: { results: z.array(searchResult) },
       annotations: readAnnotations,
