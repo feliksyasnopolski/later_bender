@@ -234,7 +234,7 @@ const fileSearchResult = z
     project: fileProject,
     tags: z.array(z.string()),
     snippet: z.string(),
-    match: z.object({ representation: z.string(), locator }),
+    match: z.object({ representation: z.string(), locator }).optional(),
     created_at: timestamp,
     updated_at: timestamp,
   })

@@ -92,7 +92,7 @@ module Api
       result = runner.request(:post, "/workspaces/#{@workspace.runner_handle}/files", payload.merge("bytes_base64" => Base64.strict_encode64(file.original.download), "filename" => file.filename, "media_type" => file.media_type))
       result = verified_file_import_result(result, file)
       @workspace.append_event!("file_imported", result.merge("file" => file.ref))
-      render json: result.merge("workspace" => @workspace.ref, "file" => file.ref)
+      render json: result.merge("status" => "succeeded", "workspace" => @workspace.ref, "file" => file.ref)
     rescue WorkspaceRunnerClient::Unavailable => e
       render_runner_error(e)
     end
@@ -372,7 +372,9 @@ module Api
       observe_remote_operation(window: REMOTE_OPERATION_OBSERVATION_WINDOW_SECONDS) { operation.reload; %w[succeeded failed].include?(operation.state) }
       operation.reload
       raise WorkspaceRunnerClient::Unavailable.new(operation.error_message.presence || "Remote Workspace operation failed", code: operation.result["code"] || "workspace_unavailable") if operation.state == "failed"
+      return render json: { "status" => "pending", "workspace" => @workspace.ref, "operation_id" => operation.operation_id }, status: :accepted unless operation.state == "succeeded"
       result = operation.result.merge("workspace" => @workspace.ref)
+      result["status"] = "succeeded"
       if kind == "put_file"
         file = find_file(payload.fetch("file"))
         result = verified_file_import_result(result, file)

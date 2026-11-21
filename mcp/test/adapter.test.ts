@@ -344,6 +344,15 @@ test("promote_workspace_file accepts the backend's post-creation acknowledgement
   await server.close();
 });
 
+test("promote_workspace_file accepts pending state without inventing File metadata", async () => {
+  const server = new McpServer({ name: "test", version: "1" });
+  const { api } = apiFor([{ status: 202, body: { status: "pending", workspace: "WS-4", operation_id: "WSOP-1" } }]);
+  registerTools(server, api);
+  const tools = (server as any)._registeredTools as Record<string, any>;
+  assert.equal(tools.promote_workspace_file.outputSchema.safeParse({ status: "pending" }).success, true);
+  assert.equal(tools.promote_workspace_file.outputSchema.safeParse({ status: "succeeded" }).success, false);
+});
+
 test("create_file accepts exactly one attachment or URL source and preserves URL acknowledgements", async () => {
   const server = new McpServer({ name: "test", version: "1" });
   const { api, calls } = apiFor([{ status: 201, body: { ref: "LB-F20", updated_at: "2026-09-17T12:00:00Z", filename: "ignored.txt" } }]);
