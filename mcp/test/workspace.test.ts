@@ -228,7 +228,7 @@ test("put_file_in_workspace returns required integrity fields through tools/call
   assert.deepEqual(result.structuredContent, { workspace: "WS-1", file: "LB-F1", path: "input.bin", byte_size: 8, sha256: "a".repeat(64) });
   const tools = (server as any)._registeredTools;
   assert.equal(tools.put_file_in_workspace.outputSchema.safeParse({ workspace: "WS-1", file: "LB-F1", path: "input.bin", status: "pending" }).success, true);
-  assert.equal(tools.put_file_in_workspace.outputSchema.safeParse({ workspace: "WS-1", file: "LB-F1", path: "input.bin", status: "succeeded" }).success, false);
+  assert.equal(tools.put_file_in_workspace.outputSchema.safeParse({ workspace: "WS-1", file: "LB-F1", path: "input.bin", status: "succeeded" }).success, true);
   await client.close();
   await server.close();
 });

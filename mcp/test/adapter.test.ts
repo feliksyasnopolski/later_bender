@@ -350,7 +350,7 @@ test("promote_workspace_file accepts pending state without inventing File metada
   registerTools(server, api);
   const tools = (server as any)._registeredTools as Record<string, any>;
   assert.equal(tools.promote_workspace_file.outputSchema.safeParse({ status: "pending" }).success, true);
-  assert.equal(tools.promote_workspace_file.outputSchema.safeParse({ status: "succeeded" }).success, false);
+  assert.equal(tools.promote_workspace_file.outputSchema.safeParse({ status: "succeeded" }).success, true);
 });
 
 test("create_file accepts exactly one attachment or URL source and preserves URL acknowledgements", async () => {

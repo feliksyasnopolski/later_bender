@@ -541,8 +541,18 @@ const noteScopeInput = z
 const searchInput = z
   .object({
     query: z.string(),
-    scope: z.enum(["all", "global", "project"]).optional().describe("Use scope=project when filtering to one project; requires project slug."),
-    project: z.string().optional().describe("Project slug; requires scope=project. Omit for scope=all/global."),
+    scope: z
+      .enum(["all", "global", "project"])
+      .optional()
+      .describe(
+        "Use scope=project when filtering to one project; requires project slug.",
+      ),
+    project: z
+      .string()
+      .optional()
+      .describe(
+        "Project slug; requires scope=project. Omit for scope=all/global.",
+      ),
     kinds: z.array(z.enum(["task", "note", "file"])).optional(),
     tags: z.array(z.string()).optional(),
     task_statuses: z.array(statuses).optional(),
