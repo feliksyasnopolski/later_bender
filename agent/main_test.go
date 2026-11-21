@@ -7,7 +7,10 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -188,6 +191,91 @@ func TestInterruptedStartIntentIsLostInsteadOfSpawningDuplicate(t *testing.T) {
 	}
 	if e.State != "lost" || e.FinishedAt == nil {
 		t.Fatalf("interrupted start state=%q finished_at=%v", e.State, e.FinishedAt)
+	}
+}
+
+func TestPollWithoutMetadataCannotSpawnExecution(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	marker := filepath.Join(t.TempDir(), "spawned")
+	op := Operation{Type: "poll_execution", Workspace: "WS-15", Execution: "WSE-15", OperationID: "WSOP-poll-missing", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/sh", "-c", "touch " + marker}},
+		"cwd":        "/workspace", "env": map[string]any{},
+	}}
+	var status string
+	if err := handleOperationWithResult(context.Background(), &Client{}, s, op, func(got string, _ map[string]string) error {
+		status = got
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status != "lost" {
+		t.Fatalf("status = %q, want lost", status)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("status poll spawned command; stat error=%v", err)
+	}
+}
+
+func TestRESTPollWithoutMetadataCannotSpawnExecution(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	marker := filepath.Join(t.TempDir(), "rest-spawned")
+	var reportedStatus string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode result: %v", err)
+		}
+		reportedStatus, _ = payload["status"].(string)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	op := Operation{Type: "poll_execution", Workspace: "WS-17", Execution: "WSE-17", OperationID: "WSOP-rest-poll-missing", Executor: "native", SpecHash: "exec-hash", Spec: map[string]any{
+		"invocation": map[string]any{"kind": "argv", "argv": []any{"/bin/sh", "-c", "touch " + marker}},
+		"cwd":        "/workspace", "env": map[string]any{},
+	}}
+	c := &Client{Base: server.URL, Session: "session", HTTP: server.Client()}
+	if err := handleOperation(context.Background(), c, s, op); err != nil {
+		t.Fatal(err)
+	}
+	if reportedStatus != "lost" {
+		t.Fatalf("REST reported status = %q, want lost", reportedStatus)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("REST status poll spawned command; stat error=%v", err)
+	}
+}
+
+func TestRecoveredExecutionDoesNotSignalPossiblyReusedPID(t *testing.T) {
+	s := Store{Dir: t.TempDir()}
+	if _, err := s.prepare("WS-16", "native", "WSOP-prepare-pid", "hash"); err != nil {
+		t.Fatal(err)
+	}
+	other := exec.Command("/bin/sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = other.Process.Kill()
+		_, _ = other.Process.Wait()
+	})
+	op := Operation{Type: "start_execution", Workspace: "WS-16", Execution: "WSE-16", OperationID: "WSOP-recover-pid", Executor: "native", SpecHash: "exec-hash"}
+	dir := s.executionDir(op.Execution)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	saved := &LocalExecution{Execution: op.Execution, Workspace: op.Workspace, SpecHash: op.SpecHash, State: "running", PID: other.Process.Pid, ProcessGroup: other.Process.Pid, Stdout: filepath.Join(dir, "stdout"), Stderr: filepath.Join(dir, "stderr")}
+	if err := atomicJSON(filepath.Join(dir, "metadata.json"), saved, 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := startNativeWithClient(context.Background(), &Client{}, s, op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != "lost" {
+		t.Fatalf("recovered execution state = %q, want lost", got.State)
+	}
+	if !processIsAlive(other.Process.Pid) {
+		t.Fatal("reconciliation signaled an unrelated process using the saved PID")
 	}
 }
 

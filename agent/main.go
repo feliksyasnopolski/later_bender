@@ -555,6 +555,35 @@ func localExecution(op Operation) (*LocalExecution, bool) {
 	return e, ok
 }
 
+func pollNativeExecution(op Operation, s Store) (*LocalExecution, bool) {
+	if e, ok := localExecution(op); ok {
+		if e.Execution != op.Execution || e.Workspace != op.Workspace || e.SpecHash != op.SpecHash {
+			return nil, false
+		}
+		return e, true
+	}
+	b, err := os.ReadFile(filepath.Join(s.executionDir(op.Execution), "metadata.json"))
+	if err != nil {
+		return nil, false
+	}
+	var saved LocalExecution
+	if err := json.Unmarshal(b, &saved); err != nil || saved.Execution != op.Execution || saved.Workspace != op.Workspace || saved.SpecHash != op.SpecHash {
+		return nil, false
+	}
+	switch saved.State {
+	case "running", "starting", "exited", "timed_out", "cancelled", "lost":
+	default:
+		return nil, false
+	}
+	if saved.State == "running" || saved.State == "starting" {
+		// Without the original waiter and verified process identity, report lost
+		// without signaling the saved PID. The process can remain orphaned.
+		now := time.Now().UTC()
+		saved.State, saved.FinishedAt = "lost", &now
+	}
+	return &saved, true
+}
+
 func startNative(s Store, op Operation) (*LocalExecution, error) {
 	return startNativeWithClient(context.Background(), &Client{HTTP: http.DefaultClient}, s, op)
 }
@@ -587,9 +616,8 @@ func startNativeWithClient(ctx context.Context, c *Client, s Store, op Operation
 				return nil, errors.New("execution identity conflicts with existing spec")
 			}
 			if existing.State == "running" {
-				if processIsAlive(existing.PID) {
-					_ = terminateProcess(existing.ProcessGroup, true)
-				}
+				// The process may have exited or the PID may have been reused since
+				// this metadata was written. Never signal an unverified PID.
 				now := time.Now().UTC()
 				existing.State = "lost"
 				existing.FinishedAt = &now
@@ -1588,17 +1616,7 @@ func handleOperationWithResult(ctx context.Context, c *Client, s Store, op Opera
 		report := executionReport(e)
 		return result(report["status"], report)
 	case "poll_execution":
-		e, ok := localExecution(op)
-		if !ok {
-			// A restarted Agent cannot safely reattach a waiter to the process or
-			// reconstruct complete output. Reconcile as lost rather than keeping
-			// the backend execution running indefinitely.
-			_, err := startNativeWithClient(ctx, c, s, Operation{Type: "start_execution", Workspace: op.Workspace, Execution: op.Execution, OperationID: op.OperationID, Executor: op.Executor, SpecHash: op.SpecHash, Spec: op.Spec})
-			if err != nil {
-				return result("lost", map[string]string{"execution": op.Execution})
-			}
-			e, _ = localExecution(op)
-		}
+		e, _ := pollNativeExecution(op, s)
 		if e == nil {
 			return result("lost", map[string]string{"execution": op.Execution})
 		}
@@ -1678,24 +1696,7 @@ func handleOperation(ctx context.Context, c *Client, s Store, op Operation) erro
 		status := extra["status"]
 		return c.result(ctx, op, status, extra)
 	case "poll_execution":
-		e, ok := localExecution(op)
-		if !ok {
-			if b, readErr := os.ReadFile(filepath.Join(s.executionDir(op.Execution), "metadata.json")); readErr == nil {
-				var saved LocalExecution
-				if json.Unmarshal(b, &saved) == nil {
-					if saved.State == "running" || saved.State == "starting" {
-						if saved.PID > 0 && processIsAlive(saved.PID) {
-							_ = terminateProcess(saved.ProcessGroup, true)
-						}
-						now := time.Now().UTC()
-						saved.State, saved.FinishedAt = "lost", &now
-						_ = atomicJSON(filepath.Join(s.executionDir(op.Execution), "metadata.json"), &saved, 0600)
-					}
-					e = &saved
-					ok = true
-				}
-			}
-		}
+		e, ok := pollNativeExecution(op, s)
 		if !ok {
 			return c.result(ctx, op, "lost", map[string]string{"execution": op.Execution})
 		}
